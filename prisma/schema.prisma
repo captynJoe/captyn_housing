@@ -1,0 +1,132 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  TENANT
+  LANDLORD
+  ADMIN
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  OVERDUE
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  role      Role
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  properties Property[] // Landlord owns properties
+  units      Unit[]     // Tenant rents units
+  payments   RentPayment[]
+  waterBills WaterBill[]
+  electricityBills ElectricityBill[]
+  notifications Notification[]
+}
+
+model Property {
+  id          Int      @id @default(autoincrement())
+  name        String
+  address     String
+  landlordId  Int
+  landlord    User     @relation(fields: [landlordId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  units Unit[]
+}
+
+model Unit {
+  id          Int      @id @default(autoincrement())
+  propertyId  Int
+  property    Property @relation(fields: [propertyId], references: [id])
+  tenantId    Int?
+  tenant      User?    @relation(fields: [tenantId], references: [id])
+  rentAmount  Float
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  rentPayments RentPayment[]
+}
+
+model RentPayment {
+  id        Int            @id @default(autoincrement())
+  tenantId  Int
+  tenant    User           @relation(fields: [tenantId], references: [id])
+  unitId    Int
+  unit      Unit           @relation(fields: [unitId], references: [id])
+  amount    Float
+  dueDate   DateTime
+  status    PaymentStatus  @default(PENDING)
+  penalty   Float          @default(0)
+  paidAt    DateTime?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+model WaterBill {
+  id        Int            @id @default(autoincrement())
+  tenantId  Int
+  tenant    User           @relation(fields: [tenantId], references: [id])
+  reading   Float
+  amount    Float
+  status    PaymentStatus  @default(PENDING)
+  paidAt    DateTime?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+model ElectricityBill {
+  id        Int            @id @default(autoincrement())
+  tenantId  Int
+  tenant    User           @relation(fields: [tenantId], references: [id])
+  tokens    Int
+  amount    Float
+  status    PaymentStatus  @default(PENDING)
+  paidAt    DateTime?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model POI {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  latitude    Float
+  longitude   Float
+  embedding   Float[]  // Vector embedding for search
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

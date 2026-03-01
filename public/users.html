@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CAPTYN Housing - Resident Desk</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/users.css" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <main class="shell">
+      <header class="hero">
+        <p class="tag">CAPTYN Housing</p>
+        <h1>Resident Support Desk</h1>
+        <p class="subtitle">
+          Private resident access for maintenance/security tickets, CCTV theft
+          workflows, and rent reminders.
+        </p>
+
+        <div class="status-row">
+          <div class="status-chip">
+            <span>API Status</span>
+            <strong id="api-status">Checking...</strong>
+          </div>
+          <div class="status-chip">
+            <span>Session</span>
+            <strong id="auth-state">Signed out</strong>
+          </div>
+        </div>
+      </header>
+
+      <nav class="module-nav" aria-label="Housing modules">
+        <a class="module-tab" href="/">Overview</a>
+        <a class="module-tab" href="/#wifi">Wi-Fi</a>
+        <a class="module-tab" href="/#cctv">CCTV</a>
+        <a class="module-tab active" href="/users">Residents</a>
+      </nav>
+
+      <section id="feedback-box" class="feedback hidden"></section>
+
+      <section id="resident-auth-panel" class="panel-card auth-stack">
+        <section class="section-head">
+          <h2>Resident Sign-In</h2>
+          <p>Phone OTP + house binding</p>
+        </section>
+
+        <form id="otp-request-form" class="report-form">
+          <div class="field-grid">
+            <label>
+              Building
+              <select id="auth-building-id" required></select>
+            </label>
+            <label>
+              House Number
+              <input
+                id="auth-house-number"
+                type="text"
+                maxlength="24"
+                placeholder="A-12"
+                required
+              />
+            </label>
+          </div>
+
+          <label>
+            Phone Number
+            <input
+              id="auth-phone-number"
+              type="tel"
+              inputmode="tel"
+              placeholder="07XXXXXXXX"
+              required
+            />
+          </label>
+
+          <div class="action-row">
+            <button id="otp-request-btn" type="submit">Request OTP</button>
+          </div>
+        </form>
+
+        <form id="otp-verify-form" class="report-form hidden">
+          <label>
+            OTP Code
+            <input
+              id="otp-code"
+              type="text"
+              inputmode="numeric"
+              pattern="[0-9]{6}"
+              maxlength="6"
+              placeholder="6-digit code"
+              required
+            />
+          </label>
+
+          <div class="action-row">
+            <button id="otp-verify-btn" type="submit">Verify & Sign In</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="resident-session-panel" class="panel-card hidden">
+        <section class="section-head">
+          <h2>Resident Session</h2>
+          <button id="resident-logout-btn" type="button" class="ghost-btn">
+            Sign Out
+          </button>
+        </section>
+        <p id="resident-session-summary" class="item-details"></p>
+      </section>
+
+      <section id="resident-layout" class="layout hidden">
+        <div class="main-column">
+          <article class="panel-card">
+            <section class="section-head">
+              <h2>Open a Ticket</h2>
+              <button id="refresh-all-btn" type="button" class="ghost-btn">
+                Refresh
+              </button>
+            </section>
+
+            <form id="report-form" class="report-form">
+              <div class="field-grid">
+                <label>
+                  Building
+                  <input id="bound-building" type="text" readonly />
+                </label>
+                <label>
+                  House Number
+                  <input id="bound-house-number" type="text" readonly />
+                </label>
+              </div>
+
+              <div class="field-grid">
+                <label>
+                  Ticket Type
+                  <select id="report-type" required>
+                    <option value="room_issue">Room Issue</option>
+                    <option value="stolen_item">Stolen Item</option>
+                    <option value="general">General</option>
+                  </select>
+                </label>
+                <label>
+                  Title
+                  <input
+                    id="report-title"
+                    name="title"
+                    type="text"
+                    maxlength="100"
+                    placeholder="Toilet flush not working"
+                    required
+                  />
+                </label>
+              </div>
+
+              <label id="stolen-item-wrap" class="hidden">
+                Stolen Item
+                <input
+                  id="stolen-item"
+                  name="stolenItem"
+                  type="text"
+                  maxlength="120"
+                  placeholder="Samsung TV 43 inch"
+                />
+              </label>
+
+              <section id="theft-workflow-wrap" class="hidden theft-workflow">
+                <div class="field-grid">
+                  <label>
+                    Incident Start
+                    <input id="incident-start" type="datetime-local" />
+                  </label>
+                  <label>
+                    Incident End
+                    <input id="incident-end" type="datetime-local" />
+                  </label>
+                </div>
+
+                <div class="field-grid">
+                  <label>
+                    Location
+                    <input
+                      id="incident-location"
+                      type="text"
+                      maxlength="120"
+                      placeholder="Block B corridor"
+                    />
+                  </label>
+                  <label>
+                    Case Reference
+                    <input
+                      id="case-reference"
+                      type="text"
+                      maxlength="80"
+                      placeholder="OB/12/02/2026"
+                    />
+                  </label>
+                </div>
+
+                <label>
+                  Evidence Attachment URLs (one per line)
+                  <textarea
+                    id="evidence-attachments"
+                    maxlength="1800"
+                    placeholder="https://..."
+                  ></textarea>
+                </label>
+              </section>
+
+              <label>
+                Details
+                <textarea
+                  id="report-details"
+                  name="details"
+                  minlength="5"
+                  maxlength="1500"
+                  placeholder="Include room details, timeline, and any witness context."
+                  required
+                ></textarea>
+              </label>
+
+              <div class="action-row">
+                <button id="submit-btn" type="submit">Submit Ticket</button>
+              </div>
+            </form>
+          </article>
+
+          <article class="panel-card">
+            <section class="section-head">
+              <h2>Recent Tickets</h2>
+              <p id="reports-count">0 tickets</p>
+            </section>
+            <section id="reports-list" class="stack-list"></section>
+          </article>
+        </div>
+
+        <aside class="side-column">
+          <article class="panel-card">
+            <section class="section-head">
+              <h2>Rent Ledger</h2>
+            </section>
+            <section id="rent-due" class="rent-wrap"></section>
+          </article>
+
+          <article class="panel-card">
+            <section class="section-head">
+              <h2>Notifications</h2>
+              <p id="notification-count">0 alerts</p>
+            </section>
+            <section id="notification-list" class="stack-list"></section>
+          </article>
+        </aside>
+      </section>
+    </main>
+
+    <template id="report-item-template">
+      <article class="stack-item">
+        <div class="stack-top">
+          <strong class="item-title"></strong>
+          <span class="item-chip"></span>
+        </div>
+        <p class="item-meta"></p>
+        <p class="item-details"></p>
+        <p class="item-guidance"></p>
+      </article>
+    </template>
+
+    <template id="notification-item-template">
+      <article class="stack-item">
+        <div class="stack-top">
+          <strong class="item-title"></strong>
+          <span class="item-chip"></span>
+        </div>
+        <p class="item-details"></p>
+        <p class="item-meta"></p>
+      </article>
+    </template>
+
+    <script type="module" src="/users.js"></script>
+  </body>
+</html>

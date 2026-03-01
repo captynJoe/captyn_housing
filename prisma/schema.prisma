@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CCTVStatus {
+  none
+  partial
+  verified
+}
+
+enum IncidentSeverity {
+  low
+  medium
+  high
+}
+
+enum IncidentStatus {
+  open
+  resolved
+}
+
+model Building {
+  id                       String              @id
+  name                     String
+  address                  String
+  county                   String
+  cctvStatus               CCTVStatus
+  units                    Int?
+  mediaImageUrls           Json
+  mediaVideoUrls           Json
+  mediaFloorPlanUrl        String?
+  mediaNeighborhoodNotes   String?
+  incidents                Incident[]
+  maintenanceRecords       MaintenanceRecord[]
+  vacancySnapshots         VacancySnapshot[]
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
+}
+
+model Incident {
+  id              String           @id @default(uuid())
+  buildingId      String
+  building        Building         @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  title           String
+  details         String
+  severity        IncidentSeverity
+  status          IncidentStatus   @default(open)
+  createdAt       DateTime         @default(now())
+  resolvedAt      DateTime?
+  resolutionNotes String?
+
+  @@index([buildingId, status])
+}
+
+model MaintenanceRecord {
+  id          String   @id @default(uuid())
+  buildingId  String
+  building    Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  details     String
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+
+  @@index([buildingId])
+}
+
+model VacancySnapshot {
+  id                String   @id @default(uuid())
+  buildingId        String
+  building          Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  movedOutAt        DateTime
+  beforeImageUrls   Json
+  afterImageUrls    Json
+  videoUrls         Json
+  structuralChanges Json
+  damages           Json
+  repairs           Json
+  notes             String?
+  createdAt         DateTime @default(now())
+
+  @@index([buildingId, movedOutAt])
+}

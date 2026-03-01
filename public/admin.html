@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CAPTYN Housing Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/admin.css" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="tag">CAPTYN Housing</p>
+          <h1>Operations Admin</h1>
+          <p class="subtitle">
+            Unified control for tickets, rent ledger + payment events, and Wi-Fi
+            operations.
+          </p>
+          <p id="auth-status" class="status-text">Checking admin session...</p>
+        </div>
+        <div class="action-row">
+          <span id="admin-role" class="status-text">role: -</span>
+          <button id="refresh-all-btn" type="button">Refresh All</button>
+          <button id="admin-logout-btn" type="button">Sign Out</button>
+        </div>
+      </header>
+
+      <section class="panel metrics-panel">
+        <div class="panel-head">
+          <h2>Overview</h2>
+        </div>
+        <div class="metrics-grid">
+          <article class="metric-card"><p>Buildings</p><strong id="metric-buildings">-</strong></article>
+          <article class="metric-card"><p>Open Tickets</p><strong id="metric-open-tickets">-</strong></article>
+          <article class="metric-card"><p>SLA Breached</p><strong id="metric-breached-tickets">-</strong></article>
+          <article class="metric-card"><p>Overdue Rent</p><strong id="metric-overdue-rent">-</strong></article>
+          <article class="metric-card"><p>Rent Payments</p><strong id="metric-rent-payments">-</strong></article>
+          <article class="metric-card"><p>Wi-Fi Payments</p><strong id="metric-wifi-payments">-</strong></article>
+        </div>
+      </section>
+
+      <section class="layout">
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Ticket Lifecycle + SLA</h2>
+            <button id="refresh-tickets" type="button">Refresh</button>
+          </div>
+
+          <form id="ticket-filter-form" class="inline-fields compact-fields">
+            <label>
+              Status
+              <select id="ticket-filter-status">
+                <option value="">All</option>
+                <option value="open">open</option>
+                <option value="triaged">triaged</option>
+                <option value="in_progress">in_progress</option>
+                <option value="resolved">resolved</option>
+              </select>
+            </label>
+            <label>
+              Queue
+              <select id="ticket-filter-queue">
+                <option value="">All</option>
+                <option value="maintenance">maintenance</option>
+                <option value="security">security</option>
+              </select>
+            </label>
+            <label>
+              House
+              <input id="ticket-filter-house" type="text" placeholder="A-12" />
+            </label>
+            <button type="submit">Apply</button>
+          </form>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Ticket</th>
+                  <th>House</th>
+                  <th>Queue</th>
+                  <th>Status</th>
+                  <th>SLA</th>
+                  <th>Created</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="tickets-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Rent Ledger</h2>
+            <button id="refresh-rent-ledger" type="button">Refresh</button>
+          </div>
+          <form id="rent-upsert-form" class="package-card">
+            <div class="inline-fields compact-fields">
+              <label>
+                House
+                <input id="rent-house" type="text" placeholder="A-12" required />
+              </label>
+              <label>
+                Due Date
+                <input id="rent-due-date" type="datetime-local" required />
+              </label>
+            </div>
+            <div class="inline-fields compact-fields">
+              <label>
+                Monthly (KSh)
+                <input id="rent-monthly" type="number" min="0" required />
+              </label>
+              <label>
+                Balance (KSh)
+                <input id="rent-balance" type="number" min="0" required />
+              </label>
+            </div>
+            <label>
+              Note
+              <input id="rent-note" type="text" maxlength="280" />
+            </label>
+            <button type="submit">Save Rent Profile</button>
+          </form>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>House</th>
+                  <th>Status</th>
+                  <th>Balance</th>
+                  <th>Due</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody id="rent-ledger-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Rent Payments</h2>
+            <button id="refresh-rent-payments" type="button">Refresh</button>
+          </div>
+          <form id="rent-payments-filter-form" class="inline-fields compact-fields">
+            <label>
+              House (optional)
+              <input id="rent-payments-house" type="text" placeholder="A-12" />
+            </label>
+            <button type="submit">Filter</button>
+          </form>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Reference</th>
+                  <th>House</th>
+                  <th>Amount</th>
+                  <th>Phone</th>
+                  <th>Paid At</th>
+                </tr>
+              </thead>
+              <tbody id="rent-payments-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Wi-Fi Package Controls</h2>
+            <button id="refresh-packages" type="button">Refresh</button>
+          </div>
+          <p class="panel-note">
+            Edit package names, durations, and pricing in KSh.
+          </p>
+          <div id="package-list" class="package-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Wi-Fi Transactions</h2>
+            <button id="refresh-payments" type="button">Refresh</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Reference</th>
+                  <th>Status</th>
+                  <th>Package</th>
+                  <th>Amount</th>
+                  <th>Phone</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody id="payments-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="admin-error" class="error-box hidden"></section>
+    </main>
+
+    <template id="package-card-template">
+      <form class="package-card">
+        <h3 class="package-id"></h3>
+        <label>
+          Name
+          <input name="name" type="text" required />
+        </label>
+        <label>
+          Profile
+          <input name="profile" type="text" required />
+        </label>
+        <div class="inline-fields">
+          <label>
+            Hours
+            <input name="hours" type="number" min="1" max="72" required />
+          </label>
+          <label>
+            Price (KSh)
+            <input
+              name="priceKsh"
+              type="number"
+              min="1"
+              max="10000"
+              required
+            />
+          </label>
+        </div>
+        <button type="submit">Save Package</button>
+      </form>
+    </template>
+
+    <script type="module" src="/admin.js"></script>
+  </body>
+</html>

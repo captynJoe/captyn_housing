@@ -42,11 +42,13 @@ export interface VacancySnapshot {
 
 export interface Building {
   id: string;
+  landlordUserId?: string;
   name: string;
   address: string;
   county: string;
   cctvStatus: CCTVStatus;
   units?: number;
+  houseNumbers?: string[];
   media: BuildingMedia;
   incidents: Incident[];
   maintenanceRecords: MaintenanceRecord[];

@@ -3,160 +3,91 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CAPTYN Housing</title>
+    <title>CAPTYN Housing - Portal Home</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Outfit:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/resident-home.css" />
   </head>
   <body>
-    <div class="backdrop"></div>
+    <div class="ambient" aria-hidden="true"></div>
     <main class="shell">
-      <header class="hero">
-        <p class="tag">CAPTYN Housing</p>
-        <h1>Trusted Building Memory</h1>
-        <p class="subtitle">
-          Live profile stream for buildings, incidents, and housing trust
-          signals.
-        </p>
-        <div class="status-row">
-          <div class="status-chip">
-            <span>API Status</span>
-            <strong id="api-status">Checking...</strong>
-          </div>
-          <div class="status-chip">
-            <span>Storage Mode</span>
-            <strong id="storage-mode">Checking...</strong>
-          </div>
-          <button id="refresh-btn" type="button">Refresh</button>
-        </div>
+      <header class="topbar">
+        <p class="brand">CAPTYN Housing</p>
+        <nav class="mode-switch" aria-label="Portal switch">
+          <a class="mode-pill active" href="/">Resident</a>
+          <a class="mode-pill" href="/landlord/login">Landlord</a>
+          <a class="mode-pill" href="/admin/login">Admin</a>
+        </nav>
       </header>
 
-      <nav class="module-nav" aria-label="Housing modules">
-        <button class="module-tab active" data-module="overview" type="button">
-          Overview
-        </button>
-        <button class="module-tab" data-module="wifi" type="button">
-          Wi-Fi
-        </button>
-        <button class="module-tab" data-module="cctv" type="button">
-          CCTV
-        </button>
-        <a class="module-tab module-link" href="/users">Residents</a>
-      </nav>
+      <section class="hero">
+        <article class="hero-copy">
+          <p class="eyebrow">Resident Portal</p>
+          <h1>Home services without the queue.</h1>
+          <p class="subtitle">
+            Report maintenance issues, track ticket progress, check rent status,
+            pay utility bills, and receive building updates from one clean dashboard.
+          </p>
+          <div class="actions">
+            <a class="btn btn-primary" href="/resident">Open Resident Portal</a>
+            <a class="btn btn-secondary" href="/landlord/login">Landlord Sign-In</a>
+            <a class="btn btn-secondary" href="/admin/login">Admin Sign-In</a>
+          </div>
+        </article>
 
-      <section class="module-panel" data-module-panel="overview">
-        <section class="section-head">
-          <h2>Building Registry</h2>
-          <p id="registry-count">Loading...</p>
-        </section>
-
-        <section id="error-box" class="error-box hidden"></section>
-        <section id="empty-state" class="empty-state hidden">
-          <h3>No buildings yet</h3>
-          <p>Create your first building via the API to populate this page.</p>
-        </section>
-        <section id="building-grid" class="building-grid"></section>
+        <article class="hero-panel" aria-label="Resident capabilities">
+          <h2>What you can do</h2>
+          <ul>
+            <li>Submit and monitor support tickets</li>
+            <li>View rent balance and due date reminders</li>
+            <li>Review water and electricity bills and payments</li>
+            <li>Receive verified notices from management</li>
+            <li>Use secure OTP sign-in bound to your house</li>
+          </ul>
+        </article>
       </section>
 
-      <section class="module-panel hidden" data-module-panel="wifi">
-        <section class="panel-card wifi-panel">
-          <p class="tag">Resident Wi-Fi</p>
-          <h2>Hourly Access</h2>
-          <p class="wifi-subtitle">
-            M-PESA checkout first. MikroTik provisioning runs after payment
-            confirmation.
-          </p>
+      <section class="feature-grid" aria-label="Resident workflows">
+        <article class="feature-card">
+          <p class="feature-tag">Support</p>
+          <h3>Report once, track clearly</h3>
+          <p>Every ticket has live status updates from open to resolved.</p>
+        </article>
 
-          <div id="wifi-packages" class="wifi-packages"></div>
+        <article class="feature-card">
+          <p class="feature-tag">Billing</p>
+          <h3>Rent + utility clarity</h3>
+          <p>See rent, water, and electricity balances with payment history.</p>
+        </article>
 
-          <form id="wifi-payment-form" class="wifi-form">
-            <label>
-              Building
-              <select id="wifi-building" required></select>
-            </label>
-            <label>
-              M-PESA Number
-              <input
-                id="wifi-phone"
-                name="phoneNumber"
-                type="tel"
-                inputmode="tel"
-                placeholder="07XXXXXXXX"
-                required
-              />
-            </label>
-            <button id="wifi-pay-btn" type="submit">Pay & Connect</button>
-          </form>
-
-          <p id="wifi-status" class="wifi-status">
-            Select a package to initiate checkout.
-          </p>
-          <section id="wifi-error" class="error-box hidden"></section>
-        </section>
+        <article class="feature-card">
+          <p class="feature-tag">Notices</p>
+          <h3>Important updates only</h3>
+          <p>Get concise building alerts without digging through chat threads.</p>
+        </article>
       </section>
 
-      <section class="module-panel hidden" data-module-panel="cctv">
-        <section class="section-head">
-          <h2>CCTV Coverage</h2>
-          <p id="cctv-count">Loading...</p>
-        </section>
-        <section id="cctv-grid" class="cctv-grid"></section>
+      <section class="steps" aria-label="How to start">
+        <h2>Quick start</h2>
+        <div class="step-grid">
+          <article>
+            <span>1</span>
+            <p>Open the resident portal and request OTP.</p>
+          </article>
+          <article>
+            <span>2</span>
+            <p>Verify using your house number and phone.</p>
+          </article>
+          <article>
+            <span>3</span>
+            <p>Manage tickets, rent, utility bills, and updates from your dashboard.</p>
+          </article>
+        </div>
       </section>
     </main>
-
-    <template id="building-card-template">
-      <article class="card">
-        <div class="card-top">
-          <div>
-            <h3 class="building-name"></h3>
-            <p class="building-id"></p>
-          </div>
-          <span class="cctv-badge"></span>
-        </div>
-        <dl class="meta">
-          <div>
-            <dt>County</dt>
-            <dd class="county"></dd>
-          </div>
-          <div>
-            <dt>Address</dt>
-            <dd class="address"></dd>
-          </div>
-          <div>
-            <dt>Units</dt>
-            <dd class="units"></dd>
-          </div>
-          <div>
-            <dt>Open Incidents</dt>
-            <dd class="incidents"></dd>
-          </div>
-        </dl>
-        <p class="updated-at"></p>
-      </article>
-    </template>
-
-    <template id="wifi-package-template">
-      <button class="wifi-package" type="button">
-        <span class="wifi-package-name"></span>
-        <span class="wifi-package-profile"></span>
-        <span class="wifi-package-meta"></span>
-      </button>
-    </template>
-
-    <template id="cctv-card-template">
-      <article class="cctv-card">
-        <div>
-          <h3 class="cctv-building-name"></h3>
-          <p class="cctv-building-id"></p>
-        </div>
-        <span class="cctv-badge"></span>
-      </article>
-    </template>
-
-    <script type="module" src="/app.js"></script>
   </body>
 </html>

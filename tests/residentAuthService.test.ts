@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ResidentAuthService } from "../src/services/residentAuthService.js";
 
-test("creates OTP challenge and verifies resident session", () => {
+test("creates OTP challenge and verifies resident session", async () => {
   const service = new ResidentAuthService({
     includeDevOtpInResponse: true,
     otpCooldownSeconds: 0
   });
 
-  const challenge = service.requestOtp({
+  const challenge = await service.requestOtp({
     buildingId: "CAPTYN-BLDG-00001",
     houseNumber: "a-12",
     phoneNumber: "0712345678"
@@ -31,13 +31,13 @@ test("creates OTP challenge and verifies resident session", () => {
   assert.equal(session?.buildingId, "CAPTYN-BLDG-00001");
 });
 
-test("rejects invalid OTP code", () => {
+test("rejects invalid OTP code", async () => {
   const service = new ResidentAuthService({
     includeDevOtpInResponse: true,
     otpCooldownSeconds: 0
   });
 
-  const challenge = service.requestOtp({
+  const challenge = await service.requestOtp({
     buildingId: "CAPTYN-BLDG-00001",
     houseNumber: "B-3",
     phoneNumber: "0711111111"

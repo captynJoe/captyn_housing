@@ -6,6 +6,7 @@ import { MemoryStore } from "../store/memoryStore.js";
 export interface RepositoryContext {
   buildingRepository: BuildingRepository;
   backend: "memory" | "prisma";
+  prisma?: PrismaClient;
   close(): Promise<void>;
 }
 
@@ -13,6 +14,7 @@ function useMemoryRepositoryContext(): RepositoryContext {
   return {
     buildingRepository: new MemoryStore(),
     backend: "memory",
+    prisma: undefined,
     close: async () => {}
   };
 }
@@ -47,6 +49,7 @@ export async function createRepositoryContext(): Promise<RepositoryContext> {
   return {
     buildingRepository: new PrismaBuildingRepository(prisma),
     backend: "prisma",
+    prisma,
     close: async () => {
       await prisma.$disconnect();
     }

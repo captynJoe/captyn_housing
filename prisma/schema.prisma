@@ -24,6 +24,30 @@ enum IncidentStatus {
   resolved
 }
 
+enum UserRole {
+  tenant
+  landlord
+  admin
+  root_admin
+}
+
+enum UserStatus {
+  active
+  disabled
+}
+
+enum TenantApplicationStatus {
+  pending
+  approved
+  rejected
+}
+
+enum LandlordAccessRequestStatus {
+  pending
+  approved
+  rejected
+}
+
 model Building {
   id                       String              @id
   name                     String
@@ -31,6 +55,7 @@ model Building {
   county                   String
   cctvStatus               CCTVStatus
   units                    Int?
+  landlordUserId           String?
   mediaImageUrls           Json
   mediaVideoUrls           Json
   mediaFloorPlanUrl        String?
@@ -38,8 +63,14 @@ model Building {
   incidents                Incident[]
   maintenanceRecords       MaintenanceRecord[]
   vacancySnapshots         VacancySnapshot[]
+  landlordUser             HousingUser?        @relation("BuildingLandlord", fields: [landlordUserId], references: [id], onDelete: SetNull)
+  houseUnits               HouseUnit[]
+  tenantApplications       TenantApplication[]
+  tenancies                Tenancy[]
   createdAt                DateTime            @default(now())
   updatedAt                DateTime            @updatedAt
+
+  @@index([landlordUserId])
 }
 
 model Incident {
@@ -83,4 +114,107 @@ model VacancySnapshot {
   createdAt         DateTime @default(now())
 
   @@index([buildingId, movedOutAt])
+}
+
+model HousingUser {
+  id                    String              @id @default(uuid())
+  fullName              String
+  email                 String              @unique
+  phone                 String              @unique
+  passwordHash          String
+  role                  UserRole            @default(tenant)
+  status                UserStatus          @default(active)
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  ownedBuildings        Building[]          @relation("BuildingLandlord")
+  sessions              UserSession[]
+  tenantApplications    TenantApplication[]
+  reviewedApplications  TenantApplication[] @relation("TenantApplicationReviewer")
+  tenancies             Tenancy[]
+  landlordAccessRequests LandlordAccessRequest[] @relation("LandlordAccessRequester")
+  reviewedLandlordAccessRequests LandlordAccessRequest[] @relation("LandlordAccessReviewer")
+
+  @@index([role])
+}
+
+model LandlordAccessRequest {
+  id               String                      @id @default(uuid())
+  userId           String
+  status           LandlordAccessRequestStatus @default(pending)
+  reason           String?
+  reviewerNote     String?
+  requestedAt      DateTime                    @default(now())
+  reviewedAt       DateTime?
+  reviewedByUserId String?
+  user             HousingUser                 @relation("LandlordAccessRequester", fields: [userId], references: [id], onDelete: Cascade)
+  reviewedBy       HousingUser?                @relation("LandlordAccessReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([status, requestedAt])
+  @@index([userId, status])
+}
+
+model UserSession {
+  id        String      @id @default(uuid())
+  userId    String
+  tokenHash String      @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime    @default(now())
+  user      HousingUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
+model HouseUnit {
+  id                 String              @id @default(uuid())
+  buildingId         String
+  houseNumber        String
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  building           Building            @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  tenantApplications TenantApplication[]
+  tenancies          Tenancy[]
+
+  @@unique([buildingId, houseNumber])
+  @@index([buildingId, isActive])
+}
+
+model TenantApplication {
+  id               String                  @id @default(uuid())
+  userId           String
+  buildingId       String
+  unitId           String?
+  houseNumber      String
+  status           TenantApplicationStatus @default(pending)
+  note             String?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+  reviewedAt       DateTime?
+  reviewedByUserId String?
+  user             HousingUser             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  building         Building                @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  unit             HouseUnit?              @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  reviewedBy       HousingUser?            @relation("TenantApplicationReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, buildingId, houseNumber])
+  @@index([buildingId, status])
+  @@index([userId, status])
+}
+
+model Tenancy {
+  id         String      @id @default(uuid())
+  userId     String
+  buildingId String
+  unitId     String
+  active     Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  endedAt    DateTime?
+  user       HousingUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  building   Building    @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  unit       HouseUnit   @relation(fields: [unitId], references: [id], onDelete: Restrict)
+
+  @@index([userId, active])
+  @@index([buildingId, active])
 }

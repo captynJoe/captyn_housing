@@ -9,7 +9,10 @@ import type {
 export interface BuildingRepository {
   listBuildings(): Promise<Building[]>;
   getBuilding(id: string): Promise<Building | undefined>;
-  createBuilding(input: CreateBuildingInput): Promise<Building>;
+  createBuilding(
+    input: CreateBuildingInput,
+    options?: { landlordUserId?: string }
+  ): Promise<Building>;
   addIncident(
     buildingId: string,
     input: CreateIncidentInput

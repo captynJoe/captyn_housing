@@ -7,6 +7,9 @@ import type {
 export interface RentPaymentEvent {
   id: string;
   houseNumber: string;
+  billingMonth: string;
+  tenantUserId?: string;
+  tenantName?: string;
   provider: "mpesa";
   providerReference: string;
   amountKsh: number;
@@ -34,6 +37,8 @@ export interface RentDueRecord {
 
 export interface RentDueSnapshot extends Omit<RentDueRecord, "reminderState"> {
   status: "clear" | "due_soon" | "overdue";
+  paymentStatus: "paid" | "partial" | "not_paid";
+  paidAmountKsh: number;
   daysToDue: number;
 }
 
@@ -50,6 +55,11 @@ export interface RecordMpesaPaymentResult {
   event: RentPaymentEvent;
   applied: boolean;
   snapshot: RentDueSnapshot | null;
+}
+
+interface ReferenceIndexEntry {
+  event: RentPaymentEvent;
+  applied: boolean;
 }
 
 function normalizeHouseNumber(value: string): string {
@@ -88,9 +98,30 @@ function isoDateKey(value: string): string {
   return value.slice(0, 10);
 }
 
+function billingMonthFromDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    const now = new Date();
+    return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+  }
+
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function normalizeProviderReference(value: string): string {
+  return value.trim().toUpperCase();
+}
+
+function paymentStatusForRecord(record: RentDueRecord): RentDueSnapshot["paymentStatus"] {
+  if (record.balanceKsh <= 0) return "paid";
+  if (record.balanceKsh >= record.monthlyRentKsh) return "not_paid";
+  return "partial";
+}
+
 export class RentLedgerService {
   private readonly records = new Map<string, RentDueRecord>();
   private readonly pendingPayments = new Map<string, RentPaymentEvent[]>();
+  private readonly paymentReferenceIndex = new Map<string, ReferenceIndexEntry>();
 
   upsertRentDue(houseNumber: string, input: UpsertRentDueInput): RentDueSnapshot {
     const normalizedHouse = normalizeHouseNumber(houseNumber);
@@ -160,14 +191,32 @@ export class RentLedgerService {
 
   recordMpesaPayment(input: RentMpesaCallbackInput): RecordMpesaPaymentResult {
     const normalizedHouse = normalizeHouseNumber(input.houseNumber);
+    const normalizedReference = normalizeProviderReference(input.providerReference);
+    const existingReference = this.paymentReferenceIndex.get(normalizedReference);
+    if (existingReference) {
+      const snapshot = this.records.get(existingReference.event.houseNumber)
+        ? this.toSnapshot(this.records.get(existingReference.event.houseNumber)!)
+        : null;
+      return {
+        event: existingReference.event,
+        applied: existingReference.applied,
+        snapshot
+      };
+    }
+
+    const paidAt = input.paidAt ?? nowIso();
+    const billingMonth = input.billingMonth ?? billingMonthFromDateTime(paidAt);
     const event: RentPaymentEvent = {
       id: randomUUID(),
       houseNumber: normalizedHouse,
+      billingMonth,
+      tenantUserId: input.tenantUserId,
+      tenantName: input.tenantName,
       provider: "mpesa",
-      providerReference: input.providerReference,
+      providerReference: normalizedReference,
       amountKsh: Math.round(input.amountKsh),
       phoneNumber: input.phoneNumber,
-      paidAt: input.paidAt ?? nowIso(),
+      paidAt,
       createdAt: nowIso()
     };
 
@@ -175,6 +224,10 @@ export class RentLedgerService {
     if (!record) {
       const current = this.pendingPayments.get(normalizedHouse) ?? [];
       this.pendingPayments.set(normalizedHouse, [event, ...current]);
+      this.paymentReferenceIndex.set(event.providerReference, {
+        event,
+        applied: false
+      });
 
       return {
         event,
@@ -184,6 +237,10 @@ export class RentLedgerService {
     }
 
     this.applyPaymentToRecord(record, event);
+    this.paymentReferenceIndex.set(event.providerReference, {
+      event,
+      applied: true
+    });
     return {
       event,
       applied: true,
@@ -246,6 +303,27 @@ export class RentLedgerService {
     return reminders;
   }
 
+  listCollectionStatus(limit = 500) {
+    return [...this.records.values()]
+      .map((record) => {
+        const snapshot = this.toSnapshot(record);
+        const latestPayment = record.payments[0];
+        return {
+          houseNumber: snapshot.houseNumber,
+          monthlyRentKsh: snapshot.monthlyRentKsh,
+          balanceKsh: snapshot.balanceKsh,
+          dueDate: snapshot.dueDate,
+          paymentStatus: snapshot.paymentStatus,
+          paidAmountKsh: snapshot.paidAmountKsh,
+          latestPaymentReference: latestPayment?.providerReference,
+          latestPaymentAt: latestPayment?.paidAt,
+          latestPaymentAmountKsh: latestPayment?.amountKsh
+        };
+      })
+      .sort((a, b) => a.houseNumber.localeCompare(b.houseNumber))
+      .slice(0, Math.max(1, limit));
+  }
+
   private applyPendingPayments(houseNumber: string) {
     const record = this.records.get(houseNumber);
     if (!record) {
@@ -263,6 +341,10 @@ export class RentLedgerService {
 
     for (const event of byOldestFirst) {
       this.applyPaymentToRecord(record, event);
+      this.paymentReferenceIndex.set(event.providerReference, {
+        event,
+        applied: true
+      });
     }
 
     this.pendingPayments.delete(houseNumber);
@@ -291,6 +373,8 @@ export class RentLedgerService {
       updatedAt: record.updatedAt,
       payments: [...record.payments],
       status: getStatus(record.balanceKsh, daysToDue),
+      paymentStatus: paymentStatusForRecord(record),
+      paidAmountKsh: Math.max(0, record.monthlyRentKsh - record.balanceKsh),
       daysToDue
     };
   }

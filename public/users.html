@@ -3,25 +3,31 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CAPTYN Housing - Resident Desk</title>
+    <title>CAPTYN Housing - Resident Portal</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Outfit:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/users.css" />
   </head>
   <body>
-    <div class="backdrop"></div>
+    <div class="ambient" aria-hidden="true"></div>
     <main class="shell">
+      <header class="topbar">
+        <a class="brand" href="/">CAPTYN Housing</a>
+      </header>
+
       <header class="hero">
-        <p class="tag">CAPTYN Housing</p>
-        <h1>Resident Support Desk</h1>
-        <p class="subtitle">
-          Private resident access for maintenance/security tickets, CCTV theft
-          workflows, and rent reminders.
-        </p>
+        <div>
+          <p class="eyebrow">Resident Portal</p>
+          <h1>Your home account, clear and simple.</h1>
+          <p class="subtitle">
+            Submit support requests, track updates, manage rent, and pay water or
+            electricity bills from one secure place.
+          </p>
+        </div>
 
         <div class="status-row">
           <div class="status-chip">
@@ -35,19 +41,12 @@
         </div>
       </header>
 
-      <nav class="module-nav" aria-label="Housing modules">
-        <a class="module-tab" href="/">Overview</a>
-        <a class="module-tab" href="/#wifi">Wi-Fi</a>
-        <a class="module-tab" href="/#cctv">CCTV</a>
-        <a class="module-tab active" href="/users">Residents</a>
-      </nav>
-
       <section id="feedback-box" class="feedback hidden"></section>
 
       <section id="resident-auth-panel" class="panel-card auth-stack">
         <section class="section-head">
-          <h2>Resident Sign-In</h2>
-          <p>Phone OTP + house binding</p>
+          <h2>Sign in with OTP</h2>
+          <p>House number + phone verification</p>
         </section>
 
         <form id="otp-request-form" class="report-form">
@@ -106,7 +105,7 @@
 
       <section id="resident-session-panel" class="panel-card hidden">
         <section class="section-head">
-          <h2>Resident Session</h2>
+          <h2>Current session</h2>
           <button id="resident-logout-btn" type="button" class="ghost-btn">
             Sign Out
           </button>
@@ -118,9 +117,9 @@
         <div class="main-column">
           <article class="panel-card">
             <section class="section-head">
-              <h2>Open a Ticket</h2>
+              <h2>Open a support request</h2>
               <button id="refresh-all-btn" type="button" class="ghost-btn">
-                Refresh
+                Refresh Data
               </button>
             </section>
 
@@ -138,10 +137,9 @@
 
               <div class="field-grid">
                 <label>
-                  Ticket Type
+                  Request Type
                   <select id="report-type" required>
                     <option value="room_issue">Room Issue</option>
-                    <option value="stolen_item">Stolen Item</option>
                     <option value="general">General</option>
                   </select>
                 </label>
@@ -158,60 +156,6 @@
                 </label>
               </div>
 
-              <label id="stolen-item-wrap" class="hidden">
-                Stolen Item
-                <input
-                  id="stolen-item"
-                  name="stolenItem"
-                  type="text"
-                  maxlength="120"
-                  placeholder="Samsung TV 43 inch"
-                />
-              </label>
-
-              <section id="theft-workflow-wrap" class="hidden theft-workflow">
-                <div class="field-grid">
-                  <label>
-                    Incident Start
-                    <input id="incident-start" type="datetime-local" />
-                  </label>
-                  <label>
-                    Incident End
-                    <input id="incident-end" type="datetime-local" />
-                  </label>
-                </div>
-
-                <div class="field-grid">
-                  <label>
-                    Location
-                    <input
-                      id="incident-location"
-                      type="text"
-                      maxlength="120"
-                      placeholder="Block B corridor"
-                    />
-                  </label>
-                  <label>
-                    Case Reference
-                    <input
-                      id="case-reference"
-                      type="text"
-                      maxlength="80"
-                      placeholder="OB/12/02/2026"
-                    />
-                  </label>
-                </div>
-
-                <label>
-                  Evidence Attachment URLs (one per line)
-                  <textarea
-                    id="evidence-attachments"
-                    maxlength="1800"
-                    placeholder="https://..."
-                  ></textarea>
-                </label>
-              </section>
-
               <label>
                 Details
                 <textarea
@@ -219,20 +163,20 @@
                   name="details"
                   minlength="5"
                   maxlength="1500"
-                  placeholder="Include room details, timeline, and any witness context."
+                  placeholder="Describe the issue clearly so the team can help quickly."
                   required
                 ></textarea>
               </label>
 
               <div class="action-row">
-                <button id="submit-btn" type="submit">Submit Ticket</button>
+                <button id="submit-btn" type="submit">Submit Request</button>
               </div>
             </form>
           </article>
 
           <article class="panel-card">
             <section class="section-head">
-              <h2>Recent Tickets</h2>
+              <h2>Recent support requests</h2>
               <p id="reports-count">0 tickets</p>
             </section>
             <section id="reports-list" class="stack-list"></section>
@@ -242,14 +186,107 @@
         <aside class="side-column">
           <article class="panel-card">
             <section class="section-head">
-              <h2>Rent Ledger</h2>
+              <h2>Manage bills</h2>
             </section>
+
             <section id="rent-due" class="rent-wrap"></section>
+
+            <p class="subheading">Pay rent (M-PESA)</p>
+            <form id="rent-payment-form" class="report-form">
+              <div class="field-grid">
+                <label>
+                  Billing Month (optional)
+                  <input id="rent-payment-month" type="month" />
+                </label>
+                <label>
+                  Amount (KSh)
+                  <input id="rent-payment-amount" type="number" min="1" required />
+                </label>
+              </div>
+
+              <label>
+                Transaction Reference
+                <input
+                  id="rent-payment-reference"
+                  type="text"
+                  maxlength="120"
+                  placeholder="QWE123ABC"
+                  required
+                />
+              </label>
+
+              <div class="action-row">
+                <button id="rent-payment-btn" type="submit">Submit Rent Payment</button>
+              </div>
+            </form>
+
+            <section class="section-head compact-head">
+              <h2>Recent rent payments</h2>
+              <p id="rent-payments-count">0 payments</p>
+            </section>
+            <section id="rent-payments-list" class="stack-list"></section>
+
+            <p class="subheading">Water & Electricity</p>
+            <p id="utility-bills-summary" class="item-details">Loading balances...</p>
+            <section id="utility-bills-list" class="stack-list"></section>
+
+            <p class="subheading">Pay a utility bill</p>
+            <form id="utility-payment-form" class="report-form">
+              <div class="field-grid">
+                <label>
+                  Utility
+                  <select id="utility-payment-type" required>
+                    <option value="water">Water</option>
+                    <option value="electricity">Electricity</option>
+                  </select>
+                </label>
+                <label>
+                  Billing Month (optional)
+                  <input id="utility-payment-month" type="month" />
+                </label>
+              </div>
+
+              <div class="field-grid">
+                <label>
+                  Amount (KSh)
+                  <input id="utility-payment-amount" type="number" min="1" required />
+                </label>
+                <label>
+                  Provider
+                  <select id="utility-payment-provider" required>
+                    <option value="mpesa">M-PESA</option>
+                    <option value="bank">Bank</option>
+                    <option value="card">Card</option>
+                    <option value="cash">Cash</option>
+                  </select>
+                </label>
+              </div>
+
+              <label>
+                Reference (optional)
+                <input
+                  id="utility-payment-reference"
+                  type="text"
+                  maxlength="120"
+                  placeholder="QWE123"
+                />
+              </label>
+
+              <div class="action-row">
+                <button id="utility-payment-btn" type="submit">Submit Utility Payment</button>
+              </div>
+            </form>
+
+            <section class="section-head compact-head">
+              <h2>Recent utility payments</h2>
+              <p id="utility-payments-count">0 payments</p>
+            </section>
+            <section id="utility-payments-list" class="stack-list"></section>
           </article>
 
           <article class="panel-card">
             <section class="section-head">
-              <h2>Notifications</h2>
+              <h2>Building notices</h2>
               <p id="notification-count">0 alerts</p>
             </section>
             <section id="notification-list" class="stack-list"></section>

@@ -19,6 +19,11 @@ type BuildingWithRelations = Prisma.BuildingGetPayload<{
     incidents: true;
     maintenanceRecords: true;
     vacancySnapshots: true;
+    houseUnits: {
+      orderBy: {
+        houseNumber: "asc";
+      };
+    };
   };
 }>;
 
@@ -70,11 +75,13 @@ function mapVacancySnapshot(
 function mapBuilding(value: BuildingWithRelations): Building {
   return {
     id: value.id,
+    landlordUserId: value.landlordUserId ?? undefined,
     name: value.name,
     address: value.address,
     county: value.county,
     cctvStatus: value.cctvStatus,
     units: value.units ?? undefined,
+    houseNumbers: value.houseUnits.map((item) => item.houseNumber),
     media: {
       imageUrls: jsonToStringArray(value.mediaImageUrls),
       videoUrls: jsonToStringArray(value.mediaVideoUrls),
@@ -97,7 +104,8 @@ export class PrismaBuildingRepository implements BuildingRepository {
       include: {
         incidents: { orderBy: { createdAt: "desc" } },
         maintenanceRecords: { orderBy: { createdAt: "desc" } },
-        vacancySnapshots: { orderBy: { movedOutAt: "desc" } }
+        vacancySnapshots: { orderBy: { movedOutAt: "desc" } },
+        houseUnits: { orderBy: { houseNumber: "asc" } }
       },
       orderBy: { createdAt: "desc" }
     });
@@ -111,7 +119,8 @@ export class PrismaBuildingRepository implements BuildingRepository {
       include: {
         incidents: { orderBy: { createdAt: "desc" } },
         maintenanceRecords: { orderBy: { createdAt: "desc" } },
-        vacancySnapshots: { orderBy: { movedOutAt: "desc" } }
+        vacancySnapshots: { orderBy: { movedOutAt: "desc" } },
+        houseUnits: { orderBy: { houseNumber: "asc" } }
       }
     });
 
@@ -119,26 +128,52 @@ export class PrismaBuildingRepository implements BuildingRepository {
     return mapBuilding(building);
   }
 
-  async createBuilding(input: CreateBuildingInput): Promise<Building> {
+  async createBuilding(
+    input: CreateBuildingInput,
+    options?: { landlordUserId?: string }
+  ): Promise<Building> {
     const id = await this.createBuildingId();
+    const normalizedHouseNumbers = Array.from(
+      new Set(
+        (input.houseNumbers ?? [])
+          .map((value) => value.trim().toUpperCase())
+          .filter((value) => value.length > 0)
+      )
+    );
 
     const building = await this.prisma.building.create({
       data: {
         id,
+        landlordUserId: options?.landlordUserId,
         name: input.name,
         address: input.address,
         county: input.county,
         cctvStatus: input.cctvStatus,
-        units: input.units,
+        units:
+          input.units ??
+          (normalizedHouseNumbers.length > 0
+            ? normalizedHouseNumbers.length
+            : undefined),
         mediaImageUrls: input.media.imageUrls,
         mediaVideoUrls: input.media.videoUrls,
         mediaFloorPlanUrl: input.media.floorPlanUrl,
-        mediaNeighborhoodNotes: input.media.neighborhoodNotes
+        mediaNeighborhoodNotes: input.media.neighborhoodNotes,
+        houseUnits:
+          normalizedHouseNumbers.length > 0
+            ? {
+                createMany: {
+                  data: normalizedHouseNumbers.map((houseNumber) => ({
+                    houseNumber
+                  }))
+                }
+              }
+            : undefined
       },
       include: {
         incidents: true,
         maintenanceRecords: true,
-        vacancySnapshots: true
+        vacancySnapshots: true,
+        houseUnits: { orderBy: { houseNumber: "asc" } }
       }
     });
 

@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CAPTYN Housing Landlord</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/admin.css" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="tag">CAPTYN Housing</p>
+          <h1>Landlord Utility Desk</h1>
+          <p class="subtitle">
+            Configure meter numbers, publish monthly water and electricity bills,
+            and monitor resident utility payments.
+          </p>
+          <p id="auth-status" class="status-text">Checking landlord session...</p>
+        </div>
+        <div class="action-row">
+          <a href="/resident" class="home-link">Resident Portal</a>
+          <a href="/admin" class="home-link">Admin Portal</a>
+          <span id="landlord-role" class="status-text">role: -</span>
+          <button id="refresh-all-btn" type="button">Refresh All</button>
+          <button id="landlord-logout-btn" type="button">Sign Out</button>
+        </div>
+      </header>
+
+      <section class="panel metrics-panel">
+        <div class="panel-head">
+          <h2>Overview</h2>
+        </div>
+        <div class="metrics-grid">
+          <article class="metric-card"><p>Meters</p><strong id="metric-meters">-</strong></article>
+          <article class="metric-card"><p>Posted Bills</p><strong id="metric-bills">-</strong></article>
+          <article class="metric-card"><p>Unpaid Bills</p><strong id="metric-unpaid">-</strong></article>
+          <article class="metric-card"><p>Overdue Bills</p><strong id="metric-overdue">-</strong></article>
+          <article class="metric-card"><p>Payments</p><strong id="metric-payments">-</strong></article>
+          <article class="metric-card"><p>Outstanding</p><strong id="metric-balance">-</strong></article>
+        </div>
+      </section>
+
+      <section class="layout">
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Building Management</h2>
+            <button id="refresh-buildings" type="button">Refresh</button>
+          </div>
+
+          <form id="building-form" class="package-card">
+            <div class="inline-fields compact-fields">
+              <label>
+                Building Name
+                <input id="building-name" type="text" maxlength="120" placeholder="Nyota Heights" required />
+              </label>
+              <label>
+                County
+                <input id="building-county" type="text" maxlength="80" placeholder="Nairobi" required />
+              </label>
+            </div>
+            <label>
+              Address
+              <input id="building-address" type="text" maxlength="180" placeholder="Mirema Drive, Nairobi" required />
+            </label>
+            <div class="inline-fields compact-fields">
+              <label>
+                CCTV Status
+                <select id="building-cctv" required>
+                  <option value="none">none</option>
+                  <option value="partial">partial</option>
+                  <option value="verified">verified</option>
+                </select>
+              </label>
+              <label>
+                House Numbers (comma or new line separated)
+                <textarea id="building-house-numbers" rows="3" placeholder="A-1, A-2, A-3" required></textarea>
+              </label>
+            </div>
+            <button type="submit">Create Building</button>
+          </form>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Name</th>
+                  <th>Address</th>
+                  <th>County</th>
+                  <th>Units</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody id="buildings-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Tenant Applications</h2>
+            <div class="action-row">
+              <label>
+                Status
+                <select id="application-status-filter">
+                  <option value="pending">pending</option>
+                  <option value="approved">approved</option>
+                  <option value="rejected">rejected</option>
+                </select>
+              </label>
+              <button id="refresh-applications" type="button">Refresh</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Building</th>
+                  <th>House</th>
+                  <th>Tenant</th>
+                  <th>Contact</th>
+                  <th>Status</th>
+                  <th>Note</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="applications-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Rent Collection Status</h2>
+            <button id="refresh-rent-status" type="button">Refresh</button>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>House</th>
+                  <th>Status</th>
+                  <th>Monthly Rent</th>
+                  <th>Balance</th>
+                  <th>Due Date</th>
+                  <th>Latest Reference</th>
+                </tr>
+              </thead>
+              <tbody id="rent-status-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Meter Registry</h2>
+            <button id="refresh-meters" type="button">Refresh</button>
+          </div>
+
+          <form id="utility-meter-form" class="package-card">
+            <div class="inline-fields compact-fields">
+              <label>
+                Utility Type
+                <select id="utility-meter-type" required>
+                  <option value="water">water</option>
+                  <option value="electricity">electricity</option>
+                </select>
+              </label>
+              <label>
+                House
+                <input id="utility-meter-house" type="text" placeholder="A-12" required />
+              </label>
+            </div>
+            <label>
+              Meter Number
+              <input id="utility-meter-number" type="text" maxlength="80" placeholder="WTR-10291" required />
+            </label>
+            <button type="submit">Save Meter</button>
+          </form>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Utility</th>
+                  <th>House</th>
+                  <th>Meter Number</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody id="meters-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Post Monthly Utility Bill</h2>
+            <button id="refresh-bills" type="button">Refresh</button>
+          </div>
+
+          <form id="utility-bill-form" class="package-card">
+            <div class="inline-fields compact-fields">
+              <label>
+                Utility Type
+                <select id="utility-bill-type" required>
+                  <option value="water">water</option>
+                  <option value="electricity">electricity</option>
+                </select>
+              </label>
+              <label>
+                House
+                <input id="utility-bill-house" type="text" placeholder="A-12" required />
+              </label>
+              <label>
+                Billing Month
+                <input id="utility-bill-month" type="month" required />
+              </label>
+            </div>
+            <div class="inline-fields compact-fields">
+              <label>
+                Previous Reading (optional)
+                <input id="utility-bill-previous-reading" type="number" min="0" step="0.001" />
+              </label>
+              <label>
+                Current Reading
+                <input id="utility-bill-current-reading" type="number" min="0" step="0.001" required />
+              </label>
+              <label>
+                Rate/Unit (KSh)
+                <input id="utility-bill-rate" type="number" min="0" step="0.01" required />
+              </label>
+              <label>
+                Fixed Charge (KSh)
+                <input id="utility-bill-fixed" type="number" min="0" step="0.01" value="0" required />
+              </label>
+            </div>
+            <div class="inline-fields compact-fields">
+              <label>
+                Due Date
+                <input id="utility-bill-due-date" type="datetime-local" required />
+              </label>
+              <label>
+                Note (optional)
+                <input id="utility-bill-note" type="text" maxlength="280" placeholder="Monthly read posted by landlord." />
+              </label>
+            </div>
+            <button type="submit">Post Monthly Bill</button>
+          </form>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Utility</th>
+                  <th>House</th>
+                  <th>Month</th>
+                  <th>Meter</th>
+                  <th>Units</th>
+                  <th>Amount</th>
+                  <th>Balance</th>
+                  <th>Due</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="utility-bills-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Resident Utility Payments</h2>
+            <button id="refresh-payments" type="button">Refresh</button>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Utility</th>
+                  <th>House</th>
+                  <th>Month</th>
+                  <th>Provider</th>
+                  <th>Reference</th>
+                  <th>Amount</th>
+                  <th>Paid At</th>
+                </tr>
+              </thead>
+              <tbody id="utility-payments-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="landlord-error" class="error-box hidden"></section>
+    </main>
+
+    <script type="module" src="/landlord.js"></script>
+  </body>
+</html>

@@ -24,17 +24,22 @@ export class MemoryStore implements BuildingRepository {
     return this.buildings.get(id);
   }
 
-  async createBuilding(input: CreateBuildingInput): Promise<Building> {
+  async createBuilding(
+    input: CreateBuildingInput,
+    options?: { landlordUserId?: string }
+  ): Promise<Building> {
     const now = new Date().toISOString();
     const id = this.createBuildingId();
 
     const building: Building = {
       id,
+      landlordUserId: options?.landlordUserId,
       name: input.name,
       address: input.address,
       county: input.county,
       cctvStatus: input.cctvStatus,
-      units: input.units,
+      units: input.units ?? input.houseNumbers?.length,
+      houseNumbers: input.houseNumbers?.map((item) => item.trim().toUpperCase()),
       media: {
         imageUrls: input.media.imageUrls,
         videoUrls: input.media.videoUrls,

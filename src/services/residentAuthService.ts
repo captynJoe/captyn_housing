@@ -42,6 +42,13 @@ export interface ResidentAuthServiceOptions {
   otpCooldownSeconds?: number;
   sessionTtlHours?: number;
   includeDevOtpInResponse?: boolean;
+  otpSender?: (input: {
+    buildingId: string;
+    houseNumber: string;
+    phoneNumber: string;
+    otpCode: string;
+    expiresAt: string;
+  }) => Promise<void> | void;
 }
 
 function nowMs(): number {
@@ -107,15 +114,17 @@ export class ResidentAuthService {
   private readonly otpCooldownSeconds: number;
   private readonly sessionTtlHours: number;
   private readonly includeDevOtpInResponse: boolean;
+  private readonly otpSender?: ResidentAuthServiceOptions["otpSender"];
 
   constructor(options: ResidentAuthServiceOptions = {}) {
     this.otpTtlMinutes = options.otpTtlMinutes ?? 5;
     this.otpCooldownSeconds = options.otpCooldownSeconds ?? 45;
     this.sessionTtlHours = options.sessionTtlHours ?? 24;
     this.includeDevOtpInResponse = options.includeDevOtpInResponse ?? false;
+    this.otpSender = options.otpSender;
   }
 
-  requestOtp(input: ResidentOtpRequestInput): ResidentOtpRequestResult {
+  async requestOtp(input: ResidentOtpRequestInput): Promise<ResidentOtpRequestResult> {
     this.purgeExpired();
 
     const houseNumber = normalizeHouseNumber(input.houseNumber);
@@ -137,6 +146,20 @@ export class ResidentAuthService {
     const otpCode = generateOtpCode();
     const expiresAt = addMinutes(now, this.otpTtlMinutes);
     const createdAt = new Date(now).toISOString();
+
+    try {
+      if (this.otpSender) {
+        await this.otpSender({
+          buildingId: input.buildingId,
+          houseNumber,
+          phoneNumber,
+          otpCode,
+          expiresAt
+        });
+      }
+    } catch (_error) {
+      throw new Error("OTP_DELIVERY_FAILED");
+    }
 
     this.challenges.set(challengeId, {
       id: challengeId,

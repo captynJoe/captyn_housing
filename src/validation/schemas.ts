@@ -18,6 +18,7 @@ export const createBuildingSchema = z.object({
   county: nonEmptyString,
   cctvStatus: cctvStatusSchema.default("none"),
   units: z.number().int().positive().optional(),
+  houseNumbers: z.array(nonEmptyString.max(24)).min(1).max(1000).optional(),
   media: z.object({
     imageUrls: optionalStringList,
     videoUrls: optionalStringList,
@@ -169,6 +170,60 @@ export const upsertRentDueSchema = z.object({
   note: z.string().trim().max(280).optional()
 });
 
+export const utilityTypeSchema = z.enum(["water", "electricity"]);
+
+export const utilityPaymentProviderSchema = z.enum([
+  "mpesa",
+  "cash",
+  "bank",
+  "card"
+]);
+
+export const billingMonthSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-(0[1-9]|1[0-2])$/, {
+    message: "Use YYYY-MM format for billing month."
+  });
+
+export const upsertUtilityMeterSchema = z.object({
+  meterNumber: z.string().trim().min(1).max(80)
+});
+
+export const createUtilityBillSchema = z
+  .object({
+    billingMonth: billingMonthSchema,
+    meterNumber: z.string().trim().min(1).max(80).optional(),
+    previousReading: z.number().min(0).max(10_000_000).optional(),
+    currentReading: z.number().min(0).max(10_000_000),
+    ratePerUnitKsh: z.number().min(0).max(50_000),
+    fixedChargeKsh: z.number().min(0).max(200_000).default(0),
+    dueDate: z.string().datetime(),
+    note: z.string().trim().max(280).optional()
+  })
+  .superRefine((value, context) => {
+    if (
+      value.previousReading != null &&
+      value.currentReading < value.previousReading
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["currentReading"],
+        message:
+          "Current reading must be greater than or equal to previous reading."
+      });
+    }
+  });
+
+export const recordUtilityPaymentSchema = z.object({
+  billingMonth: billingMonthSchema.optional(),
+  amountKsh: z.number().positive().max(500_000),
+  provider: utilityPaymentProviderSchema.default("mpesa"),
+  providerReference: z.string().trim().max(120).optional(),
+  paidAt: z.string().datetime().optional(),
+  note: z.string().trim().max(280).optional()
+});
+
 export const ticketStatusSchema = z.enum([
   "open",
   "triaged",
@@ -219,13 +274,69 @@ export const adminLoginSchema = z
     });
   });
 
+export const userRoleSchema = z.enum(["tenant", "landlord", "admin", "root_admin"]);
+
+export const userRegisterSchema = z.object({
+  fullName: nonEmptyString.max(120),
+  email: z.string().trim().email().max(160),
+  phoneNumber: kenyaPhoneSchema,
+  password: z.string().min(8).max(128)
+});
+
+export const userLoginSchema = z.object({
+  email: z.string().trim().email().max(160),
+  password: z.string().min(1).max(128)
+});
+
+export const tenantApplicationSchema = z.object({
+  buildingId: nonEmptyString,
+  houseNumber: nonEmptyString.max(24),
+  note: z.string().trim().max(280).optional()
+});
+
+export const landlordDecisionSchema = z.object({
+  action: z.enum(["approve", "reject"]),
+  note: z.string().trim().max(280).optional()
+});
+
+export const landlordAccessRequestStatusSchema = z.enum([
+  "pending",
+  "approved",
+  "rejected"
+]);
+
+export const createLandlordAccessRequestSchema = z.object({
+  reason: z.string().trim().min(5).max(500).optional()
+});
+
+export const reviewLandlordAccessRequestSchema = z.object({
+  action: z.enum(["approve", "reject"]),
+  note: z.string().trim().max(500).optional()
+});
+
 export const rentMpesaCallbackSchema = z.object({
   houseNumber: nonEmptyString.max(24),
   amountKsh: z.number().positive().max(500_000),
   providerReference: nonEmptyString.max(120),
   phoneNumber: kenyaPhoneSchema.optional(),
+  billingMonth: billingMonthSchema.optional(),
+  tenantUserId: z.string().trim().max(120).optional(),
+  tenantName: z.string().trim().max(160).optional(),
   paidAt: z.string().datetime().optional(),
   rawPayload: z.unknown().optional()
+});
+
+export const tenantResolveSchema = z.object({
+  houseNumber: nonEmptyString.max(24),
+  phoneNumber: kenyaPhoneSchema,
+  buildingId: nonEmptyString.optional()
+});
+
+export const createRentPaymentSchema = z.object({
+  amountKsh: z.number().positive().max(500_000),
+  providerReference: nonEmptyString.max(120),
+  billingMonth: billingMonthSchema.optional(),
+  paidAt: z.string().datetime().optional()
 });
 
 export type CreateBuildingInput = z.infer<typeof createBuildingSchema>;
@@ -240,8 +351,28 @@ export type ConfirmWifiPaymentInput = z.infer<typeof confirmWifiPaymentSchema>;
 export type UpdateWifiPackageInput = z.infer<typeof updateWifiPackageSchema>;
 export type CreateUserReportInput = z.infer<typeof createUserReportSchema>;
 export type UpsertRentDueInput = z.infer<typeof upsertRentDueSchema>;
+export type UtilityTypeInput = z.infer<typeof utilityTypeSchema>;
+export type UpsertUtilityMeterInput = z.infer<typeof upsertUtilityMeterSchema>;
+export type CreateUtilityBillInput = z.infer<typeof createUtilityBillSchema>;
+export type RecordUtilityPaymentInput = z.infer<typeof recordUtilityPaymentSchema>;
 export type UpdateTicketStatusInput = z.infer<typeof updateTicketStatusSchema>;
 export type ResidentOtpRequestInput = z.infer<typeof residentOtpRequestSchema>;
 export type ResidentOtpVerifyInput = z.infer<typeof residentOtpVerifySchema>;
 export type AdminLoginInput = z.infer<typeof adminLoginSchema>;
+export type UserRoleInput = z.infer<typeof userRoleSchema>;
+export type UserRegisterInput = z.infer<typeof userRegisterSchema>;
+export type UserLoginInput = z.infer<typeof userLoginSchema>;
+export type TenantApplicationInput = z.infer<typeof tenantApplicationSchema>;
+export type LandlordDecisionInput = z.infer<typeof landlordDecisionSchema>;
+export type LandlordAccessRequestStatusInput = z.infer<
+  typeof landlordAccessRequestStatusSchema
+>;
+export type CreateLandlordAccessRequestInput = z.infer<
+  typeof createLandlordAccessRequestSchema
+>;
+export type ReviewLandlordAccessRequestInput = z.infer<
+  typeof reviewLandlordAccessRequestSchema
+>;
 export type RentMpesaCallbackInput = z.infer<typeof rentMpesaCallbackSchema>;
+export type TenantResolveInput = z.infer<typeof tenantResolveSchema>;
+export type CreateRentPaymentInput = z.infer<typeof createRentPaymentSchema>;

@@ -25,14 +25,6 @@ const boundBuildingEl = document.getElementById("bound-building");
 const boundHouseNumberEl = document.getElementById("bound-house-number");
 const reportTypeEl = document.getElementById("report-type");
 const reportTitleEl = document.getElementById("report-title");
-const stolenItemWrapEl = document.getElementById("stolen-item-wrap");
-const stolenItemEl = document.getElementById("stolen-item");
-const theftWorkflowWrapEl = document.getElementById("theft-workflow-wrap");
-const incidentStartEl = document.getElementById("incident-start");
-const incidentEndEl = document.getElementById("incident-end");
-const incidentLocationEl = document.getElementById("incident-location");
-const caseReferenceEl = document.getElementById("case-reference");
-const evidenceAttachmentsEl = document.getElementById("evidence-attachments");
 const reportDetailsEl = document.getElementById("report-details");
 const submitBtnEl = document.getElementById("submit-btn");
 
@@ -41,6 +33,26 @@ const reportsCountEl = document.getElementById("reports-count");
 const notificationListEl = document.getElementById("notification-list");
 const notificationCountEl = document.getElementById("notification-count");
 const rentDueEl = document.getElementById("rent-due");
+
+const utilityBillsSummaryEl = document.getElementById("utility-bills-summary");
+const utilityBillsListEl = document.getElementById("utility-bills-list");
+const rentPaymentFormEl = document.getElementById("rent-payment-form");
+const rentPaymentMonthEl = document.getElementById("rent-payment-month");
+const rentPaymentAmountEl = document.getElementById("rent-payment-amount");
+const rentPaymentReferenceEl = document.getElementById("rent-payment-reference");
+const rentPaymentBtnEl = document.getElementById("rent-payment-btn");
+const rentPaymentsCountEl = document.getElementById("rent-payments-count");
+const rentPaymentsListEl = document.getElementById("rent-payments-list");
+const utilityPaymentFormEl = document.getElementById("utility-payment-form");
+const utilityPaymentTypeEl = document.getElementById("utility-payment-type");
+const utilityPaymentMonthEl = document.getElementById("utility-payment-month");
+const utilityPaymentAmountEl = document.getElementById("utility-payment-amount");
+const utilityPaymentProviderEl = document.getElementById("utility-payment-provider");
+const utilityPaymentReferenceEl = document.getElementById("utility-payment-reference");
+const utilityPaymentBtnEl = document.getElementById("utility-payment-btn");
+const utilityPaymentsCountEl = document.getElementById("utility-payments-count");
+const utilityPaymentsListEl = document.getElementById("utility-payments-list");
+
 const reportItemTemplate = document.getElementById("report-item-template");
 const notificationItemTemplate = document.getElementById("notification-item-template");
 
@@ -68,20 +80,7 @@ function formatDateTime(value) {
 }
 
 function formatCurrency(value) {
-  return `KSh ${Number(value).toLocaleString("en-US")}`;
-}
-
-function toIsoFromDateTimeLocal(value) {
-  if (!value) {
-    return undefined;
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return undefined;
-  }
-
-  return date.toISOString();
+  return `KSh ${Number(value ?? 0).toLocaleString("en-US")}`;
 }
 
 function getResidentToken() {
@@ -114,13 +113,9 @@ async function requestJson(url, options = {}, { auth = false } = {}) {
 
   if (auth) {
     const token = getResidentToken();
-    if (!token) {
-      const err = new Error("Resident authentication required.");
-      err.status = 401;
-      throw err;
+    if (token) {
+      headers.set("authorization", `Bearer ${token}`);
     }
-
-    headers.set("authorization", `Bearer ${token}`);
   }
 
   const response = await fetch(url, {
@@ -171,7 +166,7 @@ function renderReports(reports) {
   if (reports.length === 0) {
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent = "No tickets yet.";
+    empty.textContent = "No support requests yet.";
     reportsListEl.append(empty);
     return;
   }
@@ -189,28 +184,15 @@ function renderReports(reports) {
       : `SLA ${report.slaHours}h (${report.slaState.replace("_", " ")})`;
 
     fragment.querySelector(".item-meta").textContent =
-      `${report.queue} • ${report.type.replace("_", " ")} • ${formatDateTime(report.createdAt)} • ${slaLabel}`;
+      `${report.queue} queue • ${formatDateTime(report.createdAt)} • ${slaLabel}`;
 
-    const detailsParts = [report.details];
-    if (report.stolenItem) {
-      detailsParts.push(`Item: ${report.stolenItem}`);
-    }
-    if (report.incidentLocation) {
-      detailsParts.push(`Location: ${report.incidentLocation}`);
-    }
-    if (report.incidentWindowStartAt || report.incidentWindowEndAt) {
-      detailsParts.push(
-        `Window: ${formatDateTime(report.incidentWindowStartAt)} - ${formatDateTime(
-          report.incidentWindowEndAt
-        )}`
-      );
-    }
-    if (report.caseReference) {
-      detailsParts.push(`Case Ref: ${report.caseReference}`);
-    }
+    fragment.querySelector(".item-details").textContent = report.details;
 
-    fragment.querySelector(".item-details").textContent = detailsParts.join(" | ");
-    fragment.querySelector(".item-guidance").textContent = report.cctvGuidance;
+    const guidance =
+      report.status === "resolved"
+        ? "Resolved. If anything is still pending, open a new request."
+        : "Your request is active and the team will update you as progress is made.";
+    fragment.querySelector(".item-guidance").textContent = guidance;
 
     reportsListEl.append(fragment);
   });
@@ -249,6 +231,11 @@ function renderNotifications(notifications) {
 function renderRentDue(rentDue, fallbackMessage) {
   rentDueEl.replaceChildren();
 
+  const heading = document.createElement("p");
+  heading.className = "subheading";
+  heading.textContent = "Rent";
+  rentDueEl.append(heading);
+
   if (!rentDue) {
     const empty = document.createElement("p");
     empty.className = "empty";
@@ -285,26 +272,148 @@ function renderRentDue(rentDue, fallbackMessage) {
     </div>
   `;
   rentDueEl.append(keyvals);
+}
 
-  if (rentDue.note) {
-    const note = document.createElement("p");
-    note.className = "item-details";
-    note.textContent = rentDue.note;
-    rentDueEl.append(note);
+function renderUtilityBills(bills) {
+  utilityBillsListEl.replaceChildren();
+
+  if (!Array.isArray(bills) || bills.length === 0) {
+    utilityBillsSummaryEl.textContent = "No utility bills posted yet.";
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "Water and electricity balances will appear here.";
+    utilityBillsListEl.append(empty);
+    return;
   }
 
-  if (Array.isArray(rentDue.payments) && rentDue.payments.length > 0) {
-    const paymentInfo = document.createElement("p");
-    const recent = rentDue.payments.slice(0, 2).map((item) => {
-      return `${item.providerReference}: ${formatCurrency(item.amountKsh)} (${formatDateTime(
-        item.paidAt
-      )})`;
-    });
+  const outstanding = bills
+    .filter((item) => Number(item.balanceKsh) > 0)
+    .reduce((sum, item) => sum + Number(item.balanceKsh), 0);
 
-    paymentInfo.className = "item-details";
-    paymentInfo.textContent = `Recent payments: ${recent.join(" | ")}`;
-    rentDueEl.append(paymentInfo);
+  utilityBillsSummaryEl.textContent =
+    outstanding > 0
+      ? `Outstanding utility balance: ${formatCurrency(outstanding)}`
+      : "All utility balances are clear.";
+
+  const sorted = [...bills].sort((a, b) =>
+    new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
+  );
+
+  sorted.slice(0, 8).forEach((bill) => {
+    const card = document.createElement("article");
+    card.className = "stack-item";
+
+    const top = document.createElement("div");
+    top.className = "stack-top";
+
+    const title = document.createElement("strong");
+    title.className = "item-title";
+    title.textContent = `${bill.utilityType === "water" ? "Water" : "Electricity"} • ${bill.billingMonth}`;
+
+    const chip = document.createElement("span");
+    chip.className = `item-chip chip-${bill.status}`;
+    chip.textContent = bill.status.replace("_", " ");
+
+    top.append(title, chip);
+
+    const details = document.createElement("p");
+    details.className = "item-details";
+    details.textContent =
+      `Balance ${formatCurrency(bill.balanceKsh)} of ${formatCurrency(
+        bill.amountKsh
+      )} • Due ${formatDateTime(bill.dueDate)}`;
+
+    card.append(top, details);
+    utilityBillsListEl.append(card);
+  });
+}
+
+function renderUtilityPayments(payments) {
+  utilityPaymentsListEl.replaceChildren();
+
+  if (!Array.isArray(payments) || payments.length === 0) {
+    utilityPaymentsCountEl.textContent = "0 payments";
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "No utility payments recorded yet.";
+    utilityPaymentsListEl.append(empty);
+    return;
   }
+
+  utilityPaymentsCountEl.textContent = `${payments.length} payment${
+    payments.length === 1 ? "" : "s"
+  }`;
+
+  payments.slice(0, 8).forEach((payment) => {
+    const card = document.createElement("article");
+    card.className = "stack-item";
+
+    const top = document.createElement("div");
+    top.className = "stack-top";
+
+    const title = document.createElement("strong");
+    title.className = "item-title";
+    title.textContent = `${payment.utilityType === "water" ? "Water" : "Electricity"} • ${formatCurrency(payment.amountKsh)}`;
+
+    const chip = document.createElement("span");
+    chip.className = "item-chip chip-success";
+    chip.textContent = payment.provider;
+
+    top.append(title, chip);
+
+    const details = document.createElement("p");
+    details.className = "item-details";
+    details.textContent =
+      `${payment.billingMonth ?? "latest"} • ${formatDateTime(payment.paidAt)} • ${
+        payment.providerReference ?? "no reference"
+      }`;
+
+    card.append(top, details);
+    utilityPaymentsListEl.append(card);
+  });
+}
+
+function renderRentPayments(payments) {
+  rentPaymentsListEl.replaceChildren();
+
+  if (!Array.isArray(payments) || payments.length === 0) {
+    rentPaymentsCountEl.textContent = "0 payments";
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "No rent payments recorded yet.";
+    rentPaymentsListEl.append(empty);
+    return;
+  }
+
+  rentPaymentsCountEl.textContent = `${payments.length} payment${
+    payments.length === 1 ? "" : "s"
+  }`;
+
+  payments.slice(0, 8).forEach((payment) => {
+    const card = document.createElement("article");
+    card.className = "stack-item";
+
+    const top = document.createElement("div");
+    top.className = "stack-top";
+
+    const title = document.createElement("strong");
+    title.className = "item-title";
+    title.textContent = `Rent • ${formatCurrency(payment.amountKsh)}`;
+
+    const chip = document.createElement("span");
+    chip.className = "item-chip chip-success";
+    chip.textContent = payment.billingMonth ?? "-";
+
+    top.append(title, chip);
+
+    const details = document.createElement("p");
+    details.className = "item-details";
+    details.textContent =
+      `${formatDateTime(payment.paidAt)} • ${payment.providerReference ?? "no reference"}`;
+
+    card.append(top, details);
+    rentPaymentsListEl.append(card);
+  });
 }
 
 function showSignedOutState() {
@@ -319,6 +428,9 @@ function showSignedOutState() {
   renderReports([]);
   renderNotifications([]);
   renderRentDue(null, undefined);
+  renderRentPayments([]);
+  renderUtilityBills([]);
+  renderUtilityPayments([]);
 }
 
 function showSignedInState() {
@@ -345,30 +457,7 @@ function showSignedInState() {
     )}.`;
 }
 
-function toggleTheftWorkflowFields() {
-  const isStolenItemReport = reportTypeEl.value === "stolen_item";
-  stolenItemWrapEl.classList.toggle("hidden", !isStolenItemReport);
-  theftWorkflowWrapEl.classList.toggle("hidden", !isStolenItemReport);
-  stolenItemEl.required = isStolenItemReport;
-  incidentStartEl.required = isStolenItemReport;
-  incidentEndEl.required = isStolenItemReport;
-  incidentLocationEl.required = isStolenItemReport;
-
-  if (!isStolenItemReport) {
-    stolenItemEl.value = "";
-    incidentStartEl.value = "";
-    incidentEndEl.value = "";
-    incidentLocationEl.value = "";
-    caseReferenceEl.value = "";
-    evidenceAttachmentsEl.value = "";
-  }
-}
-
 async function loadResidentSession() {
-  if (!getResidentToken()) {
-    return false;
-  }
-
   try {
     const payload = await requestJson("/api/auth/resident/session", {}, { auth: true });
     state.residentSession = payload.data;
@@ -386,15 +475,28 @@ async function loadTenantData() {
   clearFeedback();
 
   try {
-    const [reportsPayload, notificationsPayload, rentPayload] = await Promise.all([
+    const [
+      reportsPayload,
+      notificationsPayload,
+      rentPayload,
+      rentPaymentsPayload,
+      utilitiesPayload,
+      utilityPaymentsPayload
+    ] = await Promise.all([
       requestJson("/api/user/reports", {}, { auth: true }),
       requestJson("/api/user/notifications", {}, { auth: true }),
-      requestJson("/api/user/rent-due", {}, { auth: true })
+      requestJson("/api/user/rent-due", {}, { auth: true }),
+      requestJson("/api/user/rent-payments", {}, { auth: true }),
+      requestJson("/api/user/utilities", {}, { auth: true }),
+      requestJson("/api/user/utility-payments", {}, { auth: true })
     ]);
 
     renderReports(reportsPayload.data ?? []);
     renderNotifications(notificationsPayload.data ?? []);
     renderRentDue(rentPayload.data ?? null, rentPayload.message);
+    renderRentPayments(rentPaymentsPayload.data ?? []);
+    renderUtilityBills(utilitiesPayload.data ?? []);
+    renderUtilityPayments(utilityPaymentsPayload.data ?? []);
   } catch (error) {
     if (error.status === 401) {
       saveResidentToken("");
@@ -504,52 +606,150 @@ async function submitTicket(event) {
   event.preventDefault();
   clearFeedback();
 
-  const evidenceAttachments = evidenceAttachmentsEl.value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-
   const payload = {
     type: reportTypeEl.value,
     title: reportTitleEl.value.trim(),
     details: reportDetailsEl.value.trim(),
-    stolenItem: stolenItemEl.value.trim() || undefined,
-    incidentWindowStartAt: toIsoFromDateTimeLocal(incidentStartEl.value),
-    incidentWindowEndAt: toIsoFromDateTimeLocal(incidentEndEl.value),
-    incidentLocation: incidentLocationEl.value.trim() || undefined,
-    caseReference: caseReferenceEl.value.trim() || undefined,
-    evidenceAttachments
+    evidenceAttachments: []
   };
 
   submitBtnEl.disabled = true;
 
   try {
-    const response = await requestJson("/api/user/reports", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json"
+    const response = await requestJson(
+      "/api/user/reports",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(payload)
       },
-      body: JSON.stringify(payload)
-    }, { auth: true });
+      { auth: true }
+    );
 
     const report = response.data?.report;
     showFeedback(
-      `Ticket ${report?.id?.slice(0, 8) ?? ""} submitted successfully.`,
+      `Request ${report?.id?.slice(0, 8) ?? ""} submitted successfully.`,
       "success"
     );
 
     reportTitleEl.value = "";
     reportDetailsEl.value = "";
     reportTypeEl.value = "room_issue";
-    toggleTheftWorkflowFields();
 
     await loadTenantData();
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Unable to submit ticket.";
+      error instanceof Error ? error.message : "Unable to submit request.";
     showFeedback(message);
   } finally {
     submitBtnEl.disabled = false;
+  }
+}
+
+async function submitUtilityPayment(event) {
+  event.preventDefault();
+  clearFeedback();
+
+  const utilityType = String(utilityPaymentTypeEl.value ?? "water");
+  const billingMonthRaw = String(utilityPaymentMonthEl.value ?? "").trim();
+  const billingMonth = billingMonthRaw ? billingMonthRaw.slice(0, 7) : undefined;
+
+  const payload = {
+    billingMonth,
+    amountKsh: Number(utilityPaymentAmountEl.value),
+    provider: String(utilityPaymentProviderEl.value ?? "mpesa"),
+    providerReference: utilityPaymentReferenceEl.value.trim() || undefined
+  };
+
+  if (!Number.isFinite(payload.amountKsh) || payload.amountKsh <= 0) {
+    showFeedback("Provide a valid utility payment amount.");
+    return;
+  }
+
+  utilityPaymentBtnEl.disabled = true;
+
+  try {
+    await requestJson(
+      `/api/user/utilities/${encodeURIComponent(utilityType)}/payments`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      },
+      { auth: true }
+    );
+
+    utilityPaymentAmountEl.value = "";
+    utilityPaymentReferenceEl.value = "";
+    showFeedback("Utility payment submitted successfully.", "success");
+    await loadTenantData();
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to submit utility payment.";
+    showFeedback(message);
+  } finally {
+    utilityPaymentBtnEl.disabled = false;
+  }
+}
+
+async function submitRentPayment(event) {
+  event.preventDefault();
+  clearFeedback();
+
+  const billingMonthRaw = String(rentPaymentMonthEl.value ?? "").trim();
+  const billingMonth = billingMonthRaw ? billingMonthRaw.slice(0, 7) : undefined;
+
+  const payload = {
+    billingMonth,
+    amountKsh: Number(rentPaymentAmountEl.value),
+    providerReference: rentPaymentReferenceEl.value.trim()
+  };
+
+  if (!Number.isFinite(payload.amountKsh) || payload.amountKsh <= 0) {
+    showFeedback("Provide a valid rent payment amount.");
+    return;
+  }
+
+  if (!payload.providerReference) {
+    showFeedback("Provide transaction reference.");
+    return;
+  }
+
+  rentPaymentBtnEl.disabled = true;
+
+  try {
+    const response = await requestJson(
+      "/api/user/rent/payments",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      },
+      { auth: true }
+    );
+
+    const status = response.data?.rentStatus ?? "UPDATED";
+    const reference = response.data?.receiptReference ?? payload.providerReference;
+
+    rentPaymentAmountEl.value = "";
+    rentPaymentReferenceEl.value = "";
+    showFeedback(
+      `Rent payment recorded. Status: ${status}. Receipt: ${reference}.`,
+      "success"
+    );
+    await loadTenantData();
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to submit rent payment.";
+    showFeedback(message);
+  } finally {
+    rentPaymentBtnEl.disabled = false;
   }
 }
 
@@ -557,15 +757,21 @@ async function signOutResident() {
   clearFeedback();
 
   try {
-    if (getResidentToken()) {
-      await requestJson(
-        "/api/auth/resident/logout",
-        {
-          method: "POST"
-        },
-        { auth: true }
-      );
-    }
+    await requestJson(
+      "/api/auth/resident/logout",
+      {
+        method: "POST"
+      },
+      { auth: true }
+    );
+  } catch (_error) {
+    // legacy sign-out fallback
+  }
+
+  try {
+    await requestJson("/api/auth/logout", {
+      method: "POST"
+    });
   } catch (_error) {
     // local sign-out still proceeds
   }
@@ -614,9 +820,16 @@ otpVerifyFormEl.addEventListener("submit", (event) => {
   void verifyOtp(event);
 });
 
-reportTypeEl.addEventListener("change", toggleTheftWorkflowFields);
 reportFormEl.addEventListener("submit", (event) => {
   void submitTicket(event);
+});
+
+rentPaymentFormEl.addEventListener("submit", (event) => {
+  void submitRentPayment(event);
+});
+
+utilityPaymentFormEl.addEventListener("submit", (event) => {
+  void submitUtilityPayment(event);
 });
 
 refreshAllBtnEl.addEventListener("click", () => {
@@ -627,5 +840,4 @@ residentLogoutBtnEl.addEventListener("click", () => {
   void signOutResident();
 });
 
-toggleTheftWorkflowFields();
 void boot();

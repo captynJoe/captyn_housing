@@ -7,7 +7,7 @@ Current core modules:
 - Building registry + CCTV status
 - Incident + vacancy snapshots
 - Resident support tickets (maintenance/security) with lifecycle + SLA
-- Resident auth via phone OTP with house-number + building binding
+- Resident auth via phone + password with house-number + building binding
 - Tenant-private report/rent/notification access
 - Rent ledger with M-PESA callback ingestion + auto reminders (D-3, D-1, overdue)
 - Wi-Fi checkout + provisioning flow
@@ -69,12 +69,16 @@ npm run db:logs
 - `ROOT_ADMIN_USERNAME`, `ROOT_ADMIN_PASSWORD` (optional): root admin credentials
 - `WIFI_PAYMENT_CALLBACK_TOKEN`: token for Wi-Fi payment confirmation callback
 - `MPESA_RENT_CALLBACK_TOKEN`: token for rent M-PESA callback endpoint
-- `EXPOSE_DEV_OTP=true` (non-prod): includes OTP code in response for local testing
+- `MPESA_STK_ENABLED`: enables Daraja STK initialization and verification
+- `MPESA_CONSUMER_KEY` + `MPESA_CONSUMER_SECRET`: Safaricom app credentials
+- `MPESA_BUSINESS_SHORT_CODE` + `MPESA_PASSKEY`: STK business credentials
+- `MPESA_CALLBACK_URL` (optional): callback URL override for rent STK webhook
+- `BASE_URL`: used to derive callback URL when `MPESA_CALLBACK_URL` is not set
 
 Resident auth flow:
 
-1. `POST /api/auth/resident/request-otp`
-2. `POST /api/auth/resident/verify-otp`
+1. First-time setup: `POST /api/auth/resident/setup-password`
+2. Login: `POST /api/auth/resident/login-phone`
 3. Use bearer token for resident APIs
 
 Admin auth flow:
@@ -105,8 +109,8 @@ Public + shared:
 
 Resident auth:
 
-- `POST /api/auth/resident/request-otp`
-- `POST /api/auth/resident/verify-otp`
+- `POST /api/auth/resident/setup-password`
+- `POST /api/auth/resident/login-phone`
 - `GET /api/auth/resident/session`
 - `POST /api/auth/resident/logout`
 
@@ -116,6 +120,8 @@ Resident private APIs (tenant-scoped):
 - `GET /api/user/reports`
 - `GET /api/user/notifications`
 - `GET /api/user/rent-due`
+- `POST /api/user/rent/payments/mpesa/initialize`
+- `POST /api/user/rent/payments/mpesa/verify`
 
 Admin auth:
 
@@ -135,25 +141,18 @@ Admin APIs (role checked):
 - `GET /api/admin/rent-payments`
 - `GET /api/admin/tickets`
 - `PATCH /api/admin/tickets/:ticketId/status`
+- `POST /api/admin/auth/resident/password-reset`
 
-## Example resident OTP flow
+## Example resident password setup
 
 ```bash
-curl -X POST http://localhost:4000/api/auth/resident/request-otp \
+curl -X POST http://localhost:4000/api/auth/resident/setup-password \
   -H "content-type: application/json" \
   -d '{
     "buildingId": "CAPTYN-BLDG-00001",
     "houseNumber": "A-12",
-    "phoneNumber": "0712345678"
-  }'
-```
-
-```bash
-curl -X POST http://localhost:4000/api/auth/resident/verify-otp \
-  -H "content-type: application/json" \
-  -d '{
-    "challengeId": "otp_xxx",
-    "otpCode": "123456"
+    "phoneNumber": "0712345678",
+    "password": "StrongPass123!"
   }'
 ```
 
@@ -161,6 +160,19 @@ Then call resident APIs with:
 
 ```text
 Authorization: Bearer <resident token>
+```
+
+Resident sign-in example:
+
+```bash
+curl -X POST http://localhost:4000/api/auth/resident/login-phone \
+  -H "content-type: application/json" \
+  -d '{
+    "buildingId": "CAPTYN-BLDG-00001",
+    "houseNumber": "A-12",
+    "phoneNumber": "0712345678",
+    "password": "StrongPass123!"
+  }'
 ```
 
 ## Example M-PESA rent callback
@@ -174,6 +186,28 @@ curl -X POST http://localhost:4000/api/payments/mpesa/rent-callback \
     "amountKsh": 3500,
     "providerReference": "QWERTY123",
     "phoneNumber": "0712345678"
+  }'
+```
+
+## Example resident rent M-PESA STK flow
+
+```bash
+curl -X POST http://localhost:4000/api/user/rent/payments/mpesa/initialize \
+  -H "content-type: application/json" \
+  -H "authorization: Bearer <resident token>" \
+  -d '{
+    "paymentMethod": "mpesa",
+    "amountKsh": 3500,
+    "billingMonth": "2026-03"
+  }'
+```
+
+```bash
+curl -X POST http://localhost:4000/api/user/rent/payments/mpesa/verify \
+  -H "content-type: application/json" \
+  -H "authorization: Bearer <resident token>" \
+  -d '{
+    "checkoutRequestId": "ws_CO_123456789"
   }'
 ```
 

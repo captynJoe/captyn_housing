@@ -24,6 +24,12 @@ const applicationsBodyEl = document.getElementById("applications-body");
 const refreshApplicationsBtnEl = document.getElementById("refresh-applications");
 const rentStatusBodyEl = document.getElementById("rent-status-body");
 const refreshRentStatusBtnEl = document.getElementById("refresh-rent-status");
+const paymentAccessBodyEl = document.getElementById("payment-access-body");
+const refreshPaymentAccessBtnEl = document.getElementById("refresh-payment-access");
+const registryBuildingSelectEl = document.getElementById("registry-building-select");
+const registryLoadBtnEl = document.getElementById("registry-load-btn");
+const registrySaveBtnEl = document.getElementById("registry-save-btn");
+const registryBodyEl = document.getElementById("registry-body");
 
 const utilityMeterFormEl = document.getElementById("utility-meter-form");
 const utilityMeterTypeEl = document.getElementById("utility-meter-type");
@@ -44,6 +50,9 @@ const utilityBillCurrentReadingEl = document.getElementById(
 );
 const utilityBillRateEl = document.getElementById("utility-bill-rate");
 const utilityBillFixedEl = document.getElementById("utility-bill-fixed");
+const utilityBillInputGuidanceEl = document.getElementById(
+  "utility-bill-input-guidance"
+);
 const utilityBillDueDateEl = document.getElementById("utility-bill-due-date");
 const utilityBillNoteEl = document.getElementById("utility-bill-note");
 const utilityBillsBodyEl = document.getElementById("utility-bills-body");
@@ -59,6 +68,9 @@ const state = {
   buildings: [],
   applications: [],
   rentStatus: [],
+  paymentAccess: [],
+  selectedRegistryBuildingId: "",
+  registryRows: [],
   meters: [],
   bills: [],
   payments: []
@@ -98,6 +110,15 @@ function formatCurrency(value) {
   return `KSh ${Number(value ?? 0).toLocaleString("en-US")}`;
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 function normalizeHouse(value) {
   return String(value ?? "").trim().toUpperCase();
 }
@@ -135,6 +156,66 @@ function toBillingMonth(value) {
   return raw.slice(0, 7);
 }
 
+function toOptionalNumber(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return undefined;
+  }
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function findConfiguredMeter(utilityType, houseNumber) {
+  const normalizedHouse = normalizeHouse(houseNumber);
+  if (!normalizedHouse) {
+    return null;
+  }
+
+  return (
+    state.meters.find(
+      (item) =>
+        item.utilityType === utilityType &&
+        normalizeHouse(item.houseNumber) === normalizedHouse
+    ) ?? null
+  );
+}
+
+function syncUtilityBillInputMode() {
+  const utilityType = String(utilityBillTypeEl.value ?? "water");
+  const houseNumber = normalizeHouse(utilityBillHouseEl.value);
+  const meter = findConfiguredMeter(utilityType, houseNumber);
+
+  const hasMeter = Boolean(meter?.meterNumber);
+  utilityBillPreviousReadingEl.disabled = !hasMeter;
+  utilityBillCurrentReadingEl.disabled = !hasMeter;
+  utilityBillRateEl.disabled = !hasMeter;
+  utilityBillCurrentReadingEl.required = hasMeter;
+  utilityBillRateEl.required = hasMeter;
+  utilityBillFixedEl.required = !hasMeter;
+
+  if (!hasMeter) {
+    utilityBillPreviousReadingEl.value = "";
+    utilityBillCurrentReadingEl.value = "";
+    utilityBillRateEl.value = "";
+    utilityBillCurrentReadingEl.placeholder = "Not required for fixed charge";
+    utilityBillRateEl.placeholder = "Not required for fixed charge";
+    utilityBillFixedEl.min = "1";
+    if (utilityBillInputGuidanceEl) {
+      const houseLabel = houseNumber || "this house";
+      utilityBillInputGuidanceEl.textContent = `${houseLabel} has no ${utilityType} meter. Post fixed charge only.`;
+    }
+    return;
+  }
+
+  utilityBillCurrentReadingEl.placeholder = "e.g. 358.5";
+  utilityBillRateEl.placeholder = "e.g. 35";
+  utilityBillFixedEl.min = "0";
+  if (utilityBillInputGuidanceEl) {
+    utilityBillInputGuidanceEl.textContent = `Meter ${meter.meterNumber} detected. Enter current reading + rate/unit (previous reading optional).`;
+  }
+}
+
 async function requestJson(url, options = {}) {
   const response = await fetch(url, {
     ...options,
@@ -167,7 +248,7 @@ function handleLandlordError(error, fallback) {
 
 async function ensureSession() {
   try {
-    const payload = await requestJson("/api/auth/session");
+    const payload = await requestJson("/api/auth/session", { cache: "no-store" });
     const role = payload.data?.role ?? "tenant";
     if (role !== "landlord" && role !== "admin" && role !== "root_admin") {
       throw new Error("This account does not have landlord access.");
@@ -208,6 +289,142 @@ function renderBuildings(rows) {
     `;
     buildingsBodyEl.append(row);
   });
+}
+
+function renderRegistryBuildingOptions() {
+  registryBuildingSelectEl.replaceChildren();
+
+  if (!Array.isArray(state.buildings) || state.buildings.length === 0) {
+    state.selectedRegistryBuildingId = "";
+    state.registryRows = [];
+    registryBuildingSelectEl.disabled = true;
+    registryLoadBtnEl.disabled = true;
+    registrySaveBtnEl.disabled = true;
+
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No buildings";
+    registryBuildingSelectEl.append(option);
+    renderRegistryRows([]);
+    return;
+  }
+
+  const knownSelection =
+    state.selectedRegistryBuildingId &&
+    state.buildings.some((item) => item.id === state.selectedRegistryBuildingId)
+      ? state.selectedRegistryBuildingId
+      : state.buildings[0].id;
+
+  state.selectedRegistryBuildingId = knownSelection;
+  registryBuildingSelectEl.disabled = false;
+  registryLoadBtnEl.disabled = false;
+  registrySaveBtnEl.disabled = false;
+
+  state.buildings.forEach((building) => {
+    const option = document.createElement("option");
+    option.value = building.id;
+    option.textContent = `${building.name} (${building.id})`;
+    if (building.id === knownSelection) {
+      option.selected = true;
+    }
+    registryBuildingSelectEl.append(option);
+  });
+}
+
+function renderRegistryRows(rows) {
+  registryBodyEl.replaceChildren();
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    const row = document.createElement("tr");
+    row.innerHTML = '<td colspan="6">No houses found for this building.</td>';
+    registryBodyEl.append(row);
+    return;
+  }
+
+  rows.forEach((item) => {
+    const houseNumber = normalizeHouse(item.houseNumber);
+    const row = document.createElement("tr");
+    row.dataset.houseNumber = houseNumber;
+    row.innerHTML = `
+      <td><strong>${escapeHtml(houseNumber)}</strong></td>
+      <td>${escapeHtml(item.residentName ?? "-")}</td>
+      <td>${escapeHtml(item.residentPhone ?? "-")}</td>
+      <td>
+        <input
+          type="number"
+          class="registry-table-input registry-members-input"
+          data-field="householdMembers"
+          min="0"
+          max="20"
+          step="1"
+          value="${Number(item.householdMembers ?? 0)}"
+        />
+      </td>
+      <td>
+        <input
+          type="text"
+          class="registry-table-input"
+          data-field="waterMeterNumber"
+          maxlength="80"
+          placeholder="WTR-0001"
+          value="${escapeHtml(item.waterMeterNumber ?? "")}"
+        />
+      </td>
+      <td>
+        <input
+          type="text"
+          class="registry-table-input"
+          data-field="electricityMeterNumber"
+          maxlength="80"
+          placeholder="ELEC-0001"
+          value="${escapeHtml(item.electricityMeterNumber ?? "")}"
+        />
+      </td>
+    `;
+
+    registryBodyEl.append(row);
+  });
+}
+
+function buildRegistrySavePayload() {
+  const rows = [];
+  const trList = registryBodyEl.querySelectorAll("tr[data-house-number]");
+
+  trList.forEach((tr) => {
+    const houseNumber = normalizeHouse(tr.dataset.houseNumber);
+    const membersInput = tr.querySelector('input[data-field="householdMembers"]');
+    const waterInput = tr.querySelector('input[data-field="waterMeterNumber"]');
+    const electricityInput = tr.querySelector(
+      'input[data-field="electricityMeterNumber"]'
+    );
+
+    if (
+      !(membersInput instanceof HTMLInputElement) ||
+      !(waterInput instanceof HTMLInputElement) ||
+      !(electricityInput instanceof HTMLInputElement)
+    ) {
+      return;
+    }
+
+    const members = Number(membersInput.value);
+    if (!Number.isInteger(members) || members < 0 || members > 20) {
+      throw new Error(
+        `Members for ${houseNumber} must be a whole number between 0 and 20.`
+      );
+    }
+
+    const waterMeterNumber = waterInput.value.trim();
+    const electricityMeterNumber = electricityInput.value.trim();
+
+    rows.push({
+      houseNumber,
+      householdMembers: members,
+      waterMeterNumber: waterMeterNumber || undefined,
+      electricityMeterNumber: electricityMeterNumber || undefined
+    });
+  });
+
+  return rows;
 }
 
 function renderApplications(rows) {
@@ -267,6 +484,31 @@ function renderRentStatus(rows) {
       <td>${item.latestPaymentReference ?? "-"}</td>
     `;
     rentStatusBodyEl.append(row);
+  });
+}
+
+function renderPaymentAccess(rows) {
+  paymentAccessBodyEl.replaceChildren();
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    const row = document.createElement("tr");
+    row.innerHTML = '<td colspan="6">No buildings available for payment access settings.</td>';
+    paymentAccessBodyEl.append(row);
+    return;
+  }
+
+  rows.forEach((item) => {
+    const row = document.createElement("tr");
+    const safeBuildingName = item.buildingName ?? item.buildingId;
+    row.innerHTML = `
+      <td><strong>${safeBuildingName}</strong><br /><small>${item.buildingId}</small></td>
+      <td><label><input type="checkbox" data-setting="rentEnabled" ${item.rentEnabled ? "checked" : ""} /> Enabled</label></td>
+      <td><label><input type="checkbox" data-setting="waterEnabled" ${item.waterEnabled ? "checked" : ""} /> Enabled</label></td>
+      <td><label><input type="checkbox" data-setting="electricityEnabled" ${item.electricityEnabled ? "checked" : ""} /> Enabled</label></td>
+      <td>${formatDateTime(item.updatedAt)}${item.updatedByRole ? `<br /><small>${item.updatedByRole}</small>` : ""}</td>
+      <td><button type="button" data-action="save-payment-access" data-building-id="${item.buildingId}">Save</button></td>
+    `;
+    paymentAccessBodyEl.append(row);
   });
 }
 
@@ -364,8 +606,10 @@ function renderMetrics() {
 }
 
 function createUtilityBillPayload() {
-  const previousRaw = String(utilityBillPreviousReadingEl.value ?? "").trim();
-  const previousReading = previousRaw === "" ? undefined : Number(previousRaw);
+  const previousReading = toOptionalNumber(utilityBillPreviousReadingEl.value);
+  const currentReading = toOptionalNumber(utilityBillCurrentReadingEl.value);
+  const ratePerUnitKsh = toOptionalNumber(utilityBillRateEl.value);
+  const fixedChargeKsh = toOptionalNumber(utilityBillFixedEl.value);
 
   return {
     utilityType: String(utilityBillTypeEl.value ?? "water"),
@@ -373,9 +617,9 @@ function createUtilityBillPayload() {
     payload: {
       billingMonth: toBillingMonth(utilityBillMonthEl.value),
       previousReading,
-      currentReading: Number(utilityBillCurrentReadingEl.value),
-      ratePerUnitKsh: Number(utilityBillRateEl.value),
-      fixedChargeKsh: Number(utilityBillFixedEl.value || 0),
+      currentReading,
+      ratePerUnitKsh,
+      fixedChargeKsh: fixedChargeKsh ?? 0,
       dueDate: toIsoFromDateTimeLocal(utilityBillDueDateEl.value),
       note: utilityBillNoteEl.value.trim() || undefined
     }
@@ -386,6 +630,7 @@ async function loadBuildings() {
   const payload = await requestJson("/api/landlord/buildings");
   state.buildings = payload.data ?? [];
   renderBuildings(state.buildings);
+  renderRegistryBuildingOptions();
 }
 
 async function loadApplications() {
@@ -403,10 +648,36 @@ async function loadRentStatus() {
   renderRentStatus(state.rentStatus);
 }
 
+async function loadPaymentAccess() {
+  const payload = await requestJson("/api/landlord/payment-access-controls");
+  state.paymentAccess = payload.data ?? [];
+  renderPaymentAccess(state.paymentAccess);
+}
+
+async function loadRegistryRows() {
+  const buildingId = String(
+    registryBuildingSelectEl.value || state.selectedRegistryBuildingId || ""
+  ).trim();
+
+  state.selectedRegistryBuildingId = buildingId;
+  if (!buildingId) {
+    state.registryRows = [];
+    renderRegistryRows(state.registryRows);
+    return;
+  }
+
+  const payload = await requestJson(
+    `/api/landlord/buildings/${encodeURIComponent(buildingId)}/utility-registry`
+  );
+  state.registryRows = payload.data ?? [];
+  renderRegistryRows(state.registryRows);
+}
+
 async function loadMeters() {
   const payload = await requestJson("/api/landlord/utilities/meters");
   state.meters = payload.data ?? [];
   renderMeters(state.meters);
+  syncUtilityBillInputMode();
   renderMetrics();
 }
 
@@ -428,14 +699,16 @@ async function loadData() {
   clearError();
 
   try {
+    await loadBuildings();
     await Promise.all([
-      loadBuildings(),
       loadApplications(),
       loadRentStatus(),
+      loadPaymentAccess(),
       loadMeters(),
       loadBills(),
       loadPayments()
     ]);
+    await loadRegistryRows();
     setStatus(`Signed in as ${state.role}. Data refreshed.`);
   } catch (error) {
     handleLandlordError(error, "Unable to load landlord data.");
@@ -454,6 +727,126 @@ async function signOut() {
 
   redirectToLogin();
 }
+
+paymentAccessBodyEl.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  if (target.dataset.action !== "save-payment-access") {
+    return;
+  }
+
+  const buildingId = target.dataset.buildingId;
+  if (!buildingId) {
+    return;
+  }
+
+  const row = target.closest("tr");
+  if (!row) {
+    return;
+  }
+
+  const rentInput = row.querySelector('input[data-setting="rentEnabled"]');
+  const waterInput = row.querySelector('input[data-setting="waterEnabled"]');
+  const electricityInput = row.querySelector(
+    'input[data-setting="electricityEnabled"]'
+  );
+  if (
+    !(rentInput instanceof HTMLInputElement) ||
+    !(waterInput instanceof HTMLInputElement) ||
+    !(electricityInput instanceof HTMLInputElement)
+  ) {
+    return;
+  }
+
+  const current = state.paymentAccess.find((item) => item.buildingId === buildingId);
+  if (!current) {
+    showError("Current payment access settings not found. Refresh and retry.");
+    return;
+  }
+
+  const nextValue = {
+    rentEnabled: Boolean(rentInput.checked),
+    waterEnabled: Boolean(waterInput.checked),
+    electricityEnabled: Boolean(electricityInput.checked)
+  };
+
+  const changes = [];
+  if (nextValue.rentEnabled !== Boolean(current.rentEnabled)) {
+    changes.push(
+      `Rent payments will be ${nextValue.rentEnabled ? "enabled" : "disabled"}`
+    );
+  }
+  if (nextValue.waterEnabled !== Boolean(current.waterEnabled)) {
+    changes.push(
+      `Water payments will be ${nextValue.waterEnabled ? "enabled" : "disabled"}`
+    );
+  }
+  if (nextValue.electricityEnabled !== Boolean(current.electricityEnabled)) {
+    changes.push(
+      `Electricity payments will be ${nextValue.electricityEnabled ? "enabled" : "disabled"}`
+    );
+  }
+
+  if (changes.length === 0) {
+    setStatus("No payment access changes detected.");
+    return;
+  }
+
+  const buildingLabel = current.buildingName ?? buildingId;
+  const confirmation = window.confirm(
+    [
+      `Apply payment access changes for ${buildingLabel}?`,
+      "",
+      "Effects:",
+      ...changes.map((item) => `- ${item}`),
+      "- Residents in this building will see disabled payment sections greyed out and locked immediately."
+    ].join("\n")
+  );
+
+  if (!confirmation) {
+    return;
+  }
+
+  const noteRaw = window.prompt(
+    "Optional note for this change (visible in audit details). Leave blank to skip."
+  );
+  const note =
+    noteRaw == null || String(noteRaw).trim().length === 0
+      ? undefined
+      : String(noteRaw).trim();
+
+  target.disabled = true;
+  clearError();
+
+  void (async () => {
+    try {
+      await requestJson(
+        `/api/landlord/payment-access-controls/${encodeURIComponent(buildingId)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            ...nextValue,
+            acknowledgeImpact: true,
+            note
+          })
+        }
+      );
+
+      setStatus(`Payment access updated for ${buildingLabel}.`);
+      await loadPaymentAccess();
+    } catch (error) {
+      handleLandlordError(error, "Failed to update payment access.");
+    } finally {
+      target.disabled = false;
+    }
+  })();
+});
 
 buildingFormEl.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -502,6 +895,7 @@ buildingFormEl.addEventListener("submit", (event) => {
 
       setStatus("Building created successfully.");
       await Promise.all([loadBuildings(), loadApplications()]);
+      await loadRegistryRows();
     } catch (error) {
       handleLandlordError(error, "Failed to create building.");
     } finally {
@@ -584,11 +978,81 @@ utilityMeterFormEl.addEventListener("submit", (event) => {
       );
 
       setStatus(`Meter saved for ${utilityType} (${houseNumber}).`);
-      await loadMeters();
+      await Promise.all([loadMeters(), loadRegistryRows()]);
     } catch (error) {
       handleLandlordError(error, "Failed to save utility meter.");
     } finally {
       submitButton.disabled = false;
+    }
+  })();
+});
+
+utilityBillTypeEl.addEventListener("change", () => {
+  syncUtilityBillInputMode();
+});
+
+utilityBillHouseEl.addEventListener("input", () => {
+  syncUtilityBillInputMode();
+});
+
+registryBuildingSelectEl.addEventListener("change", () => {
+  state.selectedRegistryBuildingId = String(registryBuildingSelectEl.value || "");
+  void loadRegistryRows().catch((error) => {
+    handleLandlordError(error, "Failed to load building utility registry.");
+  });
+});
+
+registryLoadBtnEl.addEventListener("click", () => {
+  void loadRegistryRows().catch((error) => {
+    handleLandlordError(error, "Failed to load building utility registry.");
+  });
+});
+
+registrySaveBtnEl.addEventListener("click", () => {
+  clearError();
+
+  const buildingId = String(
+    registryBuildingSelectEl.value || state.selectedRegistryBuildingId || ""
+  ).trim();
+  if (!buildingId) {
+    showError("Select a building first.");
+    return;
+  }
+
+  let rows;
+  try {
+    rows = buildRegistrySavePayload();
+  } catch (error) {
+    handleLandlordError(error, "Invalid registry values.");
+    return;
+  }
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    showError("No registry rows available to save.");
+    return;
+  }
+
+  registrySaveBtnEl.disabled = true;
+
+  void (async () => {
+    try {
+      await requestJson(
+        `/api/landlord/buildings/${encodeURIComponent(buildingId)}/utility-registry`,
+        {
+          method: "PUT",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({ rows })
+        }
+      );
+
+      setStatus(`Saved utility registry for ${buildingId}.`);
+      await Promise.all([loadRegistryRows(), loadMeters()]);
+    } catch (error) {
+      handleLandlordError(error, "Failed to save utility registry.");
+    } finally {
+      registrySaveBtnEl.disabled = false;
     }
   })();
 });
@@ -600,6 +1064,24 @@ utilityBillFormEl.addEventListener("submit", (event) => {
   const utility = createUtilityBillPayload();
   if (!utility.houseNumber || !utility.payload.billingMonth || !utility.payload.dueDate) {
     showError("Utility bill requires house, month, and due date.");
+    return;
+  }
+
+  const configuredMeter = findConfiguredMeter(utility.utilityType, utility.houseNumber);
+  if (configuredMeter) {
+    if (
+      utility.payload.currentReading == null ||
+      utility.payload.ratePerUnitKsh == null
+    ) {
+      showError(
+        `House ${utility.houseNumber} has meter ${configuredMeter.meterNumber}. Enter current reading and rate per unit.`
+      );
+      return;
+    }
+  } else if (Number(utility.payload.fixedChargeKsh ?? 0) <= 0) {
+    showError(
+      `House ${utility.houseNumber} has no ${utility.utilityType} meter. Enter a fixed charge greater than zero.`
+    );
     return;
   }
 
@@ -632,7 +1114,10 @@ utilityBillFormEl.addEventListener("submit", (event) => {
 });
 
 refreshBuildingsBtnEl.addEventListener("click", () => {
-  void loadBuildings().catch((error) => {
+  void (async () => {
+    await loadBuildings();
+    await loadRegistryRows();
+  })().catch((error) => {
     handleLandlordError(error, "Unable to refresh buildings.");
   });
 });
@@ -655,8 +1140,17 @@ refreshRentStatusBtnEl.addEventListener("click", () => {
   });
 });
 
+refreshPaymentAccessBtnEl.addEventListener("click", () => {
+  void loadPaymentAccess().catch((error) => {
+    handleLandlordError(error, "Unable to refresh payment access settings.");
+  });
+});
+
 refreshMetersBtnEl.addEventListener("click", () => {
-  void loadMeters().catch((error) => {
+  void (async () => {
+    await loadMeters();
+    await loadRegistryRows();
+  })().catch((error) => {
     handleLandlordError(error, "Unable to refresh meters.");
   });
 });
@@ -689,5 +1183,6 @@ void (async () => {
 
   const now = new Date();
   utilityBillMonthEl.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  syncUtilityBillInputMode();
   await loadData();
 })();

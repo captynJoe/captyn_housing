@@ -51,6 +51,32 @@
       <section class="layout">
         <section class="panel wide-panel">
           <div class="panel-head">
+            <h2>Resident Payment Access</h2>
+            <button id="refresh-payment-access" type="button">Refresh</button>
+          </div>
+          <p class="status-text">
+            Disable any payment channel to immediately block resident payments for that
+            building. Disabled channels appear greyed out in resident portal.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Building</th>
+                  <th>Rent</th>
+                  <th>Water</th>
+                  <th>Electricity</th>
+                  <th>Updated</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="payment-access-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
             <h2>Building Management</h2>
             <button id="refresh-buildings" type="button">Refresh</button>
           </div>
@@ -164,6 +190,39 @@
 
         <section class="panel wide-panel">
           <div class="panel-head">
+            <h2>Building Utility + Members Registry</h2>
+            <div class="action-row">
+              <label>
+                Building
+                <select id="registry-building-select"></select>
+              </label>
+              <button id="registry-load-btn" type="button">Load</button>
+              <button id="registry-save-btn" type="button">Save All</button>
+            </div>
+          </div>
+          <p class="status-text">
+            Enter water/electricity meter numbers and number of members for every house in
+            the selected building, then save in one action.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>House</th>
+                  <th>Resident</th>
+                  <th>Phone</th>
+                  <th>Members</th>
+                  <th>Water Meter</th>
+                  <th>Electricity Meter</th>
+                </tr>
+              </thead>
+              <tbody id="registry-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
             <h2>Meter Registry</h2>
             <button id="refresh-meters" type="button">Refresh</button>
           </div>
@@ -235,17 +294,20 @@
               </label>
               <label>
                 Current Reading
-                <input id="utility-bill-current-reading" type="number" min="0" step="0.001" required />
+                <input id="utility-bill-current-reading" type="number" min="0" step="0.001" />
               </label>
               <label>
                 Rate/Unit (KSh)
-                <input id="utility-bill-rate" type="number" min="0" step="0.01" required />
+                <input id="utility-bill-rate" type="number" min="0" step="0.01" />
               </label>
               <label>
                 Fixed Charge (KSh)
-                <input id="utility-bill-fixed" type="number" min="0" step="0.01" value="0" required />
+                <input id="utility-bill-fixed" type="number" min="0" step="0.01" value="0" />
               </label>
             </div>
+            <p id="utility-bill-input-guidance" class="status-text">
+              Metered houses: fill current reading + rate/unit (previous reading optional). Houses without a meter: leave readings blank and post fixed charge only.
+            </p>
             <div class="inline-fields compact-fields">
               <label>
                 Due Date

@@ -58,6 +58,15 @@ export interface WifiAccessServiceOptions {
   mikrotik?: Partial<MikrotikConfig>;
 }
 
+export interface WifiAccessPersistedState {
+  packages: WifiPackage[];
+  payments: WifiPaymentRecord[];
+}
+
+type WifiAccessStateChangeHandler = (
+  state: WifiAccessPersistedState
+) => void | Promise<void>;
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -93,6 +102,7 @@ export class WifiAccessService {
   private readonly packageMap = new Map<WifiPackage["id"], WifiPackage>();
   private readonly payments = new Map<string, WifiPaymentRecord>();
   private readonly mikrotikConfig?: MikrotikConfig;
+  private stateChangeHandler?: WifiAccessStateChangeHandler;
 
   constructor(options: WifiAccessServiceOptions) {
     this.callbackToken = options.callbackToken;
@@ -115,6 +125,81 @@ export class WifiAccessService {
     }
   }
 
+  setStateChangeHandler(handler?: WifiAccessStateChangeHandler): void {
+    this.stateChangeHandler = handler;
+  }
+
+  exportState(): WifiAccessPersistedState {
+    return {
+      packages: [...this.packageMap.values()].map((item) => ({ ...item })),
+      payments: [...this.payments.values()]
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .map((item) => ({
+          ...item,
+          building: { ...item.building },
+          package: { ...item.package },
+          voucher: item.voucher ? { ...item.voucher } : undefined
+        }))
+    };
+  }
+
+  importState(state: WifiAccessPersistedState | null | undefined): void {
+    this.packageMap.clear();
+    this.payments.clear();
+
+    if (!state) {
+      return;
+    }
+
+    if (Array.isArray(state.packages)) {
+      for (const item of state.packages) {
+        if (!item?.id) {
+          continue;
+        }
+
+        this.packageMap.set(item.id, {
+          ...item,
+          name: String(item.name ?? ""),
+          hours: Number(item.hours ?? 0),
+          priceKsh: Number(item.priceKsh ?? 0),
+          profile: String(item.profile ?? "")
+        });
+      }
+    }
+
+    if (Array.isArray(state.payments)) {
+      for (const item of state.payments) {
+        if (!item?.checkoutReference) {
+          continue;
+        }
+
+        this.payments.set(item.checkoutReference, {
+          ...item,
+          building: {
+            id: String(item.building?.id ?? ""),
+            name: String(item.building?.name ?? "")
+          },
+          package: {
+            id: item.package.id,
+            name: String(item.package.name ?? ""),
+            hours: Number(item.package.hours ?? 0),
+            priceKsh: Number(item.package.priceKsh ?? 0),
+            profile: String(item.package.profile ?? "")
+          },
+          amountKsh: Number(item.amountKsh ?? 0),
+          phoneNumber: normalizeKenyaPhone(String(item.phoneNumber ?? "")),
+          voucher: item.voucher
+            ? {
+                username: String(item.voucher.username ?? ""),
+                password: String(item.voucher.password ?? ""),
+                expiresAt: String(item.voucher.expiresAt ?? "")
+              }
+            : undefined
+        });
+      }
+    }
+  }
+
   listPackages(): WifiPackage[] {
     return [...this.packageMap.values()];
   }
@@ -134,6 +219,7 @@ export class WifiAccessService {
     };
 
     this.packageMap.set(packageId, updated);
+    this.emitStateChange();
     return updated;
   }
 
@@ -175,6 +261,7 @@ export class WifiAccessService {
     };
 
     this.payments.set(payment.checkoutReference, payment);
+    this.emitStateChange();
     return payment;
   }
 
@@ -202,6 +289,7 @@ export class WifiAccessService {
       };
 
       this.payments.set(checkoutReference, failed);
+      this.emitStateChange();
       return failed;
     }
 
@@ -214,6 +302,7 @@ export class WifiAccessService {
       updatedAt: nowIso()
     };
     this.payments.set(checkoutReference, provisioning);
+    this.emitStateChange();
 
     try {
       const voucher = await this.provisionAccess(provisioning);
@@ -227,6 +316,7 @@ export class WifiAccessService {
       };
 
       this.payments.set(checkoutReference, active);
+      this.emitStateChange();
       return active;
     } catch (error) {
       const message =
@@ -243,8 +333,20 @@ export class WifiAccessService {
       };
 
       this.payments.set(checkoutReference, failedProvisioning);
+      this.emitStateChange();
       return failedProvisioning;
     }
+  }
+
+  private emitStateChange(): void {
+    if (!this.stateChangeHandler) {
+      return;
+    }
+
+    const snapshot = this.exportState();
+    void Promise.resolve(this.stateChangeHandler(snapshot)).catch((error) => {
+      console.error("Failed to persist Wi-Fi state", error);
+    });
   }
 
   private async provisionAccess(

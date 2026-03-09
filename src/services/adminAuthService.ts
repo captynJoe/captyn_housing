@@ -10,6 +10,14 @@ export interface AdminSession {
   expiresAt: string;
 }
 
+export interface AdminAuthPersistedState {
+  sessions: AdminSession[];
+}
+
+type AdminAuthStateChangeHandler = (
+  state: AdminAuthPersistedState
+) => void | Promise<void>;
+
 export interface AdminAuthServiceOptions {
   landlordToken?: string;
   adminToken: string;
@@ -51,6 +59,7 @@ export class AdminAuthService {
   private readonly rootAdminUsername?: string;
   private readonly rootAdminPassword?: string;
   private readonly sessionTtlHours: number;
+  private stateChangeHandler?: AdminAuthStateChangeHandler;
 
   constructor(options: AdminAuthServiceOptions) {
     this.landlordToken = options.landlordToken;
@@ -63,6 +72,40 @@ export class AdminAuthService {
     this.rootAdminUsername = options.rootAdminUsername;
     this.rootAdminPassword = options.rootAdminPassword;
     this.sessionTtlHours = options.sessionTtlHours ?? 12;
+  }
+
+  setStateChangeHandler(handler?: AdminAuthStateChangeHandler): void {
+    this.stateChangeHandler = handler;
+  }
+
+  exportState(): AdminAuthPersistedState {
+    return {
+      sessions: [...this.sessions.values()].map((session) => ({ ...session }))
+    };
+  }
+
+  importState(state: AdminAuthPersistedState | null | undefined): void {
+    this.sessions.clear();
+    if (!state || !Array.isArray(state.sessions)) {
+      return;
+    }
+
+    for (const session of state.sessions) {
+      if (!session?.token || !session?.expiresAt || !session?.createdAt || !session?.role) {
+        continue;
+      }
+
+      if (new Date(session.expiresAt).getTime() < nowMs()) {
+        continue;
+      }
+
+      this.sessions.set(session.token, {
+        token: session.token,
+        role: session.role,
+        createdAt: session.createdAt,
+        expiresAt: session.expiresAt
+      });
+    }
   }
 
   login(input: AdminLoginInput): AdminSession | null {
@@ -122,6 +165,7 @@ export class AdminAuthService {
     };
 
     this.sessions.set(session.token, session);
+    this.emitStateChange();
     return session;
   }
 
@@ -139,6 +183,7 @@ export class AdminAuthService {
 
     if (new Date(session.expiresAt).getTime() < nowMs()) {
       this.sessions.delete(token);
+      this.emitStateChange();
       return null;
     }
 
@@ -150,7 +195,12 @@ export class AdminAuthService {
       return false;
     }
 
-    return this.sessions.delete(token);
+    const removed = this.sessions.delete(token);
+    if (removed) {
+      this.emitStateChange();
+    }
+
+    return removed;
   }
 
   hasRole(session: AdminSession, minimumRole: AdminRole): boolean {
@@ -169,13 +219,30 @@ export class AdminAuthService {
     return session.role === "root_admin";
   }
 
+  private emitStateChange(): void {
+    if (!this.stateChangeHandler) {
+      return;
+    }
+
+    const snapshot = this.exportState();
+    void Promise.resolve(this.stateChangeHandler(snapshot)).catch((error) => {
+      console.error("Failed to persist admin auth state", error);
+    });
+  }
+
   private purgeExpired() {
     const now = nowMs();
+    let changed = false;
 
     for (const [token, session] of this.sessions) {
       if (new Date(session.expiresAt).getTime() < now) {
         this.sessions.delete(token);
+        changed = true;
       }
+    }
+
+    if (changed) {
+      this.emitStateChange();
     }
   }
 }

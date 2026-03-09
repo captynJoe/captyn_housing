@@ -1,5 +1,5 @@
 const loginFormEl = document.getElementById("landlord-login-form");
-const emailEl = document.getElementById("landlord-email");
+const identifierEl = document.getElementById("landlord-email");
 const passwordEl = document.getElementById("landlord-password");
 const loginBtnEl = document.getElementById("landlord-login-btn");
 const loginStatusEl = document.getElementById("login-status");
@@ -88,7 +88,7 @@ async function syncTenantRequestStatus() {
   }
 }
 
-async function handleSignedInRole(role) {
+async function handleSignedInRole(role, identity = {}) {
   if (role === "landlord" || role === "admin" || role === "root_admin") {
     setStatus(`Signed in as ${role}. Redirecting...`);
     window.location.href = "/landlord";
@@ -97,6 +97,14 @@ async function handleSignedInRole(role) {
 
   if (role === "tenant") {
     toggleLandlordRequestPanel(true);
+    const email = typeof identity.email === "string" ? identity.email : "";
+    const phoneMask =
+      typeof identity.phoneMask === "string" ? identity.phoneMask : "";
+    if (email || phoneMask) {
+      setStatus(
+        `Signed in as tenant (${email || "no email"}${phoneMask ? ` • ${phoneMask}` : ""}). Submit landlord request below.`
+      );
+    }
     await syncTenantRequestStatus();
     return true;
   }
@@ -106,9 +114,9 @@ async function handleSignedInRole(role) {
 
 async function checkSession() {
   try {
-    const payload = await requestJson("/api/auth/session");
+    const payload = await requestJson("/api/auth/session", { cache: "no-store" });
     const role = payload.data?.role;
-    return handleSignedInRole(role);
+    return handleSignedInRole(role, payload.data ?? {});
   } catch (_error) {
     toggleLandlordRequestPanel(false);
     return false;
@@ -119,13 +127,15 @@ async function signIn(event) {
   event.preventDefault();
   clearError();
 
-  const email = emailEl.value.trim();
+  const identifier = identifierEl.value.trim();
   const password = passwordEl.value.trim();
 
-  if (!email || !password) {
-    showError("Provide email and password.");
+  if (!identifier || !password) {
+    showError("Provide email/phone and password.");
     return;
   }
+
+  const looksLikePhone = /^(\+254|254|0)\d{9}$/.test(identifier.replace(/[\s-]/g, ""));
 
   loginBtnEl.disabled = true;
   setStatus("Signing in...");
@@ -137,13 +147,13 @@ async function signIn(event) {
         "content-type": "application/json"
       },
       body: JSON.stringify({
-        email,
+        ...(looksLikePhone ? { phoneNumber: identifier } : { email: identifier }),
         password
       })
     });
 
     const role = payload.data?.role;
-    const handled = await handleSignedInRole(role);
+    const handled = await handleSignedInRole(role, payload.data ?? {});
     if (!handled) {
       throw new Error("This account is not eligible for landlord portal access.");
     }

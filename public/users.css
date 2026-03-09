@@ -182,19 +182,19 @@ body {
 
 .auth-stack,
 #resident-session-panel,
-.layout {
+.resident-workspace {
   margin-top: 14px;
 }
 
-.layout {
+.resident-workspace {
   display: grid;
   gap: 14px;
-  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr);
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
   align-items: start;
 }
 
-.main-column,
-.side-column {
+.resident-content,
+.resident-view {
   display: grid;
   gap: 14px;
 }
@@ -202,6 +202,73 @@ body {
 .panel-card {
   padding: 18px;
   box-shadow: 0 8px 20px rgba(16, 28, 40, 0.06);
+}
+
+.resident-sidebar {
+  position: sticky;
+  top: 18px;
+}
+
+.sidebar-label {
+  margin: 0;
+  color: var(--ink-600);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.resident-nav {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.resident-nav-btn {
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(16, 28, 40, 0.18);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ink-950);
+  border-radius: 10px;
+  padding: 11px 12px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.resident-nav-btn.active {
+  border-color: rgba(15, 123, 118, 0.5);
+  background: linear-gradient(136deg, rgba(15, 123, 118, 0.16), rgba(11, 95, 91, 0.1));
+  color: #0b5f5b;
+}
+
+.sidebar-note {
+  margin: 14px 0 0;
+  color: var(--ink-600);
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.overview-grid {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.overview-card {
+  border: 1px solid rgba(16, 28, 40, 0.14);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  background: #fff;
+}
+
+.overview-value {
+  margin: 2px 0 0;
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--ink-950);
 }
 
 .section-head {
@@ -286,16 +353,18 @@ button,
 }
 
 #submit-btn,
-#otp-request-btn,
-#otp-verify-btn {
+#resident-setup-btn,
+#resident-login-btn,
+#resident-password-change-btn {
   border: 0;
   color: var(--white);
   background: linear-gradient(136deg, var(--teal-600), var(--teal-700));
 }
 
 #submit-btn:disabled,
-#otp-request-btn:disabled,
-#otp-verify-btn:disabled {
+#resident-setup-btn:disabled,
+#resident-login-btn:disabled,
+#resident-password-change-btn:disabled {
   opacity: 0.72;
   cursor: progress;
 }
@@ -316,6 +385,20 @@ button,
   border-radius: var(--radius-md);
   padding: 12px;
   background: #fff;
+}
+
+.utility-bill-card.is-clickable {
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.utility-bill-card.is-clickable:hover {
+  border-color: rgba(15, 123, 118, 0.5);
+}
+
+.utility-bill-card.is-selected {
+  border-color: var(--teal-600);
+  box-shadow: 0 0 0 1px rgba(15, 123, 118, 0.35);
 }
 
 .stack-top {
@@ -455,12 +538,16 @@ button,
 }
 
 @media (max-width: 980px) {
-  .layout {
+  .resident-workspace {
     grid-template-columns: 1fr;
   }
 
-  .side-column {
-    order: -1;
+  .resident-sidebar {
+    position: static;
+  }
+
+  .resident-nav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
@@ -479,6 +566,11 @@ button,
     padding: 18px;
   }
 
+  .resident-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overview-grid,
   .field-grid,
   .rent-keyvals {
     grid-template-columns: 1fr;
@@ -500,4 +592,31 @@ button,
 
 .compact-head h2 {
   font-size: 1.15rem;
+}
+
+.password-change-note {
+  margin: 0 0 10px;
+}
+
+.payment-section {
+  margin: 10px 0 14px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(16, 28, 40, 0.14);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.payment-state {
+  margin: 0 0 8px;
+}
+
+.payment-section.is-disabled {
+  background: #eef0f2;
+  border-color: rgba(16, 28, 40, 0.2);
+  opacity: 0.78;
+}
+
+.payment-section.is-disabled .payment-state {
+  color: #5c6671;
+  font-weight: 600;
 }

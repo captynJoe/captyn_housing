@@ -12,6 +12,8 @@ const metricWifiPaymentsEl = document.getElementById("metric-wifi-payments");
 
 const landlordAccessBodyEl = document.getElementById("landlord-access-body");
 const refreshLandlordAccessBtn = document.getElementById("refresh-landlord-access");
+const passwordRecoveryBodyEl = document.getElementById("password-recovery-body");
+const refreshPasswordRecoveryBtn = document.getElementById("refresh-password-recovery");
 
 const ticketsBodyEl = document.getElementById("tickets-body");
 const ticketFilterFormEl = document.getElementById("ticket-filter-form");
@@ -274,9 +276,13 @@ function renderLandlordAccessRequests(requests) {
               action,
               noteInput.value.trim()
             );
-            setStatus(
-              `Landlord request ${request.id.slice(0, 8)} ${action === "approve" ? "approved" : "rejected"}.`
-            );
+            if (action === "approve") {
+              setStatus(
+                `Landlord request ${request.id.slice(0, 8)} approved. User can sign in to landlord portal with existing account password using email or phone (${request.user.phone}).`
+              );
+            } else {
+              setStatus(`Landlord request ${request.id.slice(0, 8)} rejected.`);
+            }
             await loadLandlordAccessRequests();
           } catch (error) {
             handleAdminError(error, "Failed to review landlord access request.");
@@ -307,6 +313,126 @@ function renderLandlordAccessRequests(requests) {
     }
 
     landlordAccessBodyEl.append(row);
+  });
+}
+
+async function submitPasswordRecoveryDecision(
+  requestId,
+  action,
+  temporaryPassword,
+  note
+) {
+  await requestJson(
+    `/api/admin/auth/resident/password-recovery-requests/${encodeURIComponent(requestId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        action,
+        temporaryPassword: temporaryPassword || undefined,
+        note: note || undefined
+      })
+    }
+  );
+}
+
+function renderPasswordRecoveryRequests(requests) {
+  passwordRecoveryBodyEl.replaceChildren();
+
+  if (!Array.isArray(requests) || requests.length === 0) {
+    const row = document.createElement("tr");
+    row.innerHTML = '<td colspan="7">No password recovery requests found.</td>';
+    passwordRecoveryBodyEl.append(row);
+    return;
+  }
+
+  requests.forEach((request) => {
+    const row = document.createElement("tr");
+    const residentNote = request.note ?? "-";
+    const reviewedBy = request.reviewedByRole ?? "-";
+    const reviewedAt = request.reviewedAt ? formatDateTime(request.reviewedAt) : "-";
+
+    if (request.status === "pending") {
+      row.innerHTML = `
+        <td>${formatDateTime(request.requestedAt)}</td>
+        <td>${request.buildingId}</td>
+        <td>${request.houseNumber}</td>
+        <td>${request.phoneMask ?? request.phoneNumber}</td>
+        <td><strong>${request.status}</strong></td>
+        <td>${residentNote}</td>
+        <td>
+          <div class="inline-fields compact-fields" style="grid-template-columns: 1fr 1fr 1fr;">
+            <input data-action="temporary-password" type="text" minlength="8" maxlength="128" placeholder="Temp password" />
+            <input data-action="note" type="text" maxlength="500" placeholder="Admin note (optional)" />
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button data-action="approve" type="button">Issue Reset</button>
+              <button data-action="reject" type="button">Reject</button>
+            </div>
+          </div>
+        </td>
+      `;
+
+      const tempPasswordInput = row.querySelector(
+        'input[data-action="temporary-password"]'
+      );
+      const noteInput = row.querySelector('input[data-action="note"]');
+      const approveButton = row.querySelector('button[data-action="approve"]');
+      const rejectButton = row.querySelector('button[data-action="reject"]');
+
+      const handleDecision = (action) => {
+        clearError();
+        approveButton.disabled = true;
+        rejectButton.disabled = true;
+
+        void (async () => {
+          try {
+            const temporaryPassword = tempPasswordInput.value.trim();
+            if (action === "approve" && temporaryPassword.length < 8) {
+              throw new Error("Temporary password must be at least 8 characters.");
+            }
+            await submitPasswordRecoveryDecision(
+              request.id,
+              action,
+              temporaryPassword,
+              noteInput.value.trim()
+            );
+            setStatus(
+              `Password recovery request ${request.id.slice(0, 8)} ${
+                action === "approve" ? "approved" : "rejected"
+              }.`
+            );
+            await loadPasswordRecoveryRequests();
+          } catch (error) {
+            handleAdminError(error, "Failed to review password recovery request.");
+          } finally {
+            approveButton.disabled = false;
+            rejectButton.disabled = false;
+          }
+        })();
+      };
+
+      approveButton.addEventListener("click", () => {
+        handleDecision("approve");
+      });
+
+      rejectButton.addEventListener("click", () => {
+        handleDecision("reject");
+      });
+    } else {
+      row.innerHTML = `
+        <td>${formatDateTime(request.requestedAt)}</td>
+        <td>${request.buildingId}</td>
+        <td>${request.houseNumber}</td>
+        <td>${request.phoneMask ?? request.phoneNumber}</td>
+        <td><strong>${request.status}</strong></td>
+        <td>${residentNote}</td>
+        <td>${reviewedAt}<br /><small>${reviewedBy}</small></td>
+      `;
+    }
+
+    passwordRecoveryBodyEl.append(row);
   });
 }
 
@@ -668,6 +794,13 @@ async function loadLandlordAccessRequests() {
   renderLandlordAccessRequests(payload.data ?? []);
 }
 
+async function loadPasswordRecoveryRequests() {
+  const payload = await requestJson(
+    "/api/admin/auth/resident/password-recovery-requests?limit=500"
+  );
+  renderPasswordRecoveryRequests(payload.data ?? []);
+}
+
 async function loadTickets() {
   const params = new URLSearchParams();
   const status = ticketFilterStatusEl.value.trim();
@@ -734,6 +867,7 @@ async function loadAdminData() {
     await Promise.all([
       loadOverview(),
       loadLandlordAccessRequests(),
+      loadPasswordRecoveryRequests(),
       loadTickets(),
       loadBuildings(),
       loadUtilityBills(),
@@ -972,6 +1106,12 @@ rentPaymentsFilterFormEl.addEventListener("submit", (event) => {
 refreshLandlordAccessBtn.addEventListener("click", () => {
   void loadLandlordAccessRequests().catch((error) => {
     handleAdminError(error, "Unable to refresh landlord access requests.");
+  });
+});
+
+refreshPasswordRecoveryBtn.addEventListener("click", () => {
+  void loadPasswordRecoveryRequests().catch((error) => {
+    handleAdminError(error, "Unable to refresh password recovery requests.");
   });
 });
 

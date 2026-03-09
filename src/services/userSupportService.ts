@@ -89,6 +89,15 @@ export interface ListAllReportFilters {
   limit?: number;
 }
 
+export interface UserSupportPersistedState {
+  reports: UserReport[];
+  notifications: UserNotification[];
+}
+
+type UserSupportStateChangeHandler = (
+  state: UserSupportPersistedState
+) => void | Promise<void>;
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -190,6 +199,90 @@ export class UserSupportService {
   private readonly reportIndex = new Map<string, string>();
   private readonly notifications = new Map<string, UserNotification[]>();
   private readonly notificationKeys = new Map<string, Set<string>>();
+  private stateChangeHandler?: UserSupportStateChangeHandler;
+
+  setStateChangeHandler(handler?: UserSupportStateChangeHandler): void {
+    this.stateChangeHandler = handler;
+  }
+
+  exportState(): UserSupportPersistedState {
+    const reports = [...this.reportsByHouse.values()]
+      .flatMap((items) => items)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((item) => ({
+        ...item,
+        evidenceAttachments: [...item.evidenceAttachments],
+        statusHistory: [...item.statusHistory]
+      }));
+
+    const notifications = [...this.notifications.values()]
+      .flatMap((items) => items)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((item) => ({ ...item }));
+
+    return { reports, notifications };
+  }
+
+  importState(state: UserSupportPersistedState | null | undefined): void {
+    this.reportsByHouse.clear();
+    this.reportIndex.clear();
+    this.notifications.clear();
+    this.notificationKeys.clear();
+
+    if (!state) {
+      return;
+    }
+
+    if (Array.isArray(state.reports)) {
+      for (const item of state.reports) {
+        if (!item?.id || !item?.houseNumber) {
+          continue;
+        }
+
+        const houseNumber = normalizeHouseNumber(item.houseNumber);
+        const current = this.reportsByHouse.get(houseNumber) ?? [];
+        current.push({
+          ...item,
+          houseNumber,
+          evidenceAttachments: Array.isArray(item.evidenceAttachments)
+            ? [...item.evidenceAttachments]
+            : [],
+          statusHistory: Array.isArray(item.statusHistory) ? [...item.statusHistory] : []
+        });
+        this.reportsByHouse.set(houseNumber, current);
+        this.reportIndex.set(item.id, houseNumber);
+      }
+    }
+
+    for (const [houseNumber, reports] of this.reportsByHouse.entries()) {
+      reports.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      this.reportsByHouse.set(houseNumber, reports);
+    }
+
+    if (Array.isArray(state.notifications)) {
+      for (const item of state.notifications) {
+        if (!item?.id || !item?.houseNumber) {
+          continue;
+        }
+
+        const houseNumber = normalizeHouseNumber(item.houseNumber);
+        const current = this.notifications.get(houseNumber) ?? [];
+        current.push({ ...item, houseNumber });
+        this.notifications.set(houseNumber, current);
+
+        if (item.dedupeKey) {
+          const dedupe = this.notificationKeys.get(houseNumber) ?? new Set<string>();
+          dedupe.add(item.dedupeKey);
+          this.notificationKeys.set(houseNumber, dedupe);
+        }
+      }
+    }
+
+    for (const [houseNumber, notifications] of this.notifications.entries()) {
+      notifications.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      this.notifications.set(houseNumber, notifications);
+    }
+  }
 
   createReport(
     input: CreateUserReportInput,
@@ -268,6 +361,7 @@ export class UserSupportService {
     ];
 
     this.insertNotifications(houseNumber, generatedNotifications);
+    this.emitStateChange();
 
     return {
       report,
@@ -392,6 +486,7 @@ export class UserSupportService {
     };
 
     this.insertNotifications(houseNumber, [notification]);
+    this.emitStateChange();
 
     return { report, notification };
   }
@@ -416,7 +511,23 @@ export class UserSupportService {
       dedupeKey: item.dedupeKey
     }));
 
-    return this.insertNotifications(key, mapped);
+    const inserted = this.insertNotifications(key, mapped);
+    if (inserted.length > 0) {
+      this.emitStateChange();
+    }
+
+    return inserted;
+  }
+
+  private emitStateChange(): void {
+    if (!this.stateChangeHandler) {
+      return;
+    }
+
+    const snapshot = this.exportState();
+    void Promise.resolve(this.stateChangeHandler(snapshot)).catch((error) => {
+      console.error("Failed to persist user support state", error);
+    });
   }
 
   private insertNotifications(

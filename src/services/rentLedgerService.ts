@@ -62,6 +62,15 @@ interface ReferenceIndexEntry {
   applied: boolean;
 }
 
+export interface RentLedgerPersistedState {
+  records: RentDueRecord[];
+  pendingPayments: RentPaymentEvent[];
+}
+
+type RentLedgerStateChangeHandler = (
+  state: RentLedgerPersistedState
+) => void | Promise<void>;
+
 function normalizeHouseNumber(value: string): string {
   return value.trim().toUpperCase();
 }
@@ -122,6 +131,110 @@ export class RentLedgerService {
   private readonly records = new Map<string, RentDueRecord>();
   private readonly pendingPayments = new Map<string, RentPaymentEvent[]>();
   private readonly paymentReferenceIndex = new Map<string, ReferenceIndexEntry>();
+  private stateChangeHandler?: RentLedgerStateChangeHandler;
+
+  setStateChangeHandler(handler?: RentLedgerStateChangeHandler): void {
+    this.stateChangeHandler = handler;
+  }
+
+  exportState(): RentLedgerPersistedState {
+    const records = [...this.records.values()].map((record) => ({
+      ...record,
+      payments: [...record.payments],
+      reminderState: { ...record.reminderState }
+    }));
+
+    const pendingPayments = [...this.pendingPayments.values()]
+      .flatMap((items) => items)
+      .map((item) => ({ ...item }));
+
+    return {
+      records,
+      pendingPayments
+    };
+  }
+
+  importState(state: RentLedgerPersistedState | null | undefined): void {
+    this.records.clear();
+    this.pendingPayments.clear();
+    this.paymentReferenceIndex.clear();
+
+    if (!state) {
+      return;
+    }
+
+    if (Array.isArray(state.records)) {
+      for (const record of state.records) {
+        if (!record || !record.houseNumber) {
+          continue;
+        }
+
+        const houseNumber = normalizeHouseNumber(record.houseNumber);
+        const normalizedRecord: RentDueRecord = {
+          houseNumber,
+          monthlyRentKsh: Number(record.monthlyRentKsh ?? 0),
+          balanceKsh: Number(record.balanceKsh ?? 0),
+          dueDate: record.dueDate,
+          note: record.note,
+          updatedAt: record.updatedAt || nowIso(),
+          payments: Array.isArray(record.payments)
+            ? record.payments.map((payment) => ({
+                ...payment,
+                houseNumber,
+                providerReference: normalizeProviderReference(payment.providerReference)
+              }))
+            : [],
+          reminderState: {
+            d3CycleKey: record.reminderState?.d3CycleKey,
+            d1CycleKey: record.reminderState?.d1CycleKey,
+            overdueDateKey: record.reminderState?.overdueDateKey
+          }
+        };
+
+        this.records.set(houseNumber, normalizedRecord);
+      }
+    }
+
+    if (Array.isArray(state.pendingPayments)) {
+      for (const payment of state.pendingPayments) {
+        if (!payment || !payment.houseNumber || !payment.providerReference) {
+          continue;
+        }
+
+        const houseNumber = normalizeHouseNumber(payment.houseNumber);
+        const current = this.pendingPayments.get(houseNumber) ?? [];
+        current.push({
+          ...payment,
+          houseNumber,
+          providerReference: normalizeProviderReference(payment.providerReference)
+        });
+        this.pendingPayments.set(houseNumber, current);
+      }
+    }
+
+    for (const record of this.records.values()) {
+      for (const payment of record.payments) {
+        this.paymentReferenceIndex.set(normalizeProviderReference(payment.providerReference), {
+          event: { ...payment, houseNumber: record.houseNumber },
+          applied: true
+        });
+      }
+    }
+
+    for (const pending of this.pendingPayments.values()) {
+      for (const payment of pending) {
+        const key = normalizeProviderReference(payment.providerReference);
+        if (this.paymentReferenceIndex.has(key)) {
+          continue;
+        }
+
+        this.paymentReferenceIndex.set(key, {
+          event: { ...payment },
+          applied: false
+        });
+      }
+    }
+  }
 
   upsertRentDue(houseNumber: string, input: UpsertRentDueInput): RentDueSnapshot {
     const normalizedHouse = normalizeHouseNumber(houseNumber);
@@ -150,6 +263,7 @@ export class RentLedgerService {
     this.applyPendingPayments(normalizedHouse);
 
     const refreshed = this.records.get(normalizedHouse)!;
+    this.emitStateChange();
     return this.toSnapshot(refreshed);
   }
 
@@ -228,6 +342,7 @@ export class RentLedgerService {
         event,
         applied: false
       });
+      this.emitStateChange();
 
       return {
         event,
@@ -241,6 +356,8 @@ export class RentLedgerService {
       event,
       applied: true
     });
+    this.emitStateChange();
+
     return {
       event,
       applied: true,
@@ -298,6 +415,10 @@ export class RentLedgerService {
           dedupeKey: `rent-reminder-overdue-${key}-${todayKey}`
         });
       }
+    }
+
+    if (reminders.length > 0) {
+      this.emitStateChange();
     }
 
     return reminders;
@@ -358,6 +479,17 @@ export class RentLedgerService {
     if (record.balanceKsh === 0) {
       record.note = "Rent cleared by M-PESA payment events.";
     }
+  }
+
+  private emitStateChange(): void {
+    if (!this.stateChangeHandler) {
+      return;
+    }
+
+    const snapshot = this.exportState();
+    void Promise.resolve(this.stateChangeHandler(snapshot)).catch((error) => {
+      console.error("Failed to persist rent ledger state", error);
+    });
   }
 
   private toSnapshot(record: RentDueRecord): RentDueSnapshot {

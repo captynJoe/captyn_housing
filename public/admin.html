@@ -74,6 +74,33 @@
           </div>
         </section>
 
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Resident Password Recovery</h2>
+            <button id="refresh-password-recovery" type="button">Refresh</button>
+          </div>
+          <p class="panel-note">
+            Residents submit forgot-password requests with building + house + phone. Verify identity
+            before issuing a temporary password.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Requested</th>
+                  <th>Building</th>
+                  <th>House</th>
+                  <th>Phone</th>
+                  <th>Status</th>
+                  <th>Resident Note</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="password-recovery-body"></tbody>
+            </table>
+          </div>
+        </section>
+
         <section class="panel wide-panel hidden">
           <div class="panel-head">
             <h2>Ticket Lifecycle + SLA</h2>

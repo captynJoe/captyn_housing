@@ -2,24 +2,44 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { ZodError } from "zod";
 import type {
   LandlordAccessRequestStatus,
   TenantApplicationStatus,
   UserRole
 } from "@prisma/client";
+import { DarajaClient, formatDarajaMsisdn } from "./lib/mpesa/darajaClient.js";
+import { getMpesaConfig } from "./lib/mpesa/config.js";
 import { createRepositoryContext } from "./repositories/createRepositoryContext.js";
 import { AdminAuthService, type AdminRole } from "./services/adminAuthService.js";
-import { RentLedgerService } from "./services/rentLedgerService.js";
-import { UtilityBillingService } from "./services/utilityBillingService.js";
-import { ResidentAuthService } from "./services/residentAuthService.js";
+import { AppStateService } from "./services/appStateService.js";
+import {
+  RentLedgerService,
+  type RentLedgerPersistedState
+} from "./services/rentLedgerService.js";
+import {
+  UtilityBillingService,
+  type UtilityBillingPersistedState
+} from "./services/utilityBillingService.js";
 import { UserAccountService } from "./services/userAccountService.js";
 import { UserSupportService } from "./services/userSupportService.js";
 import { WifiAccessService, type WifiPackage } from "./services/wifiAccessService.js";
+import { PaymentAccessService } from "./services/paymentAccessService.js";
 import {
   adminLoginSchema,
   confirmWifiPaymentSchema,
   createRentPaymentSchema,
+  residentPasswordSetupSchema,
+  residentPhoneLoginSchema,
+  residentChangePasswordSchema,
+  residentAdminPasswordResetSchema,
+  residentPasswordRecoveryRequestSchema,
+  residentPasswordRecoveryReviewSchema,
+  initializeRentMpesaPaymentSchema,
+  verifyRentMpesaPaymentSchema,
+  initializeUtilityMpesaPaymentSchema,
+  verifyUtilityMpesaPaymentSchema,
   createBuildingSchema,
   createIncidentSchema,
   createUserReportSchema,
@@ -33,9 +53,9 @@ import {
   upsertUtilityMeterSchema,
   utilityTypeSchema,
   landlordAccessRequestStatusSchema,
-  residentOtpRequestSchema,
-  residentOtpVerifySchema,
   reviewLandlordAccessRequestSchema,
+  landlordPaymentAccessUpdateSchema,
+  landlordUtilityRegistryUpsertSchema,
   resolveIncidentSchema,
   ticketStatusSchema,
   tenantResolveSchema,
@@ -53,6 +73,69 @@ const port = Number(process.env.PORT ?? 4000);
 const publicDir = path.resolve(process.cwd(), "public");
 const adminSessionCookieName = "captyn_admin_session";
 const userSessionCookieName = "captyn_user_session";
+const TERMINAL_MPESA_FAILURE_CODES = new Set([1, 17, 26, 1032, 1037, 2001]);
+const MPESA_VERIFY_RATE_WINDOW_MS = 60 * 1000;
+const MPESA_VERIFY_RATE_MAX_PER_ID = 80;
+const PASSWORD_RECOVERY_RATE_WINDOW_MS = 15 * 60 * 1000;
+const PASSWORD_RECOVERY_RATE_MAX_PER_KEY = 3;
+const RENT_LEDGER_STATE_KEY = "rent_ledger_v1";
+const UTILITY_BILLING_STATE_KEY = "utility_billing_v1";
+
+interface PendingRentStkRequest {
+  houseNumber: string;
+  phoneNumber: string;
+  amountKsh: number;
+  billingMonth: string;
+  initiatedAt: string;
+  tenantUserId?: string;
+  tenantName?: string;
+}
+
+interface PendingUtilityStkRequest {
+  utilityType: "water" | "electricity";
+  houseNumber: string;
+  phoneNumber: string;
+  amountKsh: number;
+  billingMonth: string;
+  initiatedAt: string;
+}
+
+type ResidentPasswordRecoveryStatus = "pending" | "approved" | "rejected";
+
+interface ResidentPasswordRecoveryRequestRecord {
+  id: string;
+  buildingId: string;
+  houseNumber: string;
+  phoneNumber: string;
+  note?: string;
+  status: ResidentPasswordRecoveryStatus;
+  requestedAt: string;
+  reviewedAt?: string;
+  reviewedByRole?: AdminRole;
+  reviewedByUserId?: string;
+  reviewerNote?: string;
+  temporaryPasswordIssuedAt?: string;
+}
+
+interface HouseholdMemberRegistryRecord {
+  buildingId: string;
+  houseNumber: string;
+  members: number;
+  updatedAt: string;
+}
+
+interface LandlordUtilityRegistryRow {
+  houseNumber: string;
+  residentName?: string;
+  residentPhone?: string;
+  residentUserId?: string;
+  hasActiveResident: boolean;
+  householdMembers: number;
+  waterMeterNumber?: string;
+  electricityMeterNumber?: string;
+  waterMeterUpdatedAt?: string;
+  electricityMeterUpdatedAt?: string;
+}
 
 const wifiPackages: WifiPackage[] = [
   {
@@ -130,15 +213,6 @@ function readAdminSessionToken(req: express.Request): string | undefined {
   return cookies[adminSessionCookieName];
 }
 
-function readResidentSessionToken(req: express.Request): string | undefined {
-  const headerToken = req.header("x-resident-token");
-  if (headerToken) {
-    return headerToken;
-  }
-
-  return readBearerToken(req);
-}
-
 function readUserSessionToken(req: express.Request): string | undefined {
   const headerToken = req.header("x-user-session");
   if (headerToken) {
@@ -162,6 +236,22 @@ function maskPhone(value: string): string {
   return `${value.slice(0, 4)}****${value.slice(-3)}`;
 }
 
+function parseBooleanEnv(value: string | undefined): boolean | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true") {
+    return true;
+  }
+  if (normalized === "false") {
+    return false;
+  }
+
+  return null;
+}
+
 function normalizeKenyaPhone(phoneNumber: string): string {
   const normalized = phoneNumber.replace(/[\s-]/g, "").trim();
 
@@ -178,6 +268,52 @@ function normalizeKenyaPhone(phoneNumber: string): string {
   }
 
   return normalized;
+}
+
+function normalizeHouseNumber(value: string): string {
+  return value.trim().toUpperCase();
+}
+
+function mapUtilityDomainError(error: unknown): { status: number; message: string } | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const message = error.message || "Utility operation failed.";
+
+  if (message.includes("already exists")) {
+    return { status: 409, message };
+  }
+
+  if (message.includes("Meter number is required")) {
+    return { status: 400, message };
+  }
+
+  if (message.includes("Current reading and rate per unit are required")) {
+    return { status: 400, message };
+  }
+
+  if (message.includes("Fixed charge must be greater than zero")) {
+    return { status: 400, message };
+  }
+
+  if (message.includes("Current reading must be greater than or equal")) {
+    return { status: 400, message };
+  }
+
+  if (message.includes("was not found") || message.includes("No ") && message.includes(" bills found")) {
+    return { status: 404, message };
+  }
+
+  if (message.includes("already cleared") || message.includes("No outstanding")) {
+    return { status: 409, message };
+  }
+
+  if (message.includes("exceeds remaining balance")) {
+    return { status: 400, message };
+  }
+
+  return null;
 }
 
 function toIsoFromDarajaTimestamp(value: unknown): string | undefined {
@@ -211,6 +347,8 @@ function parseMpesaCallbackPayload(payload: unknown): {
   houseNumber?: string;
   amountKsh?: number;
   providerReference?: string;
+  checkoutRequestId?: string;
+  merchantRequestId?: string;
   phoneNumber?: string;
   paidAt?: string;
 } {
@@ -222,6 +360,14 @@ function parseMpesaCallbackPayload(payload: unknown): {
     const resultCode = Number(callback.ResultCode ?? -1);
     const resultDesc =
       typeof callback.ResultDesc === "string" ? callback.ResultDesc : undefined;
+    const checkoutRequestId =
+      typeof callback.CheckoutRequestID === "string"
+        ? callback.CheckoutRequestID.trim()
+        : undefined;
+    const merchantRequestId =
+      typeof callback.MerchantRequestID === "string"
+        ? callback.MerchantRequestID.trim()
+        : undefined;
 
     const metadataItems =
       ((callback.CallbackMetadata as Record<string, unknown> | undefined)
@@ -270,6 +416,8 @@ function parseMpesaCallbackPayload(payload: unknown): {
         typeof providerReference === "string"
           ? providerReference.trim()
           : undefined,
+      checkoutRequestId,
+      merchantRequestId,
       phoneNumber:
         phoneValue == null ? undefined : String(phoneValue).trim(),
       paidAt
@@ -291,6 +439,14 @@ function parseMpesaCallbackPayload(payload: unknown): {
         : typeof source.receiptNumber === "string"
           ? source.receiptNumber.trim()
           : undefined,
+    checkoutRequestId:
+      typeof source.checkoutRequestId === "string"
+        ? source.checkoutRequestId.trim()
+        : undefined,
+    merchantRequestId:
+      typeof source.merchantRequestId === "string"
+        ? source.merchantRequestId.trim()
+        : undefined,
     phoneNumber:
       typeof source.phoneNumber === "string" ? source.phoneNumber.trim() : undefined,
     paidAt: typeof source.paidAt === "string" ? source.paidAt : undefined
@@ -329,41 +485,25 @@ function parseLandlordAccessRequestStatus(
   return parsed.success ? parsed.data : undefined;
 }
 
-async function sendAfricasTalkingOtpSms(input: {
-  apiKey: string;
-  username: string;
-  phoneNumber: string;
-  otpCode: string;
-  houseNumber: string;
-  buildingId: string;
-}): Promise<void> {
-  const endpoint = "https://api.africastalking.com/version1/messaging";
-  const message =
-    `CAPTYN Housing OTP ${input.otpCode}. ` +
-    `House ${input.houseNumber}, Building ${input.buildingId}. ` +
-    "Valid for 5 minutes. Do not share.";
+function appendQueryParam(url: string, key: string, value: string): string {
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+}
 
-  const body = new URLSearchParams();
-  body.set("username", input.username);
-  body.set("to", input.phoneNumber);
-  body.set("message", message);
+function callbackTokenMatches(
+  req: express.Request,
+  expected: string,
+  headerName = "x-mpesa-callback-token"
+): boolean {
+  const headerToken = req.header(headerName);
+  const queryToken =
+    typeof req.query.token === "string"
+      ? req.query.token
+      : Array.isArray(req.query.token)
+        ? req.query.token[0]
+        : undefined;
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      apiKey: input.apiKey,
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: body.toString()
-  });
-
-  if (!response.ok) {
-    const details = await response.text().catch(() => "");
-    throw new Error(
-      `AfricasTalking OTP SMS request failed with status ${response.status}${details ? `: ${details}` : ""}`
-    );
-  }
+  return headerToken === expected || queryToken === expected;
 }
 
 function hasUserRoleAtLeast(role: UserRole, minimumRole: UserRole): boolean {
@@ -381,6 +521,8 @@ async function bootstrap() {
   const repositoryContext = await createRepositoryContext();
   const store = repositoryContext.buildingRepository;
   const app = express();
+  app.set("trust proxy", 1);
+  app.set("etag", false);
 
   const callbackToken =
     process.env.WIFI_PAYMENT_CALLBACK_TOKEN ?? "dev-wifi-callback-token";
@@ -415,6 +557,226 @@ async function bootstrap() {
     );
   }
 
+  const pendingRentStkRequests = new Map<string, PendingRentStkRequest>();
+  const pendingUtilityStkRequests = new Map<string, PendingUtilityStkRequest>();
+  const mpesaVerifyWindow = new Map<string, { windowStartMs: number; count: number }>();
+  const householdMembersByUnit = new Map<string, HouseholdMemberRegistryRecord>();
+  const residentPasswordRecoveryRequests = new Map<
+    string,
+    ResidentPasswordRecoveryRequestRecord
+  >();
+
+  const memberRegistryKey = (buildingId: string, houseNumber: string) =>
+    `${buildingId}::${normalizeHouseNumber(houseNumber)}`;
+  let warnedMissingHouseholdRegistryTable = false;
+  const isMissingHouseholdRegistryTable = (error: unknown) => {
+    if (!(error instanceof Error)) {
+      return false;
+    }
+
+    const message = error.message || "";
+    return (
+      (message.includes("P2021") ||
+        message.toLowerCase().includes("does not exist") ||
+        message.toLowerCase().includes("relation")) &&
+      message.includes("HouseholdMemberRegistry")
+    );
+  };
+
+  const warnMissingHouseholdRegistryTable = () => {
+    if (warnedMissingHouseholdRegistryTable) {
+      return;
+    }
+    warnedMissingHouseholdRegistryTable = true;
+    console.warn(
+      "HouseholdMemberRegistry table is not available yet. Falling back to in-memory member registry. Run Prisma migrations to persist data."
+    );
+  };
+
+  const listHouseholdMembersForBuilding = async (buildingId: string) => {
+    if (repositoryContext.prisma) {
+      try {
+        const rows = await repositoryContext.prisma.householdMemberRegistry.findMany({
+          where: { buildingId },
+          select: {
+            houseNumber: true,
+            members: true,
+            updatedAt: true
+          }
+        });
+
+        return new Map(
+          rows.map((item) => [
+            normalizeHouseNumber(item.houseNumber),
+            {
+              buildingId,
+              houseNumber: normalizeHouseNumber(item.houseNumber),
+              members: item.members,
+              updatedAt: item.updatedAt.toISOString()
+            } satisfies HouseholdMemberRegistryRecord
+          ])
+        );
+      } catch (error) {
+        if (!isMissingHouseholdRegistryTable(error)) {
+          throw error;
+        }
+        warnMissingHouseholdRegistryTable();
+      }
+    }
+
+    const rows = new Map<string, HouseholdMemberRegistryRecord>();
+    for (const item of householdMembersByUnit.values()) {
+      if (item.buildingId !== buildingId) {
+        continue;
+      }
+      rows.set(normalizeHouseNumber(item.houseNumber), item);
+    }
+
+    return rows;
+  };
+
+  const upsertHouseholdMembersForBuilding = async (
+    buildingId: string,
+    rows: Array<{ houseNumber: string; members: number }>
+  ) => {
+    if (rows.length === 0) {
+      return;
+    }
+
+    const normalized = rows.map((item) => ({
+      houseNumber: normalizeHouseNumber(item.houseNumber),
+      members: item.members
+    }));
+
+    if (repositoryContext.prisma) {
+      try {
+        await repositoryContext.prisma.$transaction(
+          normalized.map((item) =>
+            repositoryContext.prisma!.householdMemberRegistry.upsert({
+              where: {
+                buildingId_houseNumber: {
+                  buildingId,
+                  houseNumber: item.houseNumber
+                }
+              },
+              update: {
+                members: item.members
+              },
+              create: {
+                buildingId,
+                houseNumber: item.houseNumber,
+                members: item.members
+              }
+            })
+          )
+        );
+      } catch (error) {
+        if (!isMissingHouseholdRegistryTable(error)) {
+          throw error;
+        }
+        warnMissingHouseholdRegistryTable();
+      }
+    }
+
+    const now = new Date().toISOString();
+    for (const item of normalized) {
+      householdMembersByUnit.set(memberRegistryKey(buildingId, item.houseNumber), {
+        buildingId,
+        houseNumber: item.houseNumber,
+        members: item.members,
+        updatedAt: now
+      });
+    }
+  };
+  const passwordRecoveryRateWindow = new Map<
+    string,
+    { windowStartMs: number; count: number }
+  >();
+  const secureCookieOverride = parseBooleanEnv(process.env.HOUSING_COOKIE_SECURE);
+
+  const shouldUseSecureCookies = (req: express.Request): boolean => {
+    if (secureCookieOverride !== null) {
+      return secureCookieOverride;
+    }
+
+    if (req.secure) {
+      return true;
+    }
+
+    const forwardedProto = req.header("x-forwarded-proto");
+    if (!forwardedProto) {
+      return false;
+    }
+
+    return forwardedProto
+      .split(",")
+      .some((part) => part.trim().toLowerCase() === "https");
+  };
+
+  const rememberRentStkRequest = (
+    checkoutRequestId: string,
+    data: PendingRentStkRequest
+  ) => {
+    pendingRentStkRequests.set(checkoutRequestId, data);
+    if (pendingRentStkRequests.size <= 1000) {
+      return;
+    }
+
+    const now = Date.now();
+    for (const [key, value] of pendingRentStkRequests.entries()) {
+      if (now - new Date(value.initiatedAt).getTime() > 24 * 60 * 60 * 1000) {
+        pendingRentStkRequests.delete(key);
+      }
+    }
+  };
+
+  const rememberUtilityStkRequest = (
+    checkoutRequestId: string,
+    data: PendingUtilityStkRequest
+  ) => {
+    pendingUtilityStkRequests.set(checkoutRequestId, data);
+    if (pendingUtilityStkRequests.size <= 1000) {
+      return;
+    }
+
+    const now = Date.now();
+    for (const [key, value] of pendingUtilityStkRequests.entries()) {
+      if (now - new Date(value.initiatedAt).getTime() > 24 * 60 * 60 * 1000) {
+        pendingUtilityStkRequests.delete(key);
+      }
+    }
+  };
+
+  const rememberResidentPasswordRecoveryRequest = (
+    request: ResidentPasswordRecoveryRequestRecord
+  ) => {
+    residentPasswordRecoveryRequests.set(request.id, request);
+
+    if (residentPasswordRecoveryRequests.size <= 2_000) {
+      return;
+    }
+
+    const entries = [...residentPasswordRecoveryRequests.values()].sort((a, b) =>
+      b.requestedAt.localeCompare(a.requestedAt)
+    );
+    const keep = entries.slice(0, 2_000);
+    residentPasswordRecoveryRequests.clear();
+    for (const item of keep) {
+      residentPasswordRecoveryRequests.set(item.id, item);
+    }
+  };
+
+  const listResidentPasswordRecoveryRequests = (
+    status?: ResidentPasswordRecoveryStatus,
+    limit = 500
+  ) => {
+    const boundedLimit = Math.min(Math.max(Math.floor(limit), 1), 2_000);
+    return [...residentPasswordRecoveryRequests.values()]
+      .filter((item) => !status || item.status === status)
+      .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
+      .slice(0, boundedLimit);
+  };
+
   const wifiService = new WifiAccessService({
     callbackToken,
     packages: wifiPackages,
@@ -426,34 +788,6 @@ async function bootstrap() {
     }
   });
 
-  const includeDevOtpInResponse =
-    process.env.NODE_ENV !== "production" ||
-    process.env.EXPOSE_DEV_OTP === "true";
-  const africasTalkingApiKey = process.env.AFRICASTALKING_API_KEY?.trim();
-  const africasTalkingUsername = process.env.AFRICASTALKING_USERNAME?.trim();
-  const hasSmsOtpProvider = Boolean(africasTalkingApiKey && africasTalkingUsername);
-
-  if (africasTalkingApiKey && !africasTalkingUsername) {
-    console.warn(
-      "AFRICASTALKING_API_KEY is set but AFRICASTALKING_USERNAME is missing. OTP SMS delivery is disabled."
-    );
-  }
-
-  const residentAuthService = new ResidentAuthService({
-    includeDevOtpInResponse: hasSmsOtpProvider ? false : includeDevOtpInResponse,
-    otpSender: hasSmsOtpProvider
-      ? async ({ phoneNumber, otpCode, houseNumber, buildingId }) => {
-          await sendAfricasTalkingOtpSms({
-            apiKey: africasTalkingApiKey ?? "",
-            username: africasTalkingUsername ?? "",
-            phoneNumber,
-            otpCode,
-            houseNumber,
-            buildingId
-          });
-        }
-      : undefined
-  });
   const adminAuthService = new AdminAuthService({
     landlordToken,
     adminToken,
@@ -471,6 +805,40 @@ async function bootstrap() {
   const userSupportService = new UserSupportService();
   const rentLedgerService = new RentLedgerService();
   const utilityBillingService = new UtilityBillingService();
+  const paymentAccessService = new PaymentAccessService();
+  const appStateService = repositoryContext.prisma
+    ? new AppStateService(repositoryContext.prisma)
+    : null;
+
+  if (appStateService) {
+    try {
+      const [rentState, utilityState] = await Promise.all([
+        appStateService.getJson<RentLedgerPersistedState>(RENT_LEDGER_STATE_KEY),
+        appStateService.getJson<UtilityBillingPersistedState>(
+          UTILITY_BILLING_STATE_KEY
+        )
+      ]);
+
+      rentLedgerService.importState(rentState);
+      utilityBillingService.importState(utilityState);
+
+      rentLedgerService.setStateChangeHandler((state) =>
+        appStateService.queueSetJson(RENT_LEDGER_STATE_KEY, state)
+      );
+      utilityBillingService.setStateChangeHandler((state) =>
+        appStateService.queueSetJson(UTILITY_BILLING_STATE_KEY, state)
+      );
+    } catch (error) {
+      console.error(
+        "Failed to load persisted rent/utility billing state from database.",
+        error
+      );
+    }
+  } else {
+    console.warn(
+      "Billing state persistence is disabled because Prisma is unavailable (memory mode)."
+    );
+  }
 
   if (!userAccountService) {
     console.warn(
@@ -503,50 +871,50 @@ async function bootstrap() {
     req: express.Request,
     res: express.Response
   ) => {
-    const token = readResidentSessionToken(req);
-    const session = residentAuthService.getSession(token);
-
-    if (session) {
-      return session;
+    if (!userAccountService || !repositoryContext.prisma) {
+      res.status(503).json({
+        error: "Resident authentication requires database-backed user accounts."
+      });
+      return null;
     }
 
-    if (userAccountService && repositoryContext.prisma) {
-      const userSession = await userAccountService.getSession(readUserSessionToken(req));
-      if (userSession) {
-        const activeTenancy = await repositoryContext.prisma.tenancy.findFirst({
-          where: {
-            userId: userSession.userId,
-            active: true
-          },
-          include: {
-            unit: {
-              select: { houseNumber: true }
-            }
-          },
-          orderBy: { createdAt: "desc" }
-        });
+    const userSession = await userAccountService.getSession(readUserSessionToken(req));
+    if (!userSession) {
+      res.status(401).json({ error: "Resident authentication required" });
+      return null;
+    }
 
-        if (!activeTenancy) {
-          res.status(403).json({
-            error: "Tenant approval required before resident access."
-          });
-          return null;
+    const activeTenancy = await repositoryContext.prisma.tenancy.findFirst({
+      where: {
+        userId: userSession.userId,
+        active: true
+      },
+      include: {
+        unit: {
+          select: { houseNumber: true }
         }
+      },
+      orderBy: { createdAt: "desc" }
+    });
 
-        return {
-          token: "user-session",
-          role: "resident" as const,
-          buildingId: activeTenancy.buildingId,
-          houseNumber: activeTenancy.unit.houseNumber,
-          phoneNumber: userSession.phone,
-          createdAt: new Date().toISOString(),
-          expiresAt: userSession.expiresAt
-        };
-      }
+    if (!activeTenancy) {
+      res.status(403).json({
+        error: "Tenant approval required before resident access."
+      });
+      return null;
     }
 
-    res.status(401).json({ error: "Resident authentication required" });
-    return null;
+    return {
+      token: "user-session",
+      role: "resident" as const,
+      userId: userSession.userId,
+      buildingId: activeTenancy.buildingId,
+      houseNumber: activeTenancy.unit.houseNumber,
+      phoneNumber: userSession.phone,
+      mustChangePassword: userSession.mustChangePassword,
+      createdAt: new Date().toISOString(),
+      expiresAt: userSession.expiresAt
+    };
   };
 
   const getUserSession = async (
@@ -579,6 +947,68 @@ async function bootstrap() {
   const resolveOptionalUserSession = async (req: express.Request) => {
     if (!userAccountService) return null;
     return userAccountService.getSession(readUserSessionToken(req));
+  };
+
+  const resolveLandlordAccessContext = async (
+    req: express.Request,
+    res: express.Response
+  ) => {
+    const legacySession = adminAuthService.getSession(readAdminSessionToken(req));
+    if (legacySession && adminAuthService.hasRole(legacySession, "landlord")) {
+      return {
+        role: legacySession.role,
+        userId: undefined as string | undefined,
+        userSession: null
+      };
+    }
+
+    const userSession = await resolveOptionalUserSession(req);
+    if (userSession && hasUserRoleAtLeast(userSession.role, "landlord")) {
+      return {
+        role: userSession.role,
+        userId: userSession.userId,
+        userSession
+      };
+    }
+
+    res.status(401).json({ error: "Landlord authorization required" });
+    return null;
+  };
+
+  const canManageBuildingFromLandlordContext = async (
+    context: {
+      role: string;
+      userSession: Awaited<ReturnType<typeof resolveOptionalUserSession>>;
+    },
+    buildingId: string
+  ) => {
+    if (context.role === "admin" || context.role === "root_admin") {
+      return true;
+    }
+
+    if (!context.userSession || !userAccountService) {
+      // Legacy landlord sessions do not have userId linkage in current auth service.
+      return true;
+    }
+
+    return userAccountService.canAccessBuilding(context.userSession, buildingId);
+  };
+
+  const requirePaymentChannelEnabled = (
+    res: express.Response,
+    session: { buildingId: string },
+    channel: "rent" | "water" | "electricity"
+  ) => {
+    if (paymentAccessService.isEnabled(session.buildingId, channel)) {
+      return true;
+    }
+
+    const label =
+      channel === "rent" ? "Rent" : channel === "water" ? "Water" : "Electricity";
+    res.status(403).json({
+      error: `${label} payments are currently disabled by your landlord for this building.`
+    });
+    return false;
   };
 
   const resolveTenantByHouseAndPhone = async (input: {
@@ -659,6 +1089,140 @@ async function bootstrap() {
     };
   };
 
+  const buildLandlordUtilityRegistryRows = async (
+    buildingId: string,
+    houseNumbers: string[]
+  ): Promise<LandlordUtilityRegistryRow[]> => {
+    const normalizedHouses = Array.from(
+      new Set(houseNumbers.map((item) => normalizeHouseNumber(item)).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b));
+
+    const houseSet = new Set(normalizedHouses);
+    const meterMap = new Map<
+      string,
+      {
+        waterMeterNumber?: string;
+        waterMeterUpdatedAt?: string;
+        electricityMeterNumber?: string;
+        electricityMeterUpdatedAt?: string;
+      }
+    >();
+
+    for (const meter of utilityBillingService.listMeters()) {
+      const houseNumber = normalizeHouseNumber(meter.houseNumber);
+      if (!houseSet.has(houseNumber)) {
+        continue;
+      }
+
+      const current = meterMap.get(houseNumber) ?? {};
+      if (meter.utilityType === "water") {
+        current.waterMeterNumber = meter.meterNumber;
+        current.waterMeterUpdatedAt = meter.updatedAt;
+      } else {
+        current.electricityMeterNumber = meter.meterNumber;
+        current.electricityMeterUpdatedAt = meter.updatedAt;
+      }
+      meterMap.set(houseNumber, current);
+    }
+
+    const residentByHouse = new Map<
+      string,
+      {
+        residentName: string;
+        residentPhone: string;
+        residentUserId: string;
+      }
+    >();
+
+    if (repositoryContext.prisma) {
+      const tenancies = await repositoryContext.prisma.tenancy.findMany({
+        where: {
+          buildingId,
+          active: true
+        },
+        select: {
+          userId: true,
+          createdAt: true,
+          user: {
+            select: {
+              fullName: true,
+              phone: true
+            }
+          },
+          unit: {
+            select: {
+              houseNumber: true
+            }
+          }
+        },
+        orderBy: { createdAt: "desc" }
+      });
+
+      for (const tenancy of tenancies) {
+        const houseNumber = normalizeHouseNumber(tenancy.unit.houseNumber);
+        if (!houseSet.has(houseNumber) || residentByHouse.has(houseNumber)) {
+          continue;
+        }
+
+        residentByHouse.set(houseNumber, {
+          residentName: tenancy.user.fullName,
+          residentPhone: tenancy.user.phone,
+          residentUserId: tenancy.userId
+        });
+      }
+    }
+
+    const memberRegistryByHouse = await listHouseholdMembersForBuilding(
+      buildingId
+    );
+
+    return normalizedHouses.map((houseNumber) => {
+      const meter = meterMap.get(houseNumber);
+      const resident = residentByHouse.get(houseNumber);
+      const registryRecord = memberRegistryByHouse.get(houseNumber);
+      const defaultMembers = resident ? 1 : 0;
+
+      return {
+        houseNumber,
+        residentName: resident?.residentName,
+        residentPhone: resident?.residentPhone,
+        residentUserId: resident?.residentUserId,
+        hasActiveResident: Boolean(resident),
+        householdMembers: registryRecord?.members ?? defaultMembers,
+        waterMeterNumber: meter?.waterMeterNumber,
+        electricityMeterNumber: meter?.electricityMeterNumber,
+        waterMeterUpdatedAt: meter?.waterMeterUpdatedAt,
+        electricityMeterUpdatedAt: meter?.electricityMeterUpdatedAt
+      };
+    });
+  };
+
+  const recordResidentUtilityPaymentAndNotify = (
+    utilityType: "water" | "electricity",
+    houseNumber: string,
+    input: Parameters<UtilityBillingService["recordPayment"]>[2]
+  ) => {
+    const data = utilityBillingService.recordPayment(utilityType, houseNumber, input);
+    const utilityLabel = utilityType === "water" ? "Water" : "Electricity";
+    userSupportService.enqueueSystemNotifications(houseNumber, [
+      {
+        title: utilityLabel + " Payment Received",
+        message:
+          utilityLabel +
+          " payment of KSh " +
+          Math.round(input.amountKsh).toLocaleString("en-US") +
+          " has been applied to your " +
+          data.bill.billingMonth +
+          " bill.",
+        level: "success",
+        source: "system",
+        dedupeKey: "utility-payment-" + utilityType + "-" + data.event.id
+      }
+    ]);
+
+    return data;
+  };
+
   app.use(
     cors({
       origin: process.env.CORS_ORIGIN ?? "*"
@@ -666,6 +1230,23 @@ async function bootstrap() {
   );
   app.use(express.json({ limit: "1mb" }));
   app.use(express.static(publicDir));
+  app.use((req, res, next) => {
+    const pathValue = req.path ?? "";
+    if (
+      pathValue === "/landlord" ||
+      pathValue === "/landlord/login" ||
+      pathValue === "/admin" ||
+      pathValue === "/admin/login" ||
+      pathValue.startsWith("/api/auth/") ||
+      pathValue.startsWith("/api/landlord/") ||
+      pathValue.startsWith("/api/user/")
+    ) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+    }
+    next();
+  });
 
   app.get("/", (_req, res) => {
     res.sendFile(path.join(publicDir, "index.html"));
@@ -802,7 +1383,7 @@ async function bootstrap() {
       try {
         const session = await userAccountService.createSession(parsed);
         if (!session) {
-          return res.status(401).json({ error: "Invalid email or password" });
+          return res.status(401).json({ error: "Invalid email/phone or password" });
         }
 
         const expiresAtMs = new Date(session.expiresAt).getTime();
@@ -810,7 +1391,7 @@ async function bootstrap() {
         res.cookie(userSessionCookieName, session.token, {
           httpOnly: true,
           sameSite: "lax",
-          secure: process.env.NODE_ENV === "production",
+          secure: shouldUseSecureCookies(req),
           path: "/",
           maxAge: maxAgeMs
         });
@@ -866,58 +1447,201 @@ async function bootstrap() {
     return res.json({ data: { signedOut: true } });
   });
 
-  app.post("/api/auth/resident/request-otp", async (req, res, next) => {
+  app.post("/api/auth/resident/setup-password", async (req, res, next) => {
     try {
-      const parsed = residentOtpRequestSchema.parse(req.body);
+      if (!userAccountService || !repositoryContext.prisma) {
+        return res.status(503).json({
+          error: "Resident auth setup requires database-backed user accounts."
+        });
+      }
+
+      const parsed = residentPasswordSetupSchema.parse(req.body);
       const building = await store.getBuilding(parsed.buildingId);
       if (!building) {
         return res.status(404).json({ error: "Building not found" });
       }
 
-      try {
-        const data = await residentAuthService.requestOtp(parsed);
-        return res.json({
-          data,
-          message: `OTP sent to ${data.phoneMask}`
-        });
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "Unable to create OTP challenge";
-        if (message.startsWith("Wait ")) {
-          return res.status(429).json({ error: message });
-        }
-        if (message === "OTP_DELIVERY_FAILED") {
-          return res.status(502).json({
-            error:
-              "Unable to deliver OTP right now. Confirm SMS provider settings and retry."
-          });
-        }
+      const session = await userAccountService.setupResidentPasswordAndCreateSession(
+        parsed
+      );
 
-        throw error;
-      }
+      const expiresAtMs = new Date(session.expiresAt).getTime();
+      const maxAgeMs = Math.max(0, expiresAtMs - Date.now());
+      res.cookie(userSessionCookieName, session.token, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: shouldUseSecureCookies(req),
+        path: "/",
+        maxAge: maxAgeMs
+      });
+
+      return res.status(201).json({
+        data: {
+          token: session.token,
+          role: "resident",
+          buildingId: parsed.buildingId,
+          houseNumber: parsed.houseNumber.trim().toUpperCase(),
+          phoneMask: maskPhone(session.phone),
+          expiresAt: session.expiresAt,
+          mustChangePassword: session.mustChangePassword
+        }
+      });
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to setup resident password";
+      if (message === "HOUSE_NOT_FOUND") {
+        return res.status(404).json({
+          error:
+            "House number not found for this building. Confirm the house number or contact management."
+        });
+      }
+      if (message === "HOUSE_INACTIVE") {
+        return res.status(403).json({
+          error: "This house is marked inactive. Contact management."
+        });
+      }
+      if (message === "HOUSE_OCCUPIED") {
+        return res.status(409).json({
+          error: "This house is already linked to another phone number."
+        });
+      }
+      if (message === "TENANCY_NOT_FOUND") {
+        return res.status(404).json({
+          error: "Active tenancy not found for the provided building, house number, and phone."
+        });
+      }
+      if (message === "ACCOUNT_DISABLED") {
+        return res.status(403).json({ error: "Account is disabled. Contact support." });
+      }
       return next(error);
     }
   });
 
-  app.post("/api/auth/resident/verify-otp", (req, res, next) => {
+  app.post("/api/auth/resident/login-phone", async (req, res, next) => {
     try {
-      const parsed = residentOtpVerifySchema.parse(req.body);
-      const verified = residentAuthService.verifyOtp(parsed);
-
-      if (!verified) {
-        return res.status(401).json({ error: "Invalid or expired OTP" });
+      if (!userAccountService || !repositoryContext.prisma) {
+        return res.status(503).json({
+          error: "Resident login requires database-backed user accounts."
+        });
       }
+
+      const parsed = residentPhoneLoginSchema.parse(req.body);
+      const session = await userAccountService.createResidentPhoneSession(parsed);
+      if (!session) {
+        return res.status(401).json({ error: "Invalid phone, house number, or password" });
+      }
+
+      const expiresAtMs = new Date(session.expiresAt).getTime();
+      const maxAgeMs = Math.max(0, expiresAtMs - Date.now());
+      res.cookie(userSessionCookieName, session.token, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: shouldUseSecureCookies(req),
+        path: "/",
+        maxAge: maxAgeMs
+      });
 
       return res.json({
         data: {
-          token: verified.session.token,
-          role: verified.session.role,
-          buildingId: verified.session.buildingId,
-          houseNumber: verified.session.houseNumber,
-          phoneMask: maskPhone(verified.session.phoneNumber),
-          expiresAt: verified.session.expiresAt
+          token: session.token,
+          role: "resident",
+          buildingId: parsed.buildingId,
+          houseNumber: parsed.houseNumber.trim().toUpperCase(),
+          phoneMask: maskPhone(session.phone),
+          expiresAt: session.expiresAt,
+          mustChangePassword: session.mustChangePassword
         }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to login resident";
+      if (message === "TENANCY_NOT_FOUND") {
+        return res.status(404).json({
+          error: "Active tenancy not found for the provided building, house number, and phone."
+        });
+      }
+      if (message === "LOGIN_RATE_LIMITED") {
+        return res.status(429).json({ error: "Too many login attempts. Try again later." });
+      }
+      if (message === "ACCOUNT_DISABLED") {
+        return res.status(403).json({ error: "Account is disabled. Contact support." });
+      }
+      return next(error);
+    }
+  });
+
+  app.post("/api/auth/resident/password-recovery/request", async (req, res, next) => {
+    try {
+      if (!userAccountService || !repositoryContext.prisma) {
+        return res.status(503).json({
+          error: "Password recovery requires database-backed user accounts."
+        });
+      }
+
+      const parsed = residentPasswordRecoveryRequestSchema.parse(req.body ?? {});
+      const building = await store.getBuilding(parsed.buildingId);
+      if (!building) {
+        return res.status(404).json({ error: "Building not found" });
+      }
+
+      const houseNumber = parsed.houseNumber.trim().toUpperCase();
+      const phoneNumber = normalizeKenyaPhone(parsed.phoneNumber);
+      const recoveryKey = `${parsed.buildingId}:${houseNumber}:${phoneNumber}`;
+      const now = Date.now();
+      const rateSnapshot = passwordRecoveryRateWindow.get(recoveryKey);
+      if (
+        rateSnapshot &&
+        now - rateSnapshot.windowStartMs < PASSWORD_RECOVERY_RATE_WINDOW_MS
+      ) {
+        if (rateSnapshot.count >= PASSWORD_RECOVERY_RATE_MAX_PER_KEY) {
+          return res.status(429).json({
+            error: "Too many recovery requests. Please wait before trying again."
+          });
+        }
+        rateSnapshot.count += 1;
+      } else {
+        passwordRecoveryRateWindow.set(recoveryKey, {
+          windowStartMs: now,
+          count: 1
+        });
+      }
+
+      const existingPending = [...residentPasswordRecoveryRequests.values()].find(
+        (item) =>
+          item.status === "pending" &&
+          item.buildingId === parsed.buildingId &&
+          item.houseNumber === houseNumber &&
+          item.phoneNumber === phoneNumber
+      );
+
+      if (existingPending) {
+        return res.status(202).json({
+          data: {
+            requestId: existingPending.id,
+            status: existingPending.status,
+            requestedAt: existingPending.requestedAt
+          },
+          message:
+            "Recovery request already pending. Management will contact you after verification."
+        });
+      }
+
+      const request: ResidentPasswordRecoveryRequestRecord = {
+        id: randomUUID(),
+        buildingId: parsed.buildingId,
+        houseNumber,
+        phoneNumber,
+        note: parsed.note?.trim() || undefined,
+        status: "pending",
+        requestedAt: new Date().toISOString()
+      };
+      rememberResidentPasswordRecoveryRequest(request);
+
+      return res.status(202).json({
+        data: {
+          requestId: request.id,
+          status: request.status,
+          requestedAt: request.requestedAt
+        },
+        message: "Recovery request received. Management will verify and reset your password."
       });
     } catch (error) {
       return next(error);
@@ -936,13 +1660,66 @@ async function bootstrap() {
         buildingId: session.buildingId,
         houseNumber: session.houseNumber,
         phoneMask: maskPhone(session.phoneNumber),
+        mustChangePassword: Boolean(session.mustChangePassword),
         expiresAt: session.expiresAt
       }
     });
   });
 
-  app.post("/api/auth/resident/logout", (req, res) => {
-    residentAuthService.revokeSession(readResidentSessionToken(req));
+  app.post("/api/auth/resident/change-password", async (req, res, next) => {
+    try {
+      if (!userAccountService || !repositoryContext.prisma) {
+        return res.status(503).json({
+          error: "Resident password change requires database-backed user accounts."
+        });
+      }
+
+      const session = await getResidentSession(req, res);
+      if (!session) {
+        return;
+      }
+
+      const parsed = residentChangePasswordSchema.parse(req.body ?? {});
+      const nextSession = await userAccountService.changeResidentPassword(
+        { userId: session.userId },
+        parsed
+      );
+
+      const expiresAtMs = new Date(nextSession.expiresAt).getTime();
+      const maxAgeMs = Math.max(0, expiresAtMs - Date.now());
+      res.cookie(userSessionCookieName, nextSession.token, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: shouldUseSecureCookies(req),
+        path: "/",
+        maxAge: maxAgeMs
+      });
+
+      return res.json({
+        data: {
+          token: nextSession.token,
+          role: "resident",
+          buildingId: session.buildingId,
+          houseNumber: session.houseNumber,
+          phoneMask: maskPhone(nextSession.phone),
+          expiresAt: nextSession.expiresAt,
+          mustChangePassword: nextSession.mustChangePassword
+        }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to change password";
+      if (message === "ACCOUNT_DISABLED") {
+        return res.status(403).json({ error: "Account is disabled. Contact support." });
+      }
+      return next(error);
+    }
+  });
+
+  app.post("/api/auth/resident/logout", async (req, res) => {
+    if (userAccountService) {
+      await userAccountService.logout(readUserSessionToken(req));
+    }
+    res.clearCookie(userSessionCookieName, { path: "/" });
     return res.json({ data: { signedOut: true } });
   });
 
@@ -961,7 +1738,7 @@ async function bootstrap() {
       res.cookie(adminSessionCookieName, session.token, {
         httpOnly: true,
         sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
+        secure: shouldUseSecureCookies(req),
         path: "/",
         maxAge: maxAgeMs
       });
@@ -997,6 +1774,174 @@ async function bootstrap() {
     return res.json({ data: { signedOut: true } });
   });
 
+  app.post("/api/admin/auth/resident/password-reset", async (req, res, next) => {
+    try {
+      const admin = getAdminSession(req, res, "admin");
+      if (!admin) {
+        return;
+      }
+
+      if (!userAccountService) {
+        return res.status(503).json({
+          error: "User account service unavailable. Database connection is required."
+        });
+      }
+
+      const parsed = residentAdminPasswordResetSchema.parse(req.body);
+      const data = await userAccountService.resetResidentPasswordByTenancy(parsed);
+      return res.json({
+        data,
+        reviewedByRole: admin.role
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to reset resident password";
+      if (message === "TENANCY_NOT_FOUND") {
+        return res.status(404).json({
+          error: "Active tenancy not found for the provided building, house number, and phone."
+        });
+      }
+      return next(error);
+    }
+  });
+
+  app.get(
+    "/api/admin/auth/resident/password-recovery-requests",
+    async (req, res, next) => {
+      try {
+        const admin = getAdminSession(req, res, "admin");
+        if (!admin) {
+          return;
+        }
+
+        const statusRaw =
+          typeof req.query.status === "string" ? req.query.status : undefined;
+        const status: ResidentPasswordRecoveryStatus | undefined =
+          statusRaw === "pending" ||
+          statusRaw === "approved" ||
+          statusRaw === "rejected"
+            ? statusRaw
+            : undefined;
+
+        const limitRaw = Number(req.query.limit ?? 500);
+        const limit = Number.isFinite(limitRaw)
+          ? Math.min(Math.max(limitRaw, 1), 2_000)
+          : 500;
+
+        const data = listResidentPasswordRecoveryRequests(status, limit).map(
+          (item) => ({
+            ...item,
+            phoneMask: maskPhone(item.phoneNumber)
+          })
+        );
+
+        return res.json({
+          data,
+          role: admin.role
+        });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
+  app.patch(
+    "/api/admin/auth/resident/password-recovery-requests/:requestId",
+    async (req, res, next) => {
+      try {
+        const admin = getAdminSession(req, res, "admin");
+        if (!admin) {
+          return;
+        }
+
+        if (!userAccountService) {
+          return res.status(503).json({
+            error: "User account service unavailable. Database connection is required."
+          });
+        }
+
+        const parsed = residentPasswordRecoveryReviewSchema.parse(req.body ?? {});
+        const existing = residentPasswordRecoveryRequests.get(req.params.requestId);
+        if (!existing) {
+          return res
+            .status(404)
+            .json({ error: "Password recovery request not found." });
+        }
+
+        if (existing.status !== "pending") {
+          return res.status(409).json({
+            error: "Password recovery request has already been reviewed."
+          });
+        }
+
+        const reviewerSession = await resolveOptionalUserSession(req);
+        const reviewedByUserId =
+          reviewerSession && hasUserRoleAtLeast(reviewerSession.role, "admin")
+            ? reviewerSession.userId
+            : undefined;
+        const reviewedAt = new Date().toISOString();
+
+        if (parsed.action === "reject") {
+          const updated: ResidentPasswordRecoveryRequestRecord = {
+            ...existing,
+            status: "rejected",
+            reviewedAt,
+            reviewedByRole: admin.role,
+            reviewedByUserId,
+            reviewerNote: parsed.note?.trim() || undefined
+          };
+          rememberResidentPasswordRecoveryRequest(updated);
+          return res.json({
+            data: updated,
+            role: admin.role
+          });
+        }
+
+        try {
+          const reset = await userAccountService.resetResidentPasswordByTenancy({
+            buildingId: existing.buildingId,
+            houseNumber: existing.houseNumber,
+            phoneNumber: existing.phoneNumber,
+            temporaryPassword: parsed.temporaryPassword ?? ""
+          });
+
+          const updated: ResidentPasswordRecoveryRequestRecord = {
+            ...existing,
+            status: "approved",
+            reviewedAt,
+            reviewedByRole: admin.role,
+            reviewedByUserId,
+            reviewerNote: parsed.note?.trim() || undefined,
+            temporaryPasswordIssuedAt: reviewedAt
+          };
+          rememberResidentPasswordRecoveryRequest(updated);
+
+          return res.json({
+            data: {
+              request: updated,
+              reset
+            },
+            role: admin.role
+          });
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Unable to reset resident password.";
+          if (message === "TENANCY_NOT_FOUND") {
+            return res.status(404).json({
+              error:
+                "Active tenancy not found for the provided building, house number, and phone."
+            });
+          }
+          throw error;
+        }
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
   app.post("/api/auth/landlord/login", (req, res, next) => {
     try {
       const parsed = adminLoginSchema.parse(req.body);
@@ -1012,7 +1957,7 @@ async function bootstrap() {
       res.cookie(adminSessionCookieName, session.token, {
         httpOnly: true,
         sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
+        secure: shouldUseSecureCookies(req),
         path: "/",
         maxAge: maxAgeMs
       });
@@ -1113,6 +2058,99 @@ async function bootstrap() {
       return next(error);
     }
   });
+
+  app.get("/api/landlord/payment-access-controls", async (req, res, next) => {
+    try {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) {
+        return;
+      }
+
+      const queryBuildingId =
+        typeof req.query.buildingId === "string" ? req.query.buildingId.trim() : "";
+      const requestedBuildingId = queryBuildingId || undefined;
+
+      const rawBuildings = await store.listBuildings();
+      let visibleBuildings = rawBuildings;
+      if (context.userSession && userAccountService) {
+        const visibleIds = await userAccountService.listVisibleBuildingIds(
+          context.userSession
+        );
+        visibleBuildings = rawBuildings.filter(
+          (item) => !visibleIds || visibleIds.has(item.id)
+        );
+      }
+
+      if (requestedBuildingId) {
+        visibleBuildings = visibleBuildings.filter(
+          (item) => item.id === requestedBuildingId
+        );
+      }
+
+      const data = visibleBuildings.map((building) => ({
+        ...paymentAccessService.getForBuilding(building.id),
+        buildingName: building.name
+      }));
+
+      return res.json({
+        data,
+        role: context.role
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.patch(
+    "/api/landlord/payment-access-controls/:buildingId",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) {
+          return;
+        }
+
+        const buildingId = req.params.buildingId?.trim();
+        const building = buildingId ? await store.getBuilding(buildingId) : null;
+        if (!building) {
+          return res.status(404).json({ error: "Building not found" });
+        }
+
+        const hasAccess = await canManageBuildingFromLandlordContext(
+          context,
+          building.id
+        );
+        if (!hasAccess) {
+          return res.status(403).json({ error: "Building access denied" });
+        }
+
+        const parsed = landlordPaymentAccessUpdateSchema.parse(req.body ?? {});
+        const data = paymentAccessService.updateForBuilding(
+          building.id,
+          {
+            rentEnabled: parsed.rentEnabled,
+            waterEnabled: parsed.waterEnabled,
+            electricityEnabled: parsed.electricityEnabled,
+            note: parsed.note
+          },
+          {
+            role: context.role,
+            userId: context.userId
+          }
+        );
+
+        return res.json({
+          data: {
+            ...data,
+            buildingName: building.name
+          },
+          role: context.role
+        });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
 
   app.get("/api/buildings/:buildingId", async (req, res, next) => {
     try {
@@ -1487,10 +2525,232 @@ async function bootstrap() {
     });
   });
 
+  app.get("/api/user/payment-access-controls", async (req, res) => {
+    const session = await getResidentSession(req, res);
+    if (!session) {
+      return;
+    }
+
+    const data = paymentAccessService.getForBuilding(session.buildingId);
+    return res.json({ data });
+  });
+
+  app.post("/api/user/rent/payments/mpesa/initialize", async (req, res, next) => {
+    try {
+      const session = await getResidentSession(req, res);
+      if (!session) {
+        return;
+      }
+
+      if (!requirePaymentChannelEnabled(res, session, "rent")) {
+        return;
+      }
+
+      const parsed = initializeRentMpesaPaymentSchema.parse(req.body);
+      const mpesaConfig = getMpesaConfig("/api/payments/mpesa/rent-callback");
+      if (!mpesaConfig.enabled) {
+        return res.status(503).json({
+          error: "M-PESA STK is disabled. Set MPESA_STK_ENABLED=true to activate."
+        });
+      }
+
+      if (!mpesaConfig.isConfigured) {
+        return res.status(503).json({
+          error: "M-PESA STK is not fully configured.",
+          missing: mpesaConfig.missing
+        });
+      }
+
+      const paymentPhone = parsed.phoneNumber?.trim() || session.phoneNumber;
+      const formattedPhone = formatDarajaMsisdn(paymentPhone);
+      if (!formattedPhone) {
+        return res.status(400).json({
+          error: "Invalid Kenyan phone number for M-PESA STK push."
+        });
+      }
+
+      const initiatedAt = new Date().toISOString();
+      const billingMonth =
+        parsed.billingMonth ??
+        `${new Date(initiatedAt).getUTCFullYear()}-${String(
+          new Date(initiatedAt).getUTCMonth() + 1
+        ).padStart(2, "0")}`;
+
+      const callbackUrl = mpesaConfig.callbackUrl.includes("token=")
+        ? mpesaConfig.callbackUrl
+        : appendQueryParam(mpesaConfig.callbackUrl, "token", mpesaRentCallbackToken);
+
+      const accountReference =
+        session.houseNumber.replace(/[^A-Za-z0-9]/g, "").slice(0, 12) ||
+        "CAPTYNRENT";
+      const client = new DarajaClient(mpesaConfig);
+      const result = await client.initiateStkPush({
+        amount: Math.round(parsed.amountKsh),
+        phoneNumber: formattedPhone,
+        accountReference,
+        transactionDesc: `CAPTYN Rent ${billingMonth}`,
+        callbackUrl
+      });
+
+      const checkoutRequestId =
+        typeof result.CheckoutRequestID === "string"
+          ? result.CheckoutRequestID.trim()
+          : "";
+      if (!checkoutRequestId) {
+        return res.status(502).json({
+          error: "M-PESA did not return a checkout request ID."
+        });
+      }
+
+      const userSession = userAccountService
+        ? await userAccountService.getSession(readUserSessionToken(req))
+        : null;
+
+      rememberRentStkRequest(checkoutRequestId, {
+        houseNumber: session.houseNumber,
+        phoneNumber: normalizeKenyaPhone(paymentPhone),
+        amountKsh: Math.round(parsed.amountKsh),
+        billingMonth,
+        initiatedAt,
+        tenantUserId: userSession?.userId,
+        tenantName: userSession?.fullName
+      });
+
+      return res.status(202).json({
+        data: {
+          paymentMethod: parsed.paymentMethod,
+          checkoutRequestId,
+          merchantRequestId:
+            typeof result.MerchantRequestID === "string"
+              ? result.MerchantRequestID
+              : undefined,
+          responseCode: result.ResponseCode,
+          responseDescription: result.ResponseDescription,
+          customerMessage: result.CustomerMessage,
+          billingMonth,
+          amountKsh: Math.round(parsed.amountKsh),
+          phoneMask: maskPhone(normalizeKenyaPhone(paymentPhone))
+        }
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.post("/api/user/rent/payments/mpesa/verify", async (req, res, next) => {
+    try {
+      const session = await getResidentSession(req, res);
+      if (!session) {
+        return;
+      }
+
+      const parsed = verifyRentMpesaPaymentSchema.parse(req.body);
+      const pending = pendingRentStkRequests.get(parsed.checkoutRequestId);
+      if (!pending || pending.houseNumber !== session.houseNumber) {
+        return res.status(200).json({
+          data: {
+            checkoutRequestId: parsed.checkoutRequestId,
+            status: "unknown"
+          },
+          message:
+            "Payment request was not found in active verification queue. Refresh your rent ledger."
+        });
+      }
+
+      const throttleKey = `${session.houseNumber}:${parsed.checkoutRequestId}`;
+      const now = Date.now();
+      const rateSnapshot = mpesaVerifyWindow.get(throttleKey);
+      if (
+        rateSnapshot &&
+        now - rateSnapshot.windowStartMs < MPESA_VERIFY_RATE_WINDOW_MS
+      ) {
+        if (rateSnapshot.count >= MPESA_VERIFY_RATE_MAX_PER_ID) {
+          return res.status(429).json({
+            error: "Too many M-PESA verification attempts. Please wait a moment."
+          });
+        }
+        rateSnapshot.count += 1;
+      } else {
+        mpesaVerifyWindow.set(throttleKey, {
+          windowStartMs: now,
+          count: 1
+        });
+      }
+
+      const mpesaConfig = getMpesaConfig("/api/payments/mpesa/rent-callback");
+      if (!mpesaConfig.enabled || !mpesaConfig.isConfigured) {
+        return res.status(503).json({
+          error: "M-PESA STK is not configured.",
+          missing: mpesaConfig.missing
+        });
+      }
+
+      const client = new DarajaClient(mpesaConfig);
+      const queryResult = await client.queryStkPush(parsed.checkoutRequestId);
+      const resultCode = Number(queryResult?.ResultCode ?? Number.NaN);
+      const resultDesc = String(
+        queryResult?.ResultDesc || queryResult?.ResponseDescription || ""
+      );
+
+      if (Number.isFinite(resultCode) && resultCode === 0) {
+        mpesaVerifyWindow.delete(throttleKey);
+
+        return res.json({
+          data: {
+            checkoutRequestId: parsed.checkoutRequestId,
+            status: "paid",
+            billingMonth: pending.billingMonth,
+            amountKsh: pending.amountKsh,
+            resultCode,
+            resultDesc: resultDesc || "Payment confirmed."
+          },
+          message:
+            "M-PESA confirmed. Your rent ledger updates automatically when callback is processed."
+        });
+      }
+
+      if (
+        Number.isFinite(resultCode) &&
+        TERMINAL_MPESA_FAILURE_CODES.has(resultCode)
+      ) {
+        pendingRentStkRequests.delete(parsed.checkoutRequestId);
+        mpesaVerifyWindow.delete(throttleKey);
+
+        return res.status(200).json({
+          data: {
+            checkoutRequestId: parsed.checkoutRequestId,
+            status: "failed",
+            billingMonth: pending.billingMonth,
+            amountKsh: pending.amountKsh,
+            resultCode,
+            resultDesc: resultDesc || "Payment was not completed."
+          }
+        });
+      }
+
+      return res.status(200).json({
+        data: {
+          checkoutRequestId: parsed.checkoutRequestId,
+          status: "pending",
+          billingMonth: pending.billingMonth,
+          amountKsh: pending.amountKsh,
+          resultCode: Number.isFinite(resultCode) ? resultCode : undefined,
+          resultDesc: resultDesc || "Awaiting M-PESA callback."
+        }
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   app.post("/api/user/rent/payments", async (req, res, next) => {
     try {
       const session = await getResidentSession(req, res);
       if (!session) {
+        return;
+      }
+
+      if (!requirePaymentChannelEnabled(res, session, "rent")) {
         return;
       }
 
@@ -1645,6 +2905,303 @@ async function bootstrap() {
     }
   });
 
+  app.post(
+    "/api/user/utilities/:utilityType/payments/mpesa/initialize",
+    async (req, res, next) => {
+      try {
+        const session = await getResidentSession(req, res);
+        if (!session) {
+          return;
+        }
+
+        const utilityType = utilityTypeSchema.parse(req.params.utilityType);
+        if (!requirePaymentChannelEnabled(res, session, utilityType)) {
+          return;
+        }
+
+        const parsed = initializeUtilityMpesaPaymentSchema.parse(req.body);
+        const bills = utilityBillingService.listBillsForHouse(
+          session.houseNumber,
+          utilityType,
+          120
+        );
+
+        if (bills.length === 0) {
+          return res.status(404).json({
+            error: `No ${utilityType} bills found for house ${session.houseNumber}.`
+          });
+        }
+
+        const targetBill = parsed.billingMonth
+          ? bills.find((item) => item.billingMonth === parsed.billingMonth)
+          : [...bills]
+              .filter((item) => item.balanceKsh > 0)
+              .sort((a, b) => a.billingMonth.localeCompare(b.billingMonth))[0];
+
+        if (!targetBill) {
+          return res.status(409).json({
+            error: parsed.billingMonth
+              ? `${utilityType} bill for ${parsed.billingMonth} is not available.`
+              : `No outstanding ${utilityType} bill found for house ${session.houseNumber}.`
+          });
+        }
+
+        if (targetBill.balanceKsh <= 0) {
+          return res.status(409).json({
+            error: `${utilityType} bill for ${targetBill.billingMonth} is already cleared.`
+          });
+        }
+
+        if (Math.round(parsed.amountKsh) > Math.round(targetBill.balanceKsh)) {
+          return res.status(400).json({
+            error: `Amount exceeds remaining ${utilityType} balance of KSh ${Math.round(
+              targetBill.balanceKsh
+            ).toLocaleString("en-US")}.`
+          });
+        }
+
+        const mpesaConfig = getMpesaConfig("/api/payments/mpesa/rent-callback");
+        if (!mpesaConfig.enabled) {
+          return res.status(503).json({
+            error: "M-PESA STK is disabled. Set MPESA_STK_ENABLED=true to activate."
+          });
+        }
+
+        if (!mpesaConfig.isConfigured) {
+          return res.status(503).json({
+            error: "M-PESA STK is not fully configured.",
+            missing: mpesaConfig.missing
+          });
+        }
+
+        const paymentPhone = parsed.phoneNumber?.trim() || session.phoneNumber;
+        const formattedPhone = formatDarajaMsisdn(paymentPhone);
+        if (!formattedPhone) {
+          return res.status(400).json({
+            error: "Invalid Kenyan phone number for M-PESA STK push."
+          });
+        }
+
+        const callbackUrl = mpesaConfig.callbackUrl.includes("token=")
+          ? mpesaConfig.callbackUrl
+          : appendQueryParam(mpesaConfig.callbackUrl, "token", mpesaRentCallbackToken);
+        const initiatedAt = new Date().toISOString();
+        const billingMonth = parsed.billingMonth ?? targetBill.billingMonth;
+        const utilityRef = utilityType === "water" ? "WATER" : "POWER";
+        const houseRef =
+          session.houseNumber.replace(/[^A-Za-z0-9]/g, "").slice(0, 7) || "HOUSE";
+        const accountReference = `${utilityRef}${houseRef}`.slice(0, 12);
+        const amountKsh = Math.round(parsed.amountKsh);
+
+        const client = new DarajaClient(mpesaConfig);
+        const result = await client.initiateStkPush({
+          amount: amountKsh,
+          phoneNumber: formattedPhone,
+          accountReference,
+          transactionDesc: `CAPTYN ${utilityRef} ${billingMonth}`,
+          callbackUrl
+        });
+
+        const checkoutRequestId =
+          typeof result.CheckoutRequestID === "string"
+            ? result.CheckoutRequestID.trim()
+            : "";
+        if (!checkoutRequestId) {
+          return res.status(502).json({
+            error: "M-PESA did not return a checkout request ID."
+          });
+        }
+
+        rememberUtilityStkRequest(checkoutRequestId, {
+          utilityType,
+          houseNumber: session.houseNumber,
+          phoneNumber: normalizeKenyaPhone(paymentPhone),
+          amountKsh,
+          billingMonth,
+          initiatedAt
+        });
+
+        return res.status(202).json({
+          data: {
+            paymentMethod: parsed.paymentMethod,
+            utilityType,
+            checkoutRequestId,
+            merchantRequestId:
+              typeof result.MerchantRequestID === "string"
+                ? result.MerchantRequestID
+                : undefined,
+            responseCode: result.ResponseCode,
+            responseDescription: result.ResponseDescription,
+            customerMessage: result.CustomerMessage,
+            billingMonth,
+            amountKsh,
+            targetBalanceKsh: Math.round(targetBill.balanceKsh),
+            phoneMask: maskPhone(normalizeKenyaPhone(paymentPhone))
+          }
+        });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
+  app.post(
+    "/api/user/utilities/:utilityType/payments/mpesa/verify",
+    async (req, res, next) => {
+      try {
+        const session = await getResidentSession(req, res);
+        if (!session) {
+          return;
+        }
+
+        const utilityType = utilityTypeSchema.parse(req.params.utilityType);
+        const parsed = verifyUtilityMpesaPaymentSchema.parse(req.body);
+        const pending = pendingUtilityStkRequests.get(parsed.checkoutRequestId);
+        if (
+          !pending ||
+          pending.houseNumber !== session.houseNumber ||
+          pending.utilityType !== utilityType
+        ) {
+          return res.status(200).json({
+            data: {
+              checkoutRequestId: parsed.checkoutRequestId,
+              status: "unknown"
+            },
+            message:
+              "Payment request was not found in active verification queue. Refresh utility balances."
+          });
+        }
+
+        const throttleKey = `${session.houseNumber}:${utilityType}:${parsed.checkoutRequestId}`;
+        const now = Date.now();
+        const rateSnapshot = mpesaVerifyWindow.get(throttleKey);
+        if (
+          rateSnapshot &&
+          now - rateSnapshot.windowStartMs < MPESA_VERIFY_RATE_WINDOW_MS
+        ) {
+          if (rateSnapshot.count >= MPESA_VERIFY_RATE_MAX_PER_ID) {
+            return res.status(429).json({
+              error: "Too many M-PESA verification attempts. Please wait a moment."
+            });
+          }
+          rateSnapshot.count += 1;
+        } else {
+          mpesaVerifyWindow.set(throttleKey, {
+            windowStartMs: now,
+            count: 1
+          });
+        }
+
+        const mpesaConfig = getMpesaConfig("/api/payments/mpesa/rent-callback");
+        if (!mpesaConfig.enabled || !mpesaConfig.isConfigured) {
+          return res.status(503).json({
+            error: "M-PESA STK is not configured.",
+            missing: mpesaConfig.missing
+          });
+        }
+
+        const client = new DarajaClient(mpesaConfig);
+        const queryResult = await client.queryStkPush(parsed.checkoutRequestId);
+        const resultCode = Number(queryResult?.ResultCode ?? Number.NaN);
+        const resultDesc = String(
+          queryResult?.ResultDesc || queryResult?.ResponseDescription || ""
+        );
+
+        if (Number.isFinite(resultCode) && resultCode === 0) {
+          const receiptReference =
+            typeof queryResult?.MpesaReceiptNumber === "string" &&
+            queryResult.MpesaReceiptNumber.trim().length > 0
+              ? queryResult.MpesaReceiptNumber.trim()
+              : parsed.checkoutRequestId;
+
+          try {
+            const data = recordResidentUtilityPaymentAndNotify(
+              utilityType,
+              session.houseNumber,
+              {
+                billingMonth: pending.billingMonth,
+                amountKsh: pending.amountKsh,
+                provider: "mpesa",
+                providerReference: receiptReference,
+                paidAt: new Date().toISOString(),
+                note: "M-PESA STK payment"
+              }
+            );
+
+            pendingUtilityStkRequests.delete(parsed.checkoutRequestId);
+            mpesaVerifyWindow.delete(throttleKey);
+
+            return res.json({
+              data: {
+                checkoutRequestId: parsed.checkoutRequestId,
+                status: "paid",
+                billingMonth: pending.billingMonth,
+                utilityType,
+                amountKsh: pending.amountKsh,
+                receiptReference,
+                resultCode,
+                resultDesc: resultDesc || "Payment confirmed.",
+                event: data.event,
+                bill: data.bill
+              }
+            });
+          } catch (applyError) {
+            pendingUtilityStkRequests.delete(parsed.checkoutRequestId);
+            mpesaVerifyWindow.delete(throttleKey);
+            return res.status(409).json({
+              data: {
+                checkoutRequestId: parsed.checkoutRequestId,
+                status: "paid_unapplied",
+                utilityType,
+                amountKsh: pending.amountKsh,
+                resultCode,
+                resultDesc: resultDesc || "Payment confirmed."
+              },
+              error:
+                applyError instanceof Error
+                  ? applyError.message
+                  : "Payment confirmed but utility ledger update failed."
+            });
+          }
+        }
+
+        if (
+          Number.isFinite(resultCode) &&
+          TERMINAL_MPESA_FAILURE_CODES.has(resultCode)
+        ) {
+          pendingUtilityStkRequests.delete(parsed.checkoutRequestId);
+          mpesaVerifyWindow.delete(throttleKey);
+
+          return res.status(200).json({
+            data: {
+              checkoutRequestId: parsed.checkoutRequestId,
+              status: "failed",
+              utilityType,
+              billingMonth: pending.billingMonth,
+              amountKsh: pending.amountKsh,
+              resultCode,
+              resultDesc: resultDesc || "Payment was not completed."
+            }
+          });
+        }
+
+        return res.status(200).json({
+          data: {
+            checkoutRequestId: parsed.checkoutRequestId,
+            status: "pending",
+            utilityType,
+            billingMonth: pending.billingMonth,
+            amountKsh: pending.amountKsh,
+            resultCode: Number.isFinite(resultCode) ? resultCode : undefined,
+            resultDesc: resultDesc || "Awaiting M-PESA callback."
+          }
+        });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
   app.post("/api/user/utilities/:utilityType/payments", async (req, res, next) => {
     try {
       const session = await getResidentSession(req, res);
@@ -1653,29 +3210,16 @@ async function bootstrap() {
       }
 
       const utilityType = utilityTypeSchema.parse(req.params.utilityType);
+      if (!requirePaymentChannelEnabled(res, session, utilityType)) {
+        return;
+      }
+
       const parsed = recordUtilityPaymentSchema.parse(req.body);
-      const data = utilityBillingService.recordPayment(
+      const data = recordResidentUtilityPaymentAndNotify(
         utilityType,
         session.houseNumber,
         parsed
       );
-
-      const utilityLabel = utilityType === "water" ? "Water" : "Electricity";
-      userSupportService.enqueueSystemNotifications(session.houseNumber, [
-        {
-          title: utilityLabel + " Payment Received",
-          message:
-            utilityLabel +
-            " payment of KSh " +
-            parsed.amountKsh.toLocaleString("en-US") +
-            " has been applied to your " +
-            data.bill.billingMonth +
-            " bill.",
-          level: "success",
-          source: "system",
-          dedupeKey: "utility-payment-" + utilityType + "-" + data.event.id
-        }
-      ]);
 
       return res.status(201).json({ data });
     } catch (error) {
@@ -1708,13 +3252,22 @@ async function bootstrap() {
 
   app.post("/api/payments/mpesa/rent-callback", async (req, res, next) => {
     try {
-      const token = req.header("x-mpesa-callback-token");
-      if (!token || token !== mpesaRentCallbackToken) {
+      if (!callbackTokenMatches(req, mpesaRentCallbackToken)) {
         return res.status(401).json({ error: "Invalid M-PESA callback token" });
       }
 
       const extracted = parseMpesaCallbackPayload(req.body);
+      const pendingRentFromInit = extracted.checkoutRequestId
+        ? pendingRentStkRequests.get(extracted.checkoutRequestId)
+        : undefined;
+      const pendingUtilityFromInit = extracted.checkoutRequestId
+        ? pendingUtilityStkRequests.get(extracted.checkoutRequestId)
+        : undefined;
       if (extracted.resultCode !== 0) {
+        if (extracted.checkoutRequestId) {
+          pendingRentStkRequests.delete(extracted.checkoutRequestId);
+          pendingUtilityStkRequests.delete(extracted.checkoutRequestId);
+        }
         return res.status(202).json({
           received: true,
           applied: false,
@@ -1723,10 +3276,43 @@ async function bootstrap() {
         });
       }
 
+      if (pendingUtilityFromInit) {
+        const providerReference =
+          extracted.providerReference ?? extracted.checkoutRequestId ?? randomUUID();
+        const utilityData = recordResidentUtilityPaymentAndNotify(
+          pendingUtilityFromInit.utilityType,
+          pendingUtilityFromInit.houseNumber,
+          {
+            billingMonth: pendingUtilityFromInit.billingMonth,
+            amountKsh: pendingUtilityFromInit.amountKsh,
+            provider: "mpesa",
+            providerReference,
+            paidAt: extracted.paidAt ?? new Date().toISOString(),
+            note: "M-PESA callback payment"
+          }
+        );
+
+        if (extracted.checkoutRequestId) {
+          pendingUtilityStkRequests.delete(extracted.checkoutRequestId);
+        }
+
+        return res.status(200).json({
+          data: {
+            event: utilityData.event,
+            bill: utilityData.bill,
+            utilityType: pendingUtilityFromInit.utilityType,
+            receiptReference: providerReference
+          },
+          message: "Utility payment applied."
+        });
+      }
+
       const paidAt = extracted.paidAt ?? new Date().toISOString();
-      const billingMonth = `${new Date(paidAt).getUTCFullYear()}-${String(
-        new Date(paidAt).getUTCMonth() + 1
-      ).padStart(2, "0")}`;
+      const billingMonth =
+        pendingRentFromInit?.billingMonth ??
+        `${new Date(paidAt).getUTCFullYear()}-${String(
+          new Date(paidAt).getUTCMonth() + 1
+        ).padStart(2, "0")}`;
 
       let tenantUserId: string | undefined;
       let tenantName: string | undefined;
@@ -1741,11 +3327,28 @@ async function bootstrap() {
         }
       }
 
+      tenantUserId = tenantUserId ?? pendingRentFromInit?.tenantUserId;
+      tenantName = tenantName ?? pendingRentFromInit?.tenantName;
+
+      if (
+        !extracted.houseNumber &&
+        !pendingRentFromInit?.houseNumber &&
+        extracted.checkoutRequestId
+      ) {
+        return res.status(202).json({
+          received: true,
+          applied: false,
+          resultCode: extracted.resultCode,
+          message: "No active rent/utility STK request matched this callback."
+        });
+      }
+
       const normalized = rentMpesaCallbackSchema.parse({
-        houseNumber: extracted.houseNumber,
-        amountKsh: extracted.amountKsh,
-        providerReference: extracted.providerReference,
-        phoneNumber: extracted.phoneNumber,
+        houseNumber: extracted.houseNumber ?? pendingRentFromInit?.houseNumber,
+        amountKsh: extracted.amountKsh ?? pendingRentFromInit?.amountKsh,
+        providerReference:
+          extracted.providerReference ?? extracted.checkoutRequestId,
+        phoneNumber: extracted.phoneNumber ?? pendingRentFromInit?.phoneNumber,
         paidAt,
         billingMonth,
         tenantUserId,
@@ -1754,6 +3357,9 @@ async function bootstrap() {
       });
 
       const outcome = rentLedgerService.recordMpesaPayment(normalized);
+      if (extracted.checkoutRequestId) {
+        pendingRentStkRequests.delete(extracted.checkoutRequestId);
+      }
 
       if (outcome.applied) {
         userSupportService.enqueueSystemNotifications(normalized.houseNumber, [
@@ -2079,10 +3685,138 @@ async function bootstrap() {
     });
   });
 
-  app.get("/api/landlord/utilities/meters", (req, res, next) => {
+  app.get(
+    "/api/landlord/buildings/:buildingId/utility-registry",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) {
+          return;
+        }
+
+        const buildingId = req.params.buildingId?.trim();
+        const building = buildingId ? await store.getBuilding(buildingId) : null;
+        if (!building) {
+          return res.status(404).json({ error: "Building not found" });
+        }
+
+        const hasAccess = await canManageBuildingFromLandlordContext(
+          context,
+          building.id
+        );
+        if (!hasAccess) {
+          return res.status(403).json({ error: "Building access denied" });
+        }
+
+        const data = await buildLandlordUtilityRegistryRows(
+          building.id,
+          building.houseNumbers ?? []
+        );
+
+        return res.json({
+          data,
+          building: {
+            id: building.id,
+            name: building.name
+          },
+          role: context.role
+        });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
+  app.put(
+    "/api/landlord/buildings/:buildingId/utility-registry",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) {
+          return;
+        }
+
+        const buildingId = req.params.buildingId?.trim();
+        const building = buildingId ? await store.getBuilding(buildingId) : null;
+        if (!building) {
+          return res.status(404).json({ error: "Building not found" });
+        }
+
+        const hasAccess = await canManageBuildingFromLandlordContext(
+          context,
+          building.id
+        );
+        if (!hasAccess) {
+          return res.status(403).json({ error: "Building access denied" });
+        }
+
+        const parsed = landlordUtilityRegistryUpsertSchema.parse(req.body ?? {});
+        const allowedHouseSet = new Set(
+          (building.houseNumbers ?? [])
+            .map((item) => normalizeHouseNumber(item))
+            .filter(Boolean)
+        );
+
+        const touchedHouses = new Set<string>();
+        const householdMemberRows: Array<{ houseNumber: string; members: number }> = [];
+        for (const row of parsed.rows) {
+          const normalizedHouse = normalizeHouseNumber(
+            houseNumberQuerySchema.parse({ houseNumber: row.houseNumber }).houseNumber
+          );
+
+          if (!allowedHouseSet.has(normalizedHouse)) {
+            return res.status(404).json({
+              error: `House number ${normalizedHouse} is not registered in building ${building.id}.`
+            });
+          }
+
+          const waterMeterNumber = row.waterMeterNumber?.trim();
+          if (waterMeterNumber) {
+            utilityBillingService.upsertMeter("water", normalizedHouse, {
+              meterNumber: waterMeterNumber
+            });
+          }
+
+          const electricityMeterNumber = row.electricityMeterNumber?.trim();
+          if (electricityMeterNumber) {
+            utilityBillingService.upsertMeter("electricity", normalizedHouse, {
+              meterNumber: electricityMeterNumber
+            });
+          }
+
+          if (typeof row.householdMembers === "number") {
+            householdMemberRows.push({
+              houseNumber: normalizedHouse,
+              members: row.householdMembers
+            });
+          }
+
+          touchedHouses.add(normalizedHouse);
+        }
+
+        await upsertHouseholdMembersForBuilding(building.id, householdMemberRows);
+
+        const data = await buildLandlordUtilityRegistryRows(
+          building.id,
+          building.houseNumbers ?? []
+        );
+
+        return res.json({
+          data,
+          updatedRows: parsed.rows.length,
+          touchedHouses: [...touchedHouses].sort((a, b) => a.localeCompare(b)),
+          role: context.role
+        });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
+  app.get("/api/landlord/utilities/meters", async (req, res, next) => {
     try {
-      const landlord = getAdminSession(req, res, "landlord");
-      if (!landlord) {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) {
         return;
       }
 
@@ -2098,56 +3832,74 @@ async function bootstrap() {
           : undefined;
 
       const data = utilityBillingService.listMeters({ utilityType, houseNumber });
-      return res.json({ data, role: landlord.role });
+      return res.json({ data, role: context.role });
     } catch (error) {
       return next(error);
     }
   });
 
-  app.put("/api/landlord/utilities/:utilityType/:houseNumber/meter", (req, res, next) => {
+  app.put(
+    "/api/landlord/utilities/:utilityType/:houseNumber/meter",
+    async (req, res, next) => {
     try {
-      const landlord = getAdminSession(req, res, "landlord");
-      if (!landlord) {
-        return;
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) {
+          return;
+        }
+
+        const utilityType = utilityTypeSchema.parse(req.params.utilityType);
+        const { houseNumber } = houseNumberQuerySchema.parse({
+          houseNumber: req.params.houseNumber
+        });
+        const parsed = upsertUtilityMeterSchema.parse(req.body);
+
+        const data = utilityBillingService.upsertMeter(
+          utilityType,
+          houseNumber,
+          parsed
+        );
+        return res.json({ data, role: context.role });
+    } catch (error) {
+      return next(error);
+    }
+    }
+  );
+
+  app.post(
+    "/api/landlord/utilities/:utilityType/:houseNumber/bills",
+    async (req, res, next) => {
+    try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) {
+          return;
+        }
+
+        const utilityType = utilityTypeSchema.parse(req.params.utilityType);
+        const { houseNumber } = houseNumberQuerySchema.parse({
+          houseNumber: req.params.houseNumber
+        });
+        const parsed = createUtilityBillSchema.parse(req.body);
+
+        const data = utilityBillingService.createBill(
+          utilityType,
+          houseNumber,
+          parsed
+        );
+        return res.status(201).json({ data, role: context.role });
+    } catch (error) {
+      const mapped = mapUtilityDomainError(error);
+      if (mapped) {
+        return res.status(mapped.status).json({ error: mapped.message });
       }
-
-      const utilityType = utilityTypeSchema.parse(req.params.utilityType);
-      const { houseNumber } = houseNumberQuerySchema.parse({
-        houseNumber: req.params.houseNumber
-      });
-      const parsed = upsertUtilityMeterSchema.parse(req.body);
-
-      const data = utilityBillingService.upsertMeter(utilityType, houseNumber, parsed);
-      return res.json({ data, role: landlord.role });
-    } catch (error) {
       return next(error);
     }
-  });
-
-  app.post("/api/landlord/utilities/:utilityType/:houseNumber/bills", (req, res, next) => {
-    try {
-      const landlord = getAdminSession(req, res, "landlord");
-      if (!landlord) {
-        return;
-      }
-
-      const utilityType = utilityTypeSchema.parse(req.params.utilityType);
-      const { houseNumber } = houseNumberQuerySchema.parse({
-        houseNumber: req.params.houseNumber
-      });
-      const parsed = createUtilityBillSchema.parse(req.body);
-
-      const data = utilityBillingService.createBill(utilityType, houseNumber, parsed);
-      return res.status(201).json({ data, role: landlord.role });
-    } catch (error) {
-      return next(error);
     }
-  });
+  );
 
-  app.get("/api/landlord/utilities/bills", (req, res, next) => {
+  app.get("/api/landlord/utilities/bills", async (req, res, next) => {
     try {
-      const landlord = getAdminSession(req, res, "landlord");
-      if (!landlord) {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) {
         return;
       }
 
@@ -2173,16 +3925,16 @@ async function bootstrap() {
         limit
       });
 
-      return res.json({ data, role: landlord.role });
+      return res.json({ data, role: context.role });
     } catch (error) {
       return next(error);
     }
   });
 
-  app.get("/api/landlord/utilities/payments", (req, res, next) => {
+  app.get("/api/landlord/utilities/payments", async (req, res, next) => {
     try {
-      const landlord = getAdminSession(req, res, "landlord");
-      if (!landlord) {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) {
         return;
       }
 
@@ -2208,7 +3960,7 @@ async function bootstrap() {
         limit
       });
 
-      return res.json({ data, role: landlord.role });
+      return res.json({ data, role: context.role });
     } catch (error) {
       return next(error);
     }
@@ -2275,6 +4027,10 @@ async function bootstrap() {
       const data = utilityBillingService.createBill(utilityType, houseNumber, parsed);
       return res.status(201).json({ data, role: admin.role });
     } catch (error) {
+      const mapped = mapUtilityDomainError(error);
+      if (mapped) {
+        return res.status(mapped.status).json({ error: mapped.message });
+      }
       return next(error);
     }
   });

@@ -331,6 +331,15 @@ small {
   color: var(--ink-700);
 }
 
+.registry-table-input {
+  width: 100%;
+  min-width: 130px;
+}
+
+.registry-members-input {
+  width: 90px;
+}
+
 @media (max-width: 1200px) {
   .metrics-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));

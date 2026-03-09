@@ -82,6 +82,15 @@ interface ListUtilityPaymentsOptions {
   limit?: number;
 }
 
+export interface UtilityBillingPersistedState {
+  meters: UtilityMeterRecord[];
+  bills: UtilityBillSnapshot[];
+}
+
+type UtilityBillingStateChangeHandler = (
+  state: UtilityBillingPersistedState
+) => void | Promise<void>;
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -125,6 +134,100 @@ function monthSortDesc(a: string, b: string): number {
 export class UtilityBillingService {
   private readonly meters = new Map<string, UtilityMeterRecord>();
   private readonly billsByLedger = new Map<string, UtilityBillRecord[]>();
+  private stateChangeHandler?: UtilityBillingStateChangeHandler;
+
+  setStateChangeHandler(handler?: UtilityBillingStateChangeHandler): void {
+    this.stateChangeHandler = handler;
+  }
+
+  exportState(): UtilityBillingPersistedState {
+    const meters = [...this.meters.values()]
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .map((item) => ({ ...item }));
+
+    const bills = [...this.billsByLedger.values()]
+      .flatMap((items) => items)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .map((item) => this.toSnapshot(item));
+
+    return { meters, bills };
+  }
+
+  importState(state: UtilityBillingPersistedState | null | undefined): void {
+    this.meters.clear();
+    this.billsByLedger.clear();
+
+    if (!state) {
+      return;
+    }
+
+    if (Array.isArray(state.meters)) {
+      for (const meter of state.meters) {
+        if (!meter || !meter.utilityType || !meter.houseNumber || !meter.meterNumber) {
+          continue;
+        }
+
+        const normalizedHouse = normalizeHouseNumber(meter.houseNumber);
+        const normalized: UtilityMeterRecord = {
+          utilityType: meter.utilityType,
+          houseNumber: normalizedHouse,
+          meterNumber: String(meter.meterNumber).trim(),
+          updatedAt: meter.updatedAt || nowIso()
+        };
+
+        this.meters.set(
+          ledgerKey(normalized.utilityType, normalized.houseNumber),
+          normalized
+        );
+      }
+    }
+
+    if (Array.isArray(state.bills)) {
+      for (const snapshot of state.bills) {
+        if (!snapshot || !snapshot.utilityType || !snapshot.houseNumber || !snapshot.billingMonth) {
+          continue;
+        }
+
+        const normalizedHouse = normalizeHouseNumber(snapshot.houseNumber);
+        const key = ledgerKey(snapshot.utilityType, normalizedHouse);
+        const records = this.billsByLedger.get(key) ?? [];
+
+        const record: UtilityBillRecord = {
+          id: snapshot.id,
+          utilityType: snapshot.utilityType,
+          houseNumber: normalizedHouse,
+          billingMonth: snapshot.billingMonth,
+          meterNumber: snapshot.meterNumber,
+          previousReading: Number(snapshot.previousReading ?? 0),
+          currentReading: Number(snapshot.currentReading ?? 0),
+          unitsConsumed: Number(snapshot.unitsConsumed ?? 0),
+          ratePerUnitKsh: Number(snapshot.ratePerUnitKsh ?? 0),
+          fixedChargeKsh: Number(snapshot.fixedChargeKsh ?? 0),
+          amountKsh: Number(snapshot.amountKsh ?? 0),
+          balanceKsh: Number(snapshot.balanceKsh ?? 0),
+          dueDate: snapshot.dueDate,
+          note: snapshot.note,
+          createdAt: snapshot.createdAt || nowIso(),
+          updatedAt: snapshot.updatedAt || nowIso(),
+          payments: Array.isArray(snapshot.payments)
+            ? snapshot.payments.map((payment) => ({
+                ...payment,
+                utilityType: snapshot.utilityType,
+                houseNumber: normalizedHouse,
+                billingMonth: payment.billingMonth ?? snapshot.billingMonth
+              }))
+            : []
+        };
+
+        records.push(record);
+        this.billsByLedger.set(key, records);
+      }
+    }
+
+    for (const records of this.billsByLedger.values()) {
+      records.sort((a, b) => monthSortDesc(a.billingMonth, b.billingMonth));
+    }
+  }
 
   upsertMeter(
     utilityType: UtilityType,
@@ -140,6 +243,7 @@ export class UtilityBillingService {
     };
 
     this.meters.set(ledgerKey(utilityType, normalizedHouse), meter);
+    this.emitStateChange();
     return { ...meter };
   }
 
@@ -188,13 +292,8 @@ export class UtilityBillingService {
     }
 
     const existingMeter = this.getMeter(utilityType, normalizedHouse);
-    const meterNumber = input.meterNumber?.trim() || existingMeter?.meterNumber;
-
-    if (!meterNumber) {
-      throw new Error(
-        `Meter number is required for ${utilityType} (${normalizedHouse}). Save meter first.`
-      );
-    }
+    const meterNumber = input.meterNumber?.trim() || existingMeter?.meterNumber || "";
+    const hasMeter = meterNumber.length > 0;
 
     if (input.meterNumber?.trim()) {
       this.upsertMeter(utilityType, normalizedHouse, {
@@ -202,26 +301,46 @@ export class UtilityBillingService {
       });
     }
 
-    const previousRecord = [...records]
-      .sort((a, b) => monthSortDesc(a.billingMonth, b.billingMonth))
-      .find((item) => item.billingMonth < input.billingMonth);
+    const fixedChargeKsh = Math.max(0, Math.round(input.fixedChargeKsh ?? 0));
+    let previousReading = 0;
+    let currentReading = 0;
+    let ratePerUnitKsh = 0;
+    let unitsConsumed = 0;
+    let amountKsh = 0;
 
-    const previousReading =
-      input.previousReading ?? previousRecord?.currentReading ?? 0;
+    if (hasMeter) {
+      if (input.currentReading == null || input.ratePerUnitKsh == null) {
+        throw new Error(
+          `Current reading and rate per unit are required for metered ${utilityType} billing (${normalizedHouse}).`
+        );
+      }
 
-    if (input.currentReading < previousReading) {
-      throw new Error(
-        "Current reading must be greater than or equal to previous reading."
+      const previousRecord = [...records]
+        .sort((a, b) => monthSortDesc(a.billingMonth, b.billingMonth))
+        .find((item) => item.billingMonth < input.billingMonth);
+
+      previousReading = input.previousReading ?? previousRecord?.currentReading ?? 0;
+      currentReading = input.currentReading;
+      if (currentReading < previousReading) {
+        throw new Error(
+          "Current reading must be greater than or equal to previous reading."
+        );
+      }
+
+      ratePerUnitKsh = input.ratePerUnitKsh;
+      unitsConsumed = Number((currentReading - previousReading).toFixed(3));
+      amountKsh = Math.max(
+        0,
+        Math.round(unitsConsumed * ratePerUnitKsh + fixedChargeKsh)
       );
+    } else {
+      if (Number(fixedChargeKsh) <= 0) {
+        throw new Error(
+          `Fixed charge must be greater than zero for ${utilityType} (${normalizedHouse}) without a meter.`
+        );
+      }
+      amountKsh = fixedChargeKsh;
     }
-
-    const unitsConsumed = Number(
-      (input.currentReading - previousReading).toFixed(3)
-    );
-    const amountKsh = Math.max(
-      0,
-      Math.round(unitsConsumed * input.ratePerUnitKsh + input.fixedChargeKsh)
-    );
 
     const now = nowIso();
     const bill: UtilityBillRecord = {
@@ -229,12 +348,12 @@ export class UtilityBillingService {
       utilityType,
       houseNumber: normalizedHouse,
       billingMonth: input.billingMonth,
-      meterNumber,
+      meterNumber: hasMeter ? meterNumber : "NO-METER",
       previousReading,
-      currentReading: input.currentReading,
+      currentReading,
       unitsConsumed,
-      ratePerUnitKsh: input.ratePerUnitKsh,
-      fixedChargeKsh: input.fixedChargeKsh,
+      ratePerUnitKsh,
+      fixedChargeKsh,
       amountKsh,
       balanceKsh: amountKsh,
       dueDate: input.dueDate,
@@ -247,6 +366,7 @@ export class UtilityBillingService {
     records.push(bill);
     records.sort((a, b) => monthSortDesc(a.billingMonth, b.billingMonth));
     this.billsByLedger.set(key, records);
+    this.emitStateChange();
 
     return this.toSnapshot(bill);
   }
@@ -334,6 +454,7 @@ export class UtilityBillingService {
     target.payments.unshift(event);
     target.balanceKsh = Math.max(0, target.balanceKsh - event.amountKsh);
     target.updatedAt = nowIso();
+    this.emitStateChange();
 
     return {
       event,
@@ -426,6 +547,17 @@ export class UtilityBillingService {
       .sort((a, b) => b.paidAt.localeCompare(a.paidAt))
       .slice(0, limit)
       .map((item) => ({ ...item }));
+  }
+
+  private emitStateChange(): void {
+    if (!this.stateChangeHandler) {
+      return;
+    }
+
+    const snapshot = this.exportState();
+    void Promise.resolve(this.stateChangeHandler(snapshot)).catch((error) => {
+      console.error("Failed to persist utility billing state", error);
+    });
   }
 
   private toSnapshot(record: UtilityBillRecord): UtilityBillSnapshot {

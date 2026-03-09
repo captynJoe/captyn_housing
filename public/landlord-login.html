@@ -20,8 +20,8 @@
           <p class="tag">CAPTYN Housing</p>
           <h1>Landlord Sign-In</h1>
           <p class="subtitle">
-            Sign in with your CAPTYN Housing account to manage buildings,
-            approve tenant applications, and publish utility bills.
+            Sign in with your CAPTYN Housing account (email or phone + password)
+            to manage buildings, approve tenant applications, and publish utility bills.
           </p>
         </div>
         <a href="/" class="home-link">Back to Portal</a>
@@ -30,12 +30,12 @@
       <section class="panel auth-panel" style="grid-template-columns: 1fr; max-width: 700px;">
         <form id="landlord-login-form" class="package-card">
           <label>
-            Email
+            Email or Phone
             <input
               id="landlord-email"
-              type="email"
+              type="text"
               autocomplete="username"
-              placeholder="landlord@captyn.housing"
+              placeholder="landlord@captyn.housing or 07XXXXXXXX"
               required
             />
           </label>
@@ -63,7 +63,8 @@
         <form id="landlord-request-form" class="package-card">
           <h2 style="margin: 0;">Request Landlord Access</h2>
           <p class="status-text">
-            Signed in as tenant. Submit your reason and admin will approve your email.
+            Signed in as tenant. Submit your reason and admin will approve landlord role
+            on this same account.
           </p>
           <label>
             Reason (optional)

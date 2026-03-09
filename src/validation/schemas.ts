@@ -195,15 +195,38 @@ export const createUtilityBillSchema = z
     billingMonth: billingMonthSchema,
     meterNumber: z.string().trim().min(1).max(80).optional(),
     previousReading: z.number().min(0).max(10_000_000).optional(),
-    currentReading: z.number().min(0).max(10_000_000),
-    ratePerUnitKsh: z.number().min(0).max(50_000),
+    currentReading: z.number().min(0).max(10_000_000).optional(),
+    ratePerUnitKsh: z.number().min(0).max(50_000).optional(),
     fixedChargeKsh: z.number().min(0).max(200_000).default(0),
     dueDate: z.string().datetime(),
     note: z.string().trim().max(280).optional()
   })
   .superRefine((value, context) => {
+    const hasCurrentReading = value.currentReading != null;
+    const hasRate = value.ratePerUnitKsh != null;
+    const hasAnyReadingData =
+      value.previousReading != null || hasCurrentReading || hasRate;
+
+    if (hasCurrentReading !== hasRate) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: hasCurrentReading ? ["ratePerUnitKsh"] : ["currentReading"],
+        message:
+          "Provide both current reading and rate per unit for metered billing."
+      });
+    }
+
+    if (value.previousReading != null && !hasCurrentReading) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["currentReading"],
+        message: "Current reading is required when previous reading is provided."
+      });
+    }
+
     if (
       value.previousReading != null &&
+      value.currentReading != null &&
       value.currentReading < value.previousReading
     ) {
       context.addIssue({
@@ -211,6 +234,15 @@ export const createUtilityBillSchema = z
         path: ["currentReading"],
         message:
           "Current reading must be greater than or equal to previous reading."
+      });
+    }
+
+    if (!hasAnyReadingData && value.fixedChargeKsh <= 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["fixedChargeKsh"],
+        message:
+          "Provide a fixed charge greater than zero, or meter reading details."
       });
     }
   });
@@ -237,16 +269,64 @@ export const updateTicketStatusSchema = z.object({
   adminNote: z.string().trim().max(500).optional()
 });
 
-export const residentOtpRequestSchema = z.object({
+export const residentPasswordSetupSchema = z.object({
   buildingId: nonEmptyString,
   houseNumber: nonEmptyString.max(24),
-  phoneNumber: kenyaPhoneSchema
+  phoneNumber: kenyaPhoneSchema,
+  password: z.string().min(8).max(128)
 });
 
-export const residentOtpVerifySchema = z.object({
-  challengeId: nonEmptyString,
-  otpCode: z.string().trim().regex(/^\d{6}$/)
+export const residentPhoneLoginSchema = z.object({
+  buildingId: nonEmptyString,
+  houseNumber: nonEmptyString.max(24),
+  phoneNumber: kenyaPhoneSchema,
+  password: z.string().min(1).max(128)
 });
+
+export const residentChangePasswordSchema = z
+  .object({
+    newPassword: z.string().min(8).max(128),
+    confirmPassword: z.string().min(8).max(128)
+  })
+  .superRefine((value, context) => {
+    if (value.newPassword !== value.confirmPassword) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["confirmPassword"],
+        message: "Confirmation password must match the new password."
+      });
+    }
+  });
+
+export const residentAdminPasswordResetSchema = z.object({
+  buildingId: nonEmptyString,
+  houseNumber: nonEmptyString.max(24),
+  phoneNumber: kenyaPhoneSchema,
+  temporaryPassword: z.string().min(8).max(128)
+});
+
+export const residentPasswordRecoveryRequestSchema = z.object({
+  buildingId: nonEmptyString,
+  houseNumber: nonEmptyString.max(24),
+  phoneNumber: kenyaPhoneSchema,
+  note: z.string().trim().max(280).optional()
+});
+
+export const residentPasswordRecoveryReviewSchema = z
+  .object({
+    action: z.enum(["approve", "reject"]),
+    temporaryPassword: z.string().min(8).max(128).optional(),
+    note: z.string().trim().max(500).optional()
+  })
+  .superRefine((value, context) => {
+    if (value.action === "approve" && !value.temporaryPassword) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["temporaryPassword"],
+        message: "Temporary password is required when approving a reset request."
+      });
+    }
+  });
 
 export const adminLoginSchema = z
   .object({
@@ -283,10 +363,28 @@ export const userRegisterSchema = z.object({
   password: z.string().min(8).max(128)
 });
 
-export const userLoginSchema = z.object({
-  email: z.string().trim().email().max(160),
-  password: z.string().min(1).max(128)
-});
+export const userLoginSchema = z
+  .object({
+    email: z.string().trim().email().max(160).optional(),
+    phoneNumber: kenyaPhoneSchema.optional(),
+    password: z.string().min(1).max(128)
+  })
+  .superRefine((value, context) => {
+    const hasEmail = Boolean(value.email && value.email.trim().length > 0);
+    const hasPhone = Boolean(
+      value.phoneNumber && value.phoneNumber.trim().length > 0
+    );
+
+    if (hasEmail || hasPhone) {
+      return;
+    }
+
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["email"],
+      message: "Provide either email or phone number."
+    });
+  });
 
 export const tenantApplicationSchema = z.object({
   buildingId: nonEmptyString,
@@ -297,6 +395,41 @@ export const tenantApplicationSchema = z.object({
 export const landlordDecisionSchema = z.object({
   action: z.enum(["approve", "reject"]),
   note: z.string().trim().max(280).optional()
+});
+
+export const landlordPaymentAccessUpdateSchema = z
+  .object({
+    rentEnabled: z.boolean().optional(),
+    waterEnabled: z.boolean().optional(),
+    electricityEnabled: z.boolean().optional(),
+    acknowledgeImpact: z.literal(true),
+    note: z.string().trim().max(280).optional()
+  })
+  .refine(
+    (value) =>
+      typeof value.rentEnabled === "boolean" ||
+      typeof value.waterEnabled === "boolean" ||
+      typeof value.electricityEnabled === "boolean",
+    {
+      message: "Provide at least one payment toggle to update."
+    }
+  );
+
+const optionalMeterNumberSchema = z.string().trim().max(80).optional();
+const householdMembersSchema = z.number().int().min(0).max(20);
+
+export const landlordUtilityRegistryUpsertSchema = z.object({
+  rows: z
+    .array(
+      z.object({
+        houseNumber: nonEmptyString.max(24),
+        waterMeterNumber: optionalMeterNumberSchema,
+        electricityMeterNumber: optionalMeterNumberSchema,
+        householdMembers: householdMembersSchema.optional()
+      })
+    )
+    .min(1)
+    .max(2_000)
 });
 
 export const landlordAccessRequestStatusSchema = z.enum([
@@ -339,6 +472,30 @@ export const createRentPaymentSchema = z.object({
   paidAt: z.string().datetime().optional()
 });
 
+export const rentPaymentMethodSchema = z.enum(["mpesa"]);
+
+export const initializeRentMpesaPaymentSchema = z.object({
+  amountKsh: z.number().positive().max(500_000),
+  billingMonth: billingMonthSchema.optional(),
+  phoneNumber: kenyaPhoneSchema.optional(),
+  paymentMethod: rentPaymentMethodSchema.default("mpesa")
+});
+
+export const verifyRentMpesaPaymentSchema = z.object({
+  checkoutRequestId: nonEmptyString.max(120)
+});
+
+export const initializeUtilityMpesaPaymentSchema = z.object({
+  amountKsh: z.number().positive().max(500_000),
+  billingMonth: billingMonthSchema.optional(),
+  phoneNumber: kenyaPhoneSchema.optional(),
+  paymentMethod: rentPaymentMethodSchema.default("mpesa")
+});
+
+export const verifyUtilityMpesaPaymentSchema = z.object({
+  checkoutRequestId: nonEmptyString.max(120)
+});
+
 export type CreateBuildingInput = z.infer<typeof createBuildingSchema>;
 export type CreateIncidentInput = z.infer<typeof createIncidentSchema>;
 export type ResolveIncidentInput = z.infer<typeof resolveIncidentSchema>;
@@ -356,14 +513,34 @@ export type UpsertUtilityMeterInput = z.infer<typeof upsertUtilityMeterSchema>;
 export type CreateUtilityBillInput = z.infer<typeof createUtilityBillSchema>;
 export type RecordUtilityPaymentInput = z.infer<typeof recordUtilityPaymentSchema>;
 export type UpdateTicketStatusInput = z.infer<typeof updateTicketStatusSchema>;
-export type ResidentOtpRequestInput = z.infer<typeof residentOtpRequestSchema>;
-export type ResidentOtpVerifyInput = z.infer<typeof residentOtpVerifySchema>;
+export type ResidentPasswordSetupInput = z.infer<
+  typeof residentPasswordSetupSchema
+>;
+export type ResidentPhoneLoginInput = z.infer<typeof residentPhoneLoginSchema>;
+export type ResidentChangePasswordInput = z.infer<
+  typeof residentChangePasswordSchema
+>;
+export type ResidentAdminPasswordResetInput = z.infer<
+  typeof residentAdminPasswordResetSchema
+>;
+export type ResidentPasswordRecoveryRequestInput = z.infer<
+  typeof residentPasswordRecoveryRequestSchema
+>;
+export type ResidentPasswordRecoveryReviewInput = z.infer<
+  typeof residentPasswordRecoveryReviewSchema
+>;
 export type AdminLoginInput = z.infer<typeof adminLoginSchema>;
 export type UserRoleInput = z.infer<typeof userRoleSchema>;
 export type UserRegisterInput = z.infer<typeof userRegisterSchema>;
 export type UserLoginInput = z.infer<typeof userLoginSchema>;
 export type TenantApplicationInput = z.infer<typeof tenantApplicationSchema>;
 export type LandlordDecisionInput = z.infer<typeof landlordDecisionSchema>;
+export type LandlordPaymentAccessUpdateInput = z.infer<
+  typeof landlordPaymentAccessUpdateSchema
+>;
+export type LandlordUtilityRegistryUpsertInput = z.infer<
+  typeof landlordUtilityRegistryUpsertSchema
+>;
 export type LandlordAccessRequestStatusInput = z.infer<
   typeof landlordAccessRequestStatusSchema
 >;
@@ -376,3 +553,15 @@ export type ReviewLandlordAccessRequestInput = z.infer<
 export type RentMpesaCallbackInput = z.infer<typeof rentMpesaCallbackSchema>;
 export type TenantResolveInput = z.infer<typeof tenantResolveSchema>;
 export type CreateRentPaymentInput = z.infer<typeof createRentPaymentSchema>;
+export type InitializeRentMpesaPaymentInput = z.infer<
+  typeof initializeRentMpesaPaymentSchema
+>;
+export type VerifyRentMpesaPaymentInput = z.infer<
+  typeof verifyRentMpesaPaymentSchema
+>;
+export type InitializeUtilityMpesaPaymentInput = z.infer<
+  typeof initializeUtilityMpesaPaymentSchema
+>;
+export type VerifyUtilityMpesaPaymentInput = z.infer<
+  typeof verifyUtilityMpesaPaymentSchema
+>;

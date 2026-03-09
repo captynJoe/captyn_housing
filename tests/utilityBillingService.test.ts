@@ -2,19 +2,36 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { UtilityBillingService } from "../src/services/utilityBillingService.js";
 
-test("requires meter number before posting utility bill", () => {
+test("supports fixed-charge bill for house without meter", () => {
   const service = new UtilityBillingService();
   const dueDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+
+  const bill = service.createBill("water", "A-12", {
+    billingMonth: "2026-03",
+    fixedChargeKsh: 150,
+    dueDate
+  });
+
+  assert.equal(bill.meterNumber, "NO-METER");
+  assert.equal(bill.amountKsh, 150);
+  assert.equal(bill.unitsConsumed, 0);
+});
+
+test("requires current reading + rate for metered bill", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.upsertMeter("water", "A-12", {
+    meterNumber: "WTR-001"
+  });
 
   assert.throws(() => {
     service.createBill("water", "A-12", {
       billingMonth: "2026-03",
-      currentReading: 200,
-      ratePerUnitKsh: 30,
       fixedChargeKsh: 150,
       dueDate
     });
-  }, /Meter number is required/);
+  }, /Current reading and rate per unit are required/);
 });
 
 test("creates monthly bill and computes units from previous reading", () => {

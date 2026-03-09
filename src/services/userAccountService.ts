@@ -9,6 +9,10 @@ import type {
 import type {
   CreateLandlordAccessRequestInput,
   LandlordDecisionInput,
+  ResidentAdminPasswordResetInput,
+  ResidentChangePasswordInput,
+  ResidentPasswordSetupInput,
+  ResidentPhoneLoginInput,
   ReviewLandlordAccessRequestInput,
   TenantApplicationInput,
   UserLoginInput,
@@ -28,6 +32,7 @@ export interface AuthenticatedUserSession {
   email: string;
   phone: string;
   expiresAt: string;
+  mustChangePassword: boolean;
 }
 
 export interface UserAccountServiceOptions {
@@ -151,6 +156,7 @@ export class UserAccountService {
   private readonly loginWindowMs: number;
   private readonly loginMaxAttempts: number;
   private readonly loginRateByEmail = new Map<string, LoginRateRecord>();
+  private readonly loginRateByPhone = new Map<string, LoginRateRecord>();
 
   constructor(
     private readonly prisma: PrismaClient,
@@ -214,19 +220,55 @@ export class UserAccountService {
   async createSession(input: UserLoginInput): Promise<AuthenticatedUserSession | null> {
     await this.purgeExpiredSessions();
 
-    const email = normalizeEmail(input.email);
-    const record = this.loginRateByEmail.get(email);
-    const now = nowMs();
-    if (record && record.resetAt > now && record.attempts >= this.loginMaxAttempts) {
-      throw new Error("LOGIN_RATE_LIMITED");
+    const emailRaw = typeof input.email === "string" ? input.email.trim() : "";
+    const phoneRaw =
+      typeof input.phoneNumber === "string" ? input.phoneNumber.trim() : "";
+
+    let user:
+      | {
+          id: string;
+          fullName: string;
+          email: string;
+          phone: string;
+          passwordHash: string;
+          requirePasswordChange: boolean;
+          role: UserRole;
+          status: string;
+        }
+      | null = null;
+    let failedKeyType: "email" | "phone" = "email";
+    let failedKeyValue = "";
+
+    if (emailRaw) {
+      const email = normalizeEmail(emailRaw);
+      failedKeyType = "email";
+      failedKeyValue = email;
+      if (this.isRateLimited(this.loginRateByEmail, email)) {
+        throw new Error("LOGIN_RATE_LIMITED");
+      }
+
+      user = await this.prisma.housingUser.findUnique({
+        where: { email }
+      });
+    } else if (phoneRaw) {
+      const phone = normalizeKenyaPhone(phoneRaw);
+      failedKeyType = "phone";
+      failedKeyValue = phone;
+      if (this.isRateLimited(this.loginRateByPhone, phone)) {
+        throw new Error("LOGIN_RATE_LIMITED");
+      }
+
+      user = await this.prisma.housingUser.findUnique({
+        where: { phone }
+      });
     }
 
-    const user = await this.prisma.housingUser.findUnique({
-      where: { email }
-    });
-
     if (!user || !verifyPassword(input.password, user.passwordHash)) {
-      this.trackFailedLogin(email);
+      if (failedKeyType === "phone") {
+        this.trackFailedPhoneLogin(failedKeyValue);
+      } else {
+        this.trackFailedLogin(failedKeyValue);
+      }
       return null;
     }
 
@@ -234,13 +276,161 @@ export class UserAccountService {
       throw new Error("ACCOUNT_DISABLED");
     }
 
-    this.loginRateByEmail.delete(email);
+    this.loginRateByEmail.delete(normalizeEmail(user.email));
+    this.loginRateByPhone.delete(normalizeKenyaPhone(user.phone));
+    return this.issueSessionForUser(user);
+  }
 
+  async setupResidentPasswordAndCreateSession(
+    input: ResidentPasswordSetupInput
+  ): Promise<AuthenticatedUserSession> {
+    await this.purgeExpiredSessions();
+
+    const phone = normalizeKenyaPhone(input.phoneNumber);
+    const houseNumber = normalizeHouseNumber(input.houseNumber);
+    const tenancy = await this.findActiveTenancyByHouseAndPhone({
+      buildingId: input.buildingId,
+      houseNumber,
+      phoneNumber: phone
+    });
+
+    const user = tenancy
+      ? await this.prisma.housingUser.update({
+          where: { id: tenancy.user.id },
+          data: {
+            passwordHash: hashPassword(input.password),
+            requirePasswordChange: false
+          }
+        })
+      : await this.provisionResidentForSetup({
+          buildingId: input.buildingId,
+          houseNumber,
+          phoneNumber: phone,
+          password: input.password
+        });
+
+    if (user.status !== "active") {
+      throw new Error("ACCOUNT_DISABLED");
+    }
+
+    this.loginRateByPhone.delete(phone);
+    this.loginRateByEmail.delete(normalizeEmail(user.email));
+    return this.issueSessionForUser(user);
+  }
+
+  async createResidentPhoneSession(
+    input: ResidentPhoneLoginInput
+  ): Promise<AuthenticatedUserSession | null> {
+    await this.purgeExpiredSessions();
+    const phone = normalizeKenyaPhone(input.phoneNumber);
+
+    if (this.isRateLimited(this.loginRateByPhone, phone)) {
+      throw new Error("LOGIN_RATE_LIMITED");
+    }
+
+    const tenancy = await this.findActiveTenancyByHouseAndPhone({
+      buildingId: input.buildingId,
+      houseNumber: input.houseNumber,
+      phoneNumber: phone
+    });
+
+    if (!tenancy) {
+      this.trackFailedPhoneLogin(phone);
+      return null;
+    }
+
+    const user = tenancy.user;
+    if (!verifyPassword(input.password, user.passwordHash)) {
+      this.trackFailedPhoneLogin(phone);
+      return null;
+    }
+
+    if (user.status !== "active") {
+      throw new Error("ACCOUNT_DISABLED");
+    }
+
+    this.loginRateByPhone.delete(phone);
+    this.loginRateByEmail.delete(normalizeEmail(user.email));
+    return this.issueSessionForUser(user);
+  }
+
+  async resetResidentPasswordByTenancy(input: ResidentAdminPasswordResetInput) {
+    await this.purgeExpiredSessions();
+
+    const phone = normalizeKenyaPhone(input.phoneNumber);
+    const houseNumber = normalizeHouseNumber(input.houseNumber);
+    const tenancy = await this.findActiveTenancyByHouseAndPhone({
+      buildingId: input.buildingId,
+      houseNumber,
+      phoneNumber: phone
+    });
+
+    if (!tenancy) {
+      throw new Error("TENANCY_NOT_FOUND");
+    }
+
+    const user = await this.prisma.housingUser.update({
+      where: { id: tenancy.user.id },
+      data: {
+        passwordHash: hashPassword(input.temporaryPassword),
+        requirePasswordChange: true
+      }
+    });
+
+    await this.prisma.userSession.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: new Date() }
+    });
+
+    return {
+      userId: user.id,
+      fullName: user.fullName,
+      phone: user.phone,
+      buildingId: input.buildingId,
+      houseNumber,
+      resetAt: new Date().toISOString()
+    };
+  }
+
+  async changeResidentPassword(
+    session: Pick<AuthenticatedUserSession, "userId">,
+    input: ResidentChangePasswordInput
+  ): Promise<AuthenticatedUserSession> {
+    await this.purgeExpiredSessions();
+
+    const user = await this.prisma.housingUser.update({
+      where: { id: session.userId },
+      data: {
+        passwordHash: hashPassword(input.newPassword),
+        requirePasswordChange: false
+      }
+    });
+
+    if (user.status !== "active") {
+      throw new Error("ACCOUNT_DISABLED");
+    }
+
+    await this.prisma.userSession.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: new Date() }
+    });
+
+    this.loginRateByPhone.delete(normalizeKenyaPhone(user.phone));
+    this.loginRateByEmail.delete(normalizeEmail(user.email));
+    return this.issueSessionForUser(user);
+  }
+
+  private async issueSessionForUser(user: {
+    id: string;
+    role: UserRole;
+    fullName: string;
+    email: string;
+    phone: string;
+    requirePasswordChange: boolean;
+  }): Promise<AuthenticatedUserSession> {
     const token = createSessionToken();
     const tokenHash = hashSessionToken(token);
-    const expiresAt = new Date(
-      now + this.sessionTtlHours * 60 * 60 * 1000
-    );
+    const expiresAt = new Date(nowMs() + this.sessionTtlHours * 60 * 60 * 1000);
 
     await this.prisma.userSession.create({
       data: {
@@ -257,8 +447,184 @@ export class UserAccountService {
       fullName: user.fullName,
       email: user.email,
       phone: user.phone,
-      expiresAt: expiresAt.toISOString()
+      expiresAt: expiresAt.toISOString(),
+      mustChangePassword: Boolean(user.requirePasswordChange)
     };
+  }
+
+  private async findActiveTenancyByHouseAndPhone(input: {
+    buildingId: string;
+    houseNumber: string;
+    phoneNumber: string;
+  }) {
+    const houseNumber = normalizeHouseNumber(input.houseNumber);
+    const phoneNumber = normalizeKenyaPhone(input.phoneNumber);
+    return this.prisma.tenancy.findFirst({
+      where: {
+        active: true,
+        buildingId: input.buildingId,
+        unit: {
+          houseNumber
+        },
+        user: {
+          phone: phoneNumber
+        }
+      },
+      include: {
+        user: true
+      },
+      orderBy: { createdAt: "desc" }
+    });
+  }
+
+  private async provisionResidentForSetup(input: {
+    buildingId: string;
+    houseNumber: string;
+    phoneNumber: string;
+    password: string;
+  }) {
+    const phoneNumber = normalizeKenyaPhone(input.phoneNumber);
+    const houseNumber = normalizeHouseNumber(input.houseNumber);
+    const passwordHash = hashPassword(input.password);
+
+    return this.prisma.$transaction(async (tx) => {
+      let unit = await tx.houseUnit.findUnique({
+        where: {
+          buildingId_houseNumber: {
+            buildingId: input.buildingId,
+            houseNumber
+          }
+        },
+        select: {
+          id: true,
+          isActive: true
+        }
+      });
+
+      if (!unit) {
+        const buildingUnitCount = await tx.houseUnit.count({
+          where: { buildingId: input.buildingId }
+        });
+
+        if (buildingUnitCount > 0) {
+          throw new Error("HOUSE_NOT_FOUND");
+        }
+
+        unit = await tx.houseUnit.create({
+          data: {
+            buildingId: input.buildingId,
+            houseNumber,
+            isActive: true
+          },
+          select: {
+            id: true,
+            isActive: true
+          }
+        });
+      }
+
+      if (!unit.isActive) {
+        throw new Error("HOUSE_INACTIVE");
+      }
+
+      const existingHouseTenancy = await tx.tenancy.findFirst({
+        where: {
+          buildingId: input.buildingId,
+          unitId: unit.id,
+          active: true
+        },
+        include: {
+          user: true
+        },
+        orderBy: {
+          createdAt: "desc"
+        }
+      });
+
+      if (
+        existingHouseTenancy &&
+        normalizeKenyaPhone(existingHouseTenancy.user.phone) !== phoneNumber
+      ) {
+        throw new Error("HOUSE_OCCUPIED");
+      }
+
+      let user = existingHouseTenancy?.user
+        ? existingHouseTenancy.user
+        : await tx.housingUser.findUnique({
+            where: { phone: phoneNumber }
+          });
+
+      if (!user) {
+        const email = await this.generateResidentPlaceholderEmail(tx, phoneNumber);
+        user = await tx.housingUser.create({
+          data: {
+            fullName: `Resident ${houseNumber}`,
+            email,
+            phone: phoneNumber,
+            passwordHash,
+            role: "tenant",
+            status: "active"
+          }
+        });
+      }
+
+      if (user.status !== "active") {
+        throw new Error("ACCOUNT_DISABLED");
+      }
+
+      if (!existingHouseTenancy || existingHouseTenancy.userId !== user.id) {
+        await tx.tenancy.updateMany({
+          where: {
+            userId: user.id,
+            active: true
+          },
+          data: {
+            active: false,
+            endedAt: new Date()
+          }
+        });
+
+        await tx.tenancy.create({
+          data: {
+            userId: user.id,
+            buildingId: input.buildingId,
+            unitId: unit.id,
+            active: true
+          }
+        });
+      }
+
+      return tx.housingUser.update({
+        where: { id: user.id },
+        data: {
+          passwordHash,
+          requirePasswordChange: false
+        }
+      });
+    });
+  }
+
+  private async generateResidentPlaceholderEmail(
+    tx: Prisma.TransactionClient,
+    phoneNumber: string
+  ): Promise<string> {
+    const digits = phoneNumber.replace(/\D/g, "");
+    const base = digits ? `resident.${digits}` : `resident.${randomBytes(4).toString("hex")}`;
+    const domain = "resident.captyn.local";
+
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const suffix = attempt === 0 ? "" : `.${attempt}`;
+      const candidate = `${base}${suffix}@${domain}`;
+      const existing = await tx.housingUser.findUnique({
+        where: { email: candidate },
+        select: { id: true }
+      });
+      if (!existing) {
+        return candidate;
+      }
+    }
+
+    return `${base}.${randomBytes(3).toString("hex")}@${domain}`;
   }
 
   async getSession(token: string | undefined): Promise<AuthenticatedUserSession | null> {
@@ -293,7 +659,8 @@ export class UserAccountService {
       fullName: session.user.fullName,
       email: session.user.email,
       phone: session.user.phone,
-      expiresAt: session.expiresAt.toISOString()
+      expiresAt: session.expiresAt.toISOString(),
+      mustChangePassword: Boolean(session.user.requirePasswordChange)
     };
   }
 
@@ -833,6 +1200,15 @@ export class UserAccountService {
     return mapLandlordAccessRequest(updated);
   }
 
+  private isRateLimited(
+    source: Map<string, LoginRateRecord>,
+    key: string
+  ): boolean {
+    const now = nowMs();
+    const record = source.get(key);
+    return Boolean(record && record.resetAt > now && record.attempts >= this.loginMaxAttempts);
+  }
+
   private trackFailedLogin(email: string) {
     const now = nowMs();
     const existing = this.loginRateByEmail.get(email);
@@ -850,10 +1226,33 @@ export class UserAccountService {
     });
   }
 
+  private trackFailedPhoneLogin(phone: string) {
+    const now = nowMs();
+    const existing = this.loginRateByPhone.get(phone);
+    if (!existing || existing.resetAt <= now) {
+      this.loginRateByPhone.set(phone, {
+        attempts: 1,
+        resetAt: now + this.loginWindowMs
+      });
+      return;
+    }
+
+    this.loginRateByPhone.set(phone, {
+      attempts: existing.attempts + 1,
+      resetAt: existing.resetAt
+    });
+  }
+
   private async purgeExpiredSessions() {
     for (const [email, record] of this.loginRateByEmail) {
       if (record.resetAt <= nowMs()) {
         this.loginRateByEmail.delete(email);
+      }
+    }
+
+    for (const [phone, record] of this.loginRateByPhone) {
+      if (record.resetAt <= nowMs()) {
+        this.loginRateByPhone.delete(phone);
       }
     }
 

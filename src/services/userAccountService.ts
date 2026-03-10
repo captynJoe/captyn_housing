@@ -7,6 +7,7 @@ import type {
   UserRole
 } from "@prisma/client";
 import type {
+  AdminRevokeLandlordInput,
   CreateLandlordAccessRequestInput,
   LandlordDecisionInput,
   ResidentAdminPasswordResetInput,
@@ -312,6 +313,9 @@ export class UserAccountService {
     if (user.status !== "active") {
       throw new Error("ACCOUNT_DISABLED");
     }
+    if (user.role !== "tenant") {
+      throw new Error("RESIDENT_SIGNUP_ROLE_CONFLICT");
+    }
 
     this.loginRateByPhone.delete(phone);
     this.loginRateByEmail.delete(normalizeEmail(user.email));
@@ -347,6 +351,9 @@ export class UserAccountService {
 
     if (user.status !== "active") {
       throw new Error("ACCOUNT_DISABLED");
+    }
+    if (user.role !== "tenant") {
+      throw new Error("RESIDENT_LOGIN_ROLE_CONFLICT");
     }
 
     this.loginRateByPhone.delete(phone);
@@ -389,6 +396,128 @@ export class UserAccountService {
       buildingId: input.buildingId,
       houseNumber,
       resetAt: new Date().toISOString()
+    };
+  }
+
+  async resolveUserByIdentifier(identifier: string): Promise<{
+    identifierType: "email" | "phone";
+    normalizedIdentifier: string;
+    user: {
+      id: string;
+      fullName: string;
+      email: string;
+      phone: string;
+      role: UserRole;
+      status: string;
+    } | null;
+  }> {
+    await this.purgeExpiredSessions();
+
+    const raw = String(identifier ?? "").trim();
+    const compact = raw.replace(/[\s-]/g, "");
+    const looksLikeKenyaPhone = /^(?:\+254|254|0)\d{9}$/.test(compact);
+    const identifierType: "email" | "phone" = looksLikeKenyaPhone ? "phone" : "email";
+    const normalizedIdentifier =
+      identifierType === "phone"
+        ? normalizeKenyaPhone(compact)
+        : normalizeEmail(raw);
+
+    const user =
+      identifierType === "phone"
+        ? await this.prisma.housingUser.findUnique({
+            where: { phone: normalizedIdentifier },
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              phone: true,
+              role: true,
+              status: true
+            }
+          })
+        : await this.prisma.housingUser.findUnique({
+            where: { email: normalizedIdentifier },
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              phone: true,
+              role: true,
+              status: true
+            }
+          });
+
+    return {
+      identifierType,
+      normalizedIdentifier,
+      user
+    };
+  }
+
+  async resetPasswordByUserId(input: {
+    userId: string;
+    temporaryPassword: string;
+    requirePasswordChange?: boolean;
+  }) {
+    await this.purgeExpiredSessions();
+
+    const existing = await this.prisma.housingUser.findUnique({
+      where: { id: input.userId },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        role: true,
+        status: true
+      }
+    });
+
+    if (!existing) {
+      throw new Error("USER_NOT_FOUND");
+    }
+
+    if (existing.status !== "active") {
+      throw new Error("ACCOUNT_DISABLED");
+    }
+
+    const resetAt = new Date();
+    const requirePasswordChange =
+      typeof input.requirePasswordChange === "boolean"
+        ? input.requirePasswordChange
+        : true;
+
+    const user = await this.prisma.housingUser.update({
+      where: { id: existing.id },
+      data: {
+        passwordHash: hashPassword(input.temporaryPassword),
+        requirePasswordChange
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        role: true
+      }
+    });
+
+    await this.prisma.userSession.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: resetAt }
+    });
+
+    this.loginRateByPhone.delete(normalizeKenyaPhone(user.phone));
+    this.loginRateByEmail.delete(normalizeEmail(user.email));
+
+    return {
+      userId: user.id,
+      fullName: user.fullName,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      requirePasswordChange,
+      resetAt: resetAt.toISOString()
     };
   }
 
@@ -571,6 +700,9 @@ export class UserAccountService {
       if (user.status !== "active") {
         throw new Error("ACCOUNT_DISABLED");
       }
+      if (user.role !== "tenant") {
+        throw new Error("RESIDENT_SIGNUP_ROLE_CONFLICT");
+      }
 
       if (!existingHouseTenancy || existingHouseTenancy.userId !== user.id) {
         await tx.tenancy.updateMany({
@@ -711,6 +843,123 @@ export class UserAccountService {
       select: { id: true }
     });
     return Boolean(tenancy);
+  }
+
+  async removeResidentFromBuilding(
+    session: AuthenticatedUserSession,
+    input: { buildingId: string; userId: string; note?: string }
+  ) {
+    if (session.role !== "landlord" && session.role !== "admin" && session.role !== "root_admin") {
+      throw new Error("LANDLORD_OR_ADMIN_ROLE_REQUIRED");
+    }
+
+    const building = await this.prisma.building.findUnique({
+      where: { id: input.buildingId },
+      select: {
+        id: true,
+        name: true,
+        landlordUserId: true
+      }
+    });
+    if (!building) {
+      throw new Error("BUILDING_NOT_FOUND");
+    }
+
+    if (session.role === "landlord" && building.landlordUserId !== session.userId) {
+      throw new Error("BUILDING_ACCESS_DENIED");
+    }
+
+    const tenancy = await this.prisma.tenancy.findFirst({
+      where: {
+        buildingId: input.buildingId,
+        userId: input.userId,
+        active: true
+      },
+      include: {
+        unit: {
+          select: {
+            houseNumber: true
+          }
+        },
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            phone: true,
+            role: true
+          }
+        }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+
+    if (!tenancy) {
+      throw new Error("TENANCY_NOT_FOUND");
+    }
+
+    if (tenancy.user.role === "admin" || tenancy.user.role === "root_admin") {
+      throw new Error("TARGET_USER_NOT_RESIDENT");
+    }
+
+    const note = input.note?.trim() || undefined;
+    const endedAt = new Date();
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.tenancy.updateMany({
+        where: {
+          buildingId: input.buildingId,
+          userId: input.userId,
+          active: true
+        },
+        data: {
+          active: false,
+          endedAt
+        }
+      });
+
+      await tx.userSession.updateMany({
+        where: {
+          userId: input.userId,
+          revokedAt: null
+        },
+        data: {
+          revokedAt: endedAt
+        }
+      });
+
+      if (note) {
+        await tx.tenantApplication.updateMany({
+          where: {
+            userId: input.userId,
+            buildingId: input.buildingId,
+            status: "pending"
+          },
+          data: {
+            status: "rejected",
+            note,
+            reviewedAt: endedAt,
+            reviewedByUserId: session.userId
+          }
+        });
+      }
+    });
+
+    return {
+      building: {
+        id: building.id,
+        name: building.name
+      },
+      user: {
+        id: tenancy.user.id,
+        fullName: tenancy.user.fullName,
+        email: tenancy.user.email,
+        phone: tenancy.user.phone
+      },
+      houseNumber: tenancy.unit.houseNumber,
+      note,
+      removedAt: endedAt.toISOString()
+    };
   }
 
   async createTenantApplication(
@@ -1075,7 +1324,15 @@ export class UserAccountService {
       orderBy: { requestedAt: "desc" }
     });
 
-    return rows.map((item) => mapLandlordAccessRequest(item));
+    const mapped = rows.map((item) => mapLandlordAccessRequest(item));
+
+    // Hide stale approved rows when user is no longer an active landlord.
+    return mapped.filter((item) => {
+      if (item.status !== "approved") {
+        return true;
+      }
+      return item.user.role === "landlord";
+    });
   }
 
   async listLandlordAccessRequests(
@@ -1109,7 +1366,15 @@ export class UserAccountService {
       take: boundedLimit
     });
 
-    return rows.map((item) => mapLandlordAccessRequest(item));
+    const mapped = rows.map((item) => mapLandlordAccessRequest(item));
+
+    // Hide stale approved rows when user is no longer an active landlord.
+    return mapped.filter((item) => {
+      if (item.status !== "approved") {
+        return true;
+      }
+      return item.user.role === "landlord";
+    });
   }
 
   async reviewLandlordAccessRequest(
@@ -1198,6 +1463,96 @@ export class UserAccountService {
     });
 
     return mapLandlordAccessRequest(updated);
+  }
+
+  async revokeLandlordRole(
+    userId: string,
+    input: AdminRevokeLandlordInput & { reviewerUserId?: string }
+  ) {
+    const targetUser = await this.prisma.housingUser.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        role: true
+      }
+    });
+
+    if (!targetUser) {
+      throw new Error("LANDLORD_USER_NOT_FOUND");
+    }
+
+    if (targetUser.role !== "landlord") {
+      throw new Error("LANDLORD_ROLE_NOT_ASSIGNED");
+    }
+
+    const revokedAt = new Date();
+    const note = input.note?.trim() || undefined;
+
+    const outcome = await this.prisma.$transaction(async (tx) => {
+      const clearedBuildings = await tx.building.updateMany({
+        where: {
+          landlordUserId: targetUser.id
+        },
+        data: {
+          landlordUserId: null
+        }
+      });
+
+      await tx.housingUser.update({
+        where: { id: targetUser.id },
+        data: {
+          role: "tenant"
+        }
+      });
+
+      const revokedSessions = await tx.userSession.updateMany({
+        where: {
+          userId: targetUser.id,
+          revokedAt: null
+        },
+        data: {
+          revokedAt
+        }
+      });
+
+      await tx.landlordAccessRequest.updateMany({
+        where: {
+          userId: targetUser.id,
+          status: {
+            in: ["pending", "approved"]
+          }
+        },
+        data: {
+          status: "rejected",
+          reviewerNote: note ?? "Revoked during admin landlord-role removal.",
+          reviewedAt: revokedAt,
+          reviewedByUserId: input.reviewerUserId ?? null
+        }
+      });
+
+      return {
+        clearedBuildingsCount: clearedBuildings.count,
+        revokedSessionsCount: revokedSessions.count
+      };
+    });
+
+    return {
+      user: {
+        id: targetUser.id,
+        fullName: targetUser.fullName,
+        email: targetUser.email,
+        phone: targetUser.phone,
+        previousRole: "landlord" as const,
+        currentRole: "tenant" as const
+      },
+      note,
+      revokedAt: revokedAt.toISOString(),
+      clearedBuildingsCount: outcome.clearedBuildingsCount,
+      revokedSessionsCount: outcome.revokedSessionsCount
+    };
   }
 
   private isRateLimited(

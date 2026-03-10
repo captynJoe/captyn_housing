@@ -1,3 +1,5 @@
+import { initPasswordVisibilityToggles } from "./password-visibility.js";
+
 const RESIDENT_TOKEN_KEY = "captyn_resident_session_token";
 
 const apiStatusEl = document.getElementById("api-status");
@@ -34,7 +36,7 @@ const authBuildingIdEl = document.getElementById("auth-building-id");
 const authHouseNumberEl = document.getElementById("auth-house-number");
 const authPhoneNumberEl = document.getElementById("auth-phone-number");
 const authPasswordEl = document.getElementById("auth-password");
-const residentSetupBtnEl = document.getElementById("resident-setup-btn");
+const residentSignupBtnEl = document.getElementById("resident-signup-btn");
 const residentLoginBtnEl = document.getElementById("resident-login-btn");
 const residentForgotBtnEl = document.getElementById("resident-forgot-btn");
 
@@ -45,6 +47,12 @@ const boundHouseNumberEl = document.getElementById("bound-house-number");
 const reportTypeEl = document.getElementById("report-type");
 const reportTitleEl = document.getElementById("report-title");
 const reportDetailsEl = document.getElementById("report-details");
+const theftWorkflowFieldsEl = document.getElementById("theft-workflow-fields");
+const reportStolenItemEl = document.getElementById("report-stolen-item");
+const reportIncidentLocationEl = document.getElementById("report-incident-location");
+const reportIncidentStartEl = document.getElementById("report-incident-start");
+const reportIncidentEndEl = document.getElementById("report-incident-end");
+const reportCaseReferenceEl = document.getElementById("report-case-reference");
 const submitBtnEl = document.getElementById("submit-btn");
 
 const reportsListEl = document.getElementById("reports-list");
@@ -91,6 +99,7 @@ const state = {
   buildings: [],
   residentSession: null,
   utilityBills: [],
+  utilityMeters: [],
   paymentAccess: { ...DEFAULT_PAYMENT_ACCESS },
   residentToken: localStorage.getItem(RESIDENT_TOKEN_KEY) ?? "",
   rentPaymentPollTimer: null,
@@ -137,7 +146,7 @@ const REQUIRED_DOM_BINDINGS = Object.freeze([
   ["auth-house-number", authHouseNumberEl],
   ["auth-phone-number", authPhoneNumberEl],
   ["auth-password", authPasswordEl],
-  ["resident-setup-btn", residentSetupBtnEl],
+  ["resident-signup-btn", residentSignupBtnEl],
   ["resident-login-btn", residentLoginBtnEl],
   ["resident-forgot-btn", residentForgotBtnEl],
   ["refresh-all-btn", refreshAllBtnEl],
@@ -147,6 +156,12 @@ const REQUIRED_DOM_BINDINGS = Object.freeze([
   ["report-type", reportTypeEl],
   ["report-title", reportTitleEl],
   ["report-details", reportDetailsEl],
+  ["theft-workflow-fields", theftWorkflowFieldsEl],
+  ["report-stolen-item", reportStolenItemEl],
+  ["report-incident-location", reportIncidentLocationEl],
+  ["report-incident-start", reportIncidentStartEl],
+  ["report-incident-end", reportIncidentEndEl],
+  ["report-case-reference", reportCaseReferenceEl],
   ["submit-btn", submitBtnEl],
   ["reports-list", reportsListEl],
   ["reports-count", reportsCountEl],
@@ -198,6 +213,20 @@ function formatDateTime(value) {
 
 function formatCurrency(value) {
   return `KSh ${Number(value ?? 0).toLocaleString("en-US")}`;
+}
+
+function toIsoFromDateTimeLocal(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date.toISOString();
 }
 
 function utilityLabel(utilityType) {
@@ -349,6 +378,39 @@ function clearFeedback() {
   feedbackBoxEl.classList.remove("error", "success");
 }
 
+function formatSessionExpirySuffix(expiresAt) {
+  if (!expiresAt) {
+    return ".";
+  }
+
+  return ` (expires ${formatDateTime(expiresAt)}).`;
+}
+
+function syncReportTypeUi() {
+  const isTheftReport = reportTypeEl.value === "stolen_item";
+  theftWorkflowFieldsEl.classList.toggle("hidden", !isTheftReport);
+
+  reportStolenItemEl.required = isTheftReport;
+  reportIncidentLocationEl.required = isTheftReport;
+  reportIncidentStartEl.required = isTheftReport;
+  reportIncidentEndEl.required = isTheftReport;
+
+  if (!isTheftReport) {
+    reportStolenItemEl.value = "";
+    reportIncidentLocationEl.value = "";
+    reportIncidentStartEl.value = "";
+    reportIncidentEndEl.value = "";
+    reportCaseReferenceEl.value = "";
+  }
+}
+
+function resetReportForm() {
+  reportTitleEl.value = "";
+  reportDetailsEl.value = "";
+  reportTypeEl.value = "room_issue";
+  syncReportTypeUi();
+}
+
 function setActiveResidentView(nextView) {
   const targetView = VALID_RESIDENT_VIEWS.has(nextView) ? nextView : "overview";
   state.activeResidentView = targetView;
@@ -453,6 +515,84 @@ async function requestJson(url, options = {}, { auth = false } = {}) {
   }
 
   return payload;
+}
+
+async function readSessionSnapshot(url) {
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      cache: "no-store"
+    });
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = await response.json().catch(() => ({}));
+    return payload?.data ?? null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function detectExistingPortalSession() {
+  const userSession = await readSessionSnapshot("/api/auth/session");
+  if (userSession?.role) {
+    return {
+      role: String(userSession.role),
+      source: "user",
+      expiresAt: userSession.expiresAt
+    };
+  }
+
+  const landlordSession = await readSessionSnapshot("/api/auth/landlord/session");
+  if (landlordSession?.role) {
+    return {
+      role: String(landlordSession.role),
+      source: "landlord",
+      expiresAt: landlordSession.expiresAt
+    };
+  }
+
+  const adminSession = await readSessionSnapshot("/api/auth/admin/session");
+  if (adminSession?.role) {
+    return {
+      role: String(adminSession.role),
+      source: "admin",
+      expiresAt: adminSession.expiresAt
+    };
+  }
+
+  return null;
+}
+
+function showNonResidentSessionState(sessionInfo) {
+  const role = String(sessionInfo?.role || "account");
+  authStateEl.textContent = `Signed in (${role})`;
+  residentAuthPanelEl.classList.remove("hidden");
+  residentSessionPanelEl.classList.remove("hidden");
+  residentPasswordChangePanelEl.classList.add("hidden");
+  residentLayoutEl.classList.add("hidden");
+  residentSessionSummaryEl.textContent = `Another ${role} session is active${formatSessionExpirySuffix(
+    sessionInfo?.expiresAt
+  )} Sign out before resident sign up/sign in.`;
+}
+
+async function syncAuthConflictState() {
+  const sessionInfo = await detectExistingPortalSession();
+  if (sessionInfo) {
+    showNonResidentSessionState(sessionInfo);
+    return true;
+  }
+
+  return false;
+}
+
+function isAlreadySignedInError(error) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return error.message.toLowerCase().includes("already signed in");
 }
 
 function renderAuthBuildingLoading() {
@@ -624,14 +764,23 @@ function renderRentDue(rentDue, fallbackMessage) {
   rentDueEl.append(keyvals);
 }
 
-function renderUtilityBills(bills) {
+function renderUtilityBills(bills, meters = []) {
   utilityBillsListEl.replaceChildren();
 
   if (!Array.isArray(bills) || bills.length === 0) {
-    utilityBillsSummaryEl.textContent = "No utility bills posted yet.";
+    const meterSummary = Array.isArray(meters)
+      ? meters
+          .map((item) => `${utilityLabel(item.utilityType)} meter ${item.meterNumber}`)
+          .join(" • ")
+      : "";
+
+    utilityBillsSummaryEl.textContent = meterSummary
+      ? `No utility bills posted yet. ${meterSummary}`
+      : "No utility bills posted yet.";
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent = "Water and electricity balances will appear here.";
+    empty.textContent =
+      "Water and electricity balances plus previous/current readings will appear once monthly bills are posted.";
     utilityBillsListEl.append(empty);
     return;
   }
@@ -674,10 +823,16 @@ function renderUtilityBills(bills) {
 
     const details = document.createElement("p");
     details.className = "item-details";
+    const readingDetails =
+      bill.meterNumber === "NO-METER"
+        ? `Fixed charge ${formatCurrency(bill.fixedChargeKsh)}`
+        : `Reading ${Number(bill.previousReading ?? 0).toLocaleString("en-US")} -> ${Number(
+            bill.currentReading ?? 0
+          ).toLocaleString("en-US")}`;
     details.textContent =
       `Balance ${formatCurrency(bill.balanceKsh)} of ${formatCurrency(
         bill.amountKsh
-      )} • Due ${formatDateTime(bill.dueDate)}`;
+      )} • Due ${formatDateTime(bill.dueDate)} • ${readingDetails}`;
 
     card.append(top, details);
     utilityBillsListEl.append(card);
@@ -846,15 +1001,17 @@ function showSignedOutState() {
   renderRentDue(null, undefined);
   renderRentPayments([]);
   state.utilityBills = [];
+  state.utilityMeters = [];
   state.utilitySelectedBillMonthByType = {
     water: null,
     electricity: null
   };
   state.paymentAccess = { ...DEFAULT_PAYMENT_ACCESS };
-  renderUtilityBills([]);
+  renderUtilityBills([], []);
   renderUtilityPayments([]);
   renderOverviewSession();
   setActiveResidentView("overview");
+  resetReportForm();
   syncUtilityPaymentFormFromBalances();
   applyPaymentAccessUi();
 }
@@ -945,7 +1102,8 @@ async function loadTenantData() {
     renderRentDue(rentPayload.data ?? null, rentPayload.message);
     renderRentPayments(rentPaymentsPayload.data ?? []);
     state.utilityBills = utilitiesPayload.data ?? [];
-    renderUtilityBills(state.utilityBills);
+    state.utilityMeters = utilitiesPayload.meters ?? [];
+    renderUtilityBills(state.utilityBills, state.utilityMeters);
     syncUtilityPaymentFormFromBalances();
     renderUtilityPayments(utilityPaymentsPayload.data ?? []);
   } catch (error) {
@@ -972,57 +1130,6 @@ function buildResidentAuthPayload() {
   };
 }
 
-async function setupResidentPassword() {
-  clearFeedback();
-  const payload = buildResidentAuthPayload();
-
-  if (!payload.password || payload.password.length < 8) {
-    showFeedback("Password must be at least 8 characters.");
-    return;
-  }
-
-  residentSetupBtnEl.disabled = true;
-  residentLoginBtnEl.disabled = true;
-
-  try {
-    const response = await requestJson("/api/auth/resident/setup-password", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const token = response.data?.token;
-    if (!token) {
-      throw new Error("Resident session token was not returned.");
-    }
-
-    saveResidentToken(token);
-    const loaded = await loadResidentSession();
-    if (!loaded) {
-      throw new Error("Could not restore resident session.");
-    }
-
-    if (isPasswordChangeRequired()) {
-      showFeedback(
-        "Temporary password accepted. Set a new password to continue.",
-        "success"
-      );
-    } else {
-      showFeedback("Password created and sign-in complete.", "success");
-      await loadTenantData();
-    }
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unable to create resident password.";
-    showFeedback(message);
-  } finally {
-    residentSetupBtnEl.disabled = false;
-    residentLoginBtnEl.disabled = false;
-  }
-}
-
 async function requestResidentPasswordRecovery() {
   clearFeedback();
   const payload = buildResidentAuthPayload();
@@ -1031,14 +1138,6 @@ async function requestResidentPasswordRecovery() {
     showFeedback("Provide building, house number, and phone number first.");
     return;
   }
-
-  const noteRaw = window.prompt(
-    "Optional note for management (e.g., ID checked at office). Leave blank to skip."
-  );
-  const note =
-    noteRaw == null || String(noteRaw).trim().length === 0
-      ? undefined
-      : String(noteRaw).trim();
 
   residentForgotBtnEl.disabled = true;
 
@@ -1051,8 +1150,7 @@ async function requestResidentPasswordRecovery() {
       body: JSON.stringify({
         buildingId: payload.buildingId,
         houseNumber: payload.houseNumber,
-        phoneNumber: payload.phoneNumber,
-        note
+        phoneNumber: payload.phoneNumber
       })
     });
 
@@ -1082,8 +1180,8 @@ async function loginResident(event) {
     return;
   }
 
-  residentSetupBtnEl.disabled = true;
   residentLoginBtnEl.disabled = true;
+  residentSignupBtnEl.disabled = true;
 
   try {
     const response = await requestJson("/api/auth/resident/login-phone", {
@@ -1120,7 +1218,67 @@ async function loginResident(event) {
       error instanceof Error ? error.message : "Unable to sign in resident.";
     showFeedback(message);
   } finally {
-    residentSetupBtnEl.disabled = false;
+    residentLoginBtnEl.disabled = false;
+    residentSignupBtnEl.disabled = false;
+  }
+}
+
+async function signupResident() {
+  clearFeedback();
+
+  if (await syncAuthConflictState()) {
+    showFeedback("Another account is signed in. Sign out first, then create resident account.");
+    return;
+  }
+
+  const payload = buildResidentAuthPayload();
+  if (!payload.password || payload.password.length < 8) {
+    showFeedback("Set a password with at least 8 characters to sign up.");
+    return;
+  }
+
+  residentSignupBtnEl.disabled = true;
+  residentLoginBtnEl.disabled = true;
+
+  try {
+    const response = await requestJson("/api/auth/resident/signup", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const token = response.data?.token;
+    if (!token) {
+      throw new Error("Resident session token was not returned.");
+    }
+
+    saveResidentToken(token);
+
+    const loaded = await loadResidentSession();
+    if (!loaded) {
+      throw new Error("Could not restore resident session.");
+    }
+
+    if (isPasswordChangeRequired()) {
+      showFeedback(
+        "Temporary password detected. Set a new password before using the portal.",
+        "success"
+      );
+    } else {
+      showFeedback("Account created and signed in successfully.", "success");
+      await loadTenantData();
+    }
+  } catch (error) {
+    if (isAlreadySignedInError(error)) {
+      await syncAuthConflictState();
+    }
+    const message =
+      error instanceof Error ? error.message : "Unable to sign up resident.";
+    showFeedback(message);
+  } finally {
+    residentSignupBtnEl.disabled = false;
     residentLoginBtnEl.disabled = false;
   }
 }
@@ -1188,12 +1346,76 @@ async function submitTicket(event) {
   event.preventDefault();
   clearFeedback();
 
+  const reportType = String(reportTypeEl.value ?? "room_issue");
+  const title = reportTitleEl.value.trim();
+  const details = reportDetailsEl.value.trim();
+
+  if (!title) {
+    showFeedback("Provide a clear request title.");
+    return;
+  }
+
+  if (details.length < 5) {
+    showFeedback("Add enough details so the team can act quickly.");
+    return;
+  }
+
+  let stolenItem;
+  let incidentLocation;
+  let incidentWindowStartAt;
+  let incidentWindowEndAt;
+  let caseReference;
+
+  if (reportType === "stolen_item") {
+    stolenItem = reportStolenItemEl.value.trim();
+    incidentLocation = reportIncidentLocationEl.value.trim();
+    caseReference = reportCaseReferenceEl.value.trim() || undefined;
+
+    if (!stolenItem) {
+      showFeedback("Stolen item is required for theft reports.");
+      return;
+    }
+
+    if (!incidentLocation) {
+      showFeedback("Incident location is required for theft reports.");
+      return;
+    }
+
+    const startAt = toIsoFromDateTimeLocal(reportIncidentStartEl.value);
+    const endAt = toIsoFromDateTimeLocal(reportIncidentEndEl.value);
+
+    if (!startAt) {
+      showFeedback("Incident start date/time is required for theft reports.");
+      return;
+    }
+
+    if (!endAt) {
+      showFeedback("Incident end date/time is required for theft reports.");
+      return;
+    }
+
+    if (new Date(endAt).getTime() < new Date(startAt).getTime()) {
+      showFeedback("Incident end date/time must be after start date/time.");
+      return;
+    }
+
+    incidentWindowStartAt = startAt;
+    incidentWindowEndAt = endAt;
+  }
+
   const payload = {
-    type: reportTypeEl.value,
-    title: reportTitleEl.value.trim(),
-    details: reportDetailsEl.value.trim(),
+    type: reportType,
+    title,
+    details,
     evidenceAttachments: []
   };
+  if (reportType === "stolen_item") {
+    payload.stolenItem = stolenItem;
+    payload.incidentLocation = incidentLocation;
+    payload.incidentWindowStartAt = incidentWindowStartAt;
+    payload.incidentWindowEndAt = incidentWindowEndAt;
+    payload.caseReference = caseReference;
+  }
 
   submitBtnEl.disabled = true;
 
@@ -1216,9 +1438,7 @@ async function submitTicket(event) {
       "success"
     );
 
-    reportTitleEl.value = "";
-    reportDetailsEl.value = "";
-    reportTypeEl.value = "room_issue";
+    resetReportForm();
 
     await loadTenantData();
   } catch (error) {
@@ -1656,6 +1876,7 @@ async function boot() {
       }
     } else {
       showSignedOutState();
+      await syncAuthConflictState();
     }
   } catch (error) {
     showSignedOutState();
@@ -1689,8 +1910,8 @@ function startResidentPortal() {
     void loginResident(event);
   });
 
-  residentSetupBtnEl.addEventListener("click", () => {
-    void setupResidentPassword();
+  residentSignupBtnEl.addEventListener("click", () => {
+    void signupResident();
   });
 
   residentForgotBtnEl.addEventListener("click", () => {
@@ -1703,6 +1924,10 @@ function startResidentPortal() {
 
   reportFormEl.addEventListener("submit", (event) => {
     void submitTicket(event);
+  });
+
+  reportTypeEl.addEventListener("change", () => {
+    syncReportTypeUi();
   });
 
   rentPaymentFormEl.addEventListener("submit", (event) => {
@@ -1765,6 +1990,7 @@ function startResidentPortal() {
     void signOutResident();
   });
 
+  syncReportTypeUi();
   syncUtilityPaymentProviderUi();
   syncUtilityPaymentFormFromBalances();
   applyPaymentAccessUi();
@@ -1773,5 +1999,6 @@ function startResidentPortal() {
 }
 
 if (hasRequiredDomBindings()) {
+  initPasswordVisibilityToggles();
   startResidentPortal();
 }

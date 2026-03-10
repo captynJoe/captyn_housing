@@ -7,9 +7,11 @@ import type {
 } from "../validation/schemas.js";
 
 export type UtilityType = UtilityTypeInput;
+export const UTILITY_LEGACY_BUILDING_ID = "__LEGACY__";
 
 export interface UtilityMeterRecord {
   utilityType: UtilityType;
+  buildingId: string;
   houseNumber: string;
   meterNumber: string;
   updatedAt: string;
@@ -18,6 +20,7 @@ export interface UtilityMeterRecord {
 export interface UtilityPaymentEvent {
   id: string;
   utilityType: UtilityType;
+  buildingId: string;
   houseNumber: string;
   billingMonth?: string;
   provider: "mpesa" | "cash" | "bank" | "card";
@@ -31,6 +34,7 @@ export interface UtilityPaymentEvent {
 interface UtilityBillRecord {
   id: string;
   utilityType: UtilityType;
+  buildingId: string;
   houseNumber: string;
   billingMonth: string;
   meterNumber: string;
@@ -60,6 +64,7 @@ export interface RecordUtilityPaymentResult {
 }
 
 export interface UtilityReminderNotification {
+  buildingId: string;
   houseNumber: string;
   utilityType: UtilityType;
   billingMonth: string;
@@ -72,12 +77,14 @@ export interface UtilityReminderNotification {
 
 interface ListUtilityBillsOptions {
   utilityType?: UtilityType;
+  buildingId?: string;
   houseNumber?: string;
   limit?: number;
 }
 
 interface ListUtilityPaymentsOptions {
   utilityType?: UtilityType;
+  buildingId?: string;
   houseNumber?: string;
   limit?: number;
 }
@@ -99,8 +106,37 @@ function normalizeHouseNumber(value: string): string {
   return value.trim().toUpperCase();
 }
 
-function ledgerKey(utilityType: UtilityType, houseNumber: string): string {
-  return `${utilityType}:${normalizeHouseNumber(houseNumber)}`;
+function normalizeBuildingId(value: string | undefined): string {
+  const normalized = String(value ?? "")
+    .trim()
+    .toUpperCase();
+  return normalized || UTILITY_LEGACY_BUILDING_ID;
+}
+
+function ledgerKey(
+  utilityType: UtilityType,
+  buildingId: string,
+  houseNumber: string
+): string {
+  return `${utilityType}:${normalizeBuildingId(buildingId)}:${normalizeHouseNumber(
+    houseNumber
+  )}`;
+}
+
+function buildingMatchesScope(
+  itemBuildingId: string,
+  requestedBuildingId?: string
+): boolean {
+  if (!requestedBuildingId) {
+    return true;
+  }
+
+  const normalizedItem = normalizeBuildingId(itemBuildingId);
+  const normalizedRequested = normalizeBuildingId(requestedBuildingId);
+  return (
+    normalizedItem === normalizedRequested ||
+    normalizedItem === UTILITY_LEGACY_BUILDING_ID
+  );
 }
 
 function dayDiff(from: Date, to: Date): number {
@@ -168,15 +204,23 @@ export class UtilityBillingService {
         }
 
         const normalizedHouse = normalizeHouseNumber(meter.houseNumber);
+        const normalizedBuildingId = normalizeBuildingId(
+          (meter as { buildingId?: string }).buildingId
+        );
         const normalized: UtilityMeterRecord = {
           utilityType: meter.utilityType,
+          buildingId: normalizedBuildingId,
           houseNumber: normalizedHouse,
           meterNumber: String(meter.meterNumber).trim(),
           updatedAt: meter.updatedAt || nowIso()
         };
 
         this.meters.set(
-          ledgerKey(normalized.utilityType, normalized.houseNumber),
+          ledgerKey(
+            normalized.utilityType,
+            normalized.buildingId,
+            normalized.houseNumber
+          ),
           normalized
         );
       }
@@ -189,12 +233,16 @@ export class UtilityBillingService {
         }
 
         const normalizedHouse = normalizeHouseNumber(snapshot.houseNumber);
-        const key = ledgerKey(snapshot.utilityType, normalizedHouse);
+        const normalizedBuildingId = normalizeBuildingId(
+          (snapshot as { buildingId?: string }).buildingId
+        );
+        const key = ledgerKey(snapshot.utilityType, normalizedBuildingId, normalizedHouse);
         const records = this.billsByLedger.get(key) ?? [];
 
         const record: UtilityBillRecord = {
           id: snapshot.id,
           utilityType: snapshot.utilityType,
+          buildingId: normalizedBuildingId,
           houseNumber: normalizedHouse,
           billingMonth: snapshot.billingMonth,
           meterNumber: snapshot.meterNumber,
@@ -213,6 +261,8 @@ export class UtilityBillingService {
             ? snapshot.payments.map((payment) => ({
                 ...payment,
                 utilityType: snapshot.utilityType,
+                buildingId:
+                  (payment as { buildingId?: string }).buildingId ?? normalizedBuildingId,
                 houseNumber: normalizedHouse,
                 billingMonth: payment.billingMonth ?? snapshot.billingMonth
               }))
@@ -231,31 +281,55 @@ export class UtilityBillingService {
 
   upsertMeter(
     utilityType: UtilityType,
+    buildingId: string,
     houseNumber: string,
     input: UpsertUtilityMeterInput
   ): UtilityMeterRecord {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
     const normalizedHouse = normalizeHouseNumber(houseNumber);
     const meter: UtilityMeterRecord = {
       utilityType,
+      buildingId: normalizedBuildingId,
       houseNumber: normalizedHouse,
       meterNumber: input.meterNumber.trim(),
       updatedAt: nowIso()
     };
 
-    this.meters.set(ledgerKey(utilityType, normalizedHouse), meter);
+    this.meters.set(ledgerKey(utilityType, normalizedBuildingId, normalizedHouse), meter);
     this.emitStateChange();
     return { ...meter };
   }
 
   getMeter(
     utilityType: UtilityType,
+    buildingId: string,
     houseNumber: string
   ): UtilityMeterRecord | null {
-    const meter = this.meters.get(ledgerKey(utilityType, houseNumber));
-    return meter ? { ...meter } : null;
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const normalizedHouse = normalizeHouseNumber(houseNumber);
+    const exact = this.meters.get(ledgerKey(utilityType, normalizedBuildingId, normalizedHouse));
+    if (exact) {
+      return { ...exact };
+    }
+
+    if (normalizedBuildingId !== UTILITY_LEGACY_BUILDING_ID) {
+      const legacy = this.meters.get(
+        ledgerKey(utilityType, UTILITY_LEGACY_BUILDING_ID, normalizedHouse)
+      );
+      if (legacy) {
+        return { ...legacy };
+      }
+    }
+
+    return null;
   }
 
-  listMeters(options: { utilityType?: UtilityType; houseNumber?: string } = {}) {
+  listMeters(
+    options: { utilityType?: UtilityType; buildingId?: string; houseNumber?: string } = {}
+  ) {
+    const normalizedBuildingId = options.buildingId
+      ? normalizeBuildingId(options.buildingId)
+      : undefined;
     const normalizedHouse = options.houseNumber
       ? normalizeHouseNumber(options.houseNumber)
       : undefined;
@@ -263,6 +337,13 @@ export class UtilityBillingService {
     return [...this.meters.values()]
       .filter((item) => {
         if (options.utilityType && item.utilityType !== options.utilityType) {
+          return false;
+        }
+
+        if (
+          normalizedBuildingId &&
+          !buildingMatchesScope(item.buildingId, normalizedBuildingId)
+        ) {
           return false;
         }
 
@@ -278,11 +359,13 @@ export class UtilityBillingService {
 
   createBill(
     utilityType: UtilityType,
+    buildingId: string,
     houseNumber: string,
     input: CreateUtilityBillInput
   ): UtilityBillSnapshot {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
     const normalizedHouse = normalizeHouseNumber(houseNumber);
-    const key = ledgerKey(utilityType, normalizedHouse);
+    const key = ledgerKey(utilityType, normalizedBuildingId, normalizedHouse);
     const records = this.billsByLedger.get(key) ?? [];
 
     if (records.some((item) => item.billingMonth === input.billingMonth)) {
@@ -291,13 +374,15 @@ export class UtilityBillingService {
       );
     }
 
-    const existingMeter = this.getMeter(utilityType, normalizedHouse);
-    const meterNumber = input.meterNumber?.trim() || existingMeter?.meterNumber || "";
-    const hasMeter = meterNumber.length > 0;
+    const inputMeterNumber = input.meterNumber?.trim() || "";
+    const existingMeter = this.getMeter(utilityType, normalizedBuildingId, normalizedHouse);
+    const meterNumber = inputMeterNumber || existingMeter?.meterNumber || "";
+    const hasMeter =
+      meterNumber.length > 0 || input.currentReading != null || input.ratePerUnitKsh != null;
 
-    if (input.meterNumber?.trim()) {
-      this.upsertMeter(utilityType, normalizedHouse, {
-        meterNumber: input.meterNumber.trim()
+    if (inputMeterNumber) {
+      this.upsertMeter(utilityType, normalizedBuildingId, normalizedHouse, {
+        meterNumber: inputMeterNumber
       });
     }
 
@@ -346,9 +431,10 @@ export class UtilityBillingService {
     const bill: UtilityBillRecord = {
       id: randomUUID(),
       utilityType,
+      buildingId: normalizedBuildingId,
       houseNumber: normalizedHouse,
       billingMonth: input.billingMonth,
-      meterNumber: hasMeter ? meterNumber : "NO-METER",
+      meterNumber: hasMeter ? (meterNumber || "METER-UNSET") : "NO-METER",
       previousReading,
       currentReading,
       unitsConsumed,
@@ -376,6 +462,9 @@ export class UtilityBillingService {
       ? Math.min(Math.max(options.limit ?? 300, 1), 1_000)
       : 300;
 
+    const normalizedBuildingId = options.buildingId
+      ? normalizeBuildingId(options.buildingId)
+      : undefined;
     const normalizedHouse = options.houseNumber
       ? normalizeHouseNumber(options.houseNumber)
       : undefined;
@@ -384,6 +473,13 @@ export class UtilityBillingService {
       .flatMap((items) => items)
       .filter((item) => {
         if (options.utilityType && item.utilityType !== options.utilityType) {
+          return false;
+        }
+
+        if (
+          normalizedBuildingId &&
+          !buildingMatchesScope(item.buildingId, normalizedBuildingId)
+        ) {
           return false;
         }
 
@@ -400,11 +496,13 @@ export class UtilityBillingService {
   }
 
   listBillsForHouse(
+    buildingId: string,
     houseNumber: string,
     utilityType?: UtilityType,
     limit = 24
   ): UtilityBillSnapshot[] {
     return this.listBills({
+      buildingId,
       houseNumber,
       utilityType,
       limit
@@ -413,20 +511,29 @@ export class UtilityBillingService {
 
   recordPayment(
     utilityType: UtilityType,
+    buildingId: string,
     houseNumber: string,
     input: RecordUtilityPaymentInput
   ): RecordUtilityPaymentResult {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
     const normalizedHouse = normalizeHouseNumber(houseNumber);
-    const key = ledgerKey(utilityType, normalizedHouse);
+    const key = ledgerKey(utilityType, normalizedBuildingId, normalizedHouse);
     const records = this.billsByLedger.get(key) ?? [];
+    const legacyRecords =
+      normalizedBuildingId === UTILITY_LEGACY_BUILDING_ID
+        ? []
+        : this.billsByLedger.get(
+            ledgerKey(utilityType, UTILITY_LEGACY_BUILDING_ID, normalizedHouse)
+          ) ?? [];
+    const mergedRecords = records.length > 0 ? records : legacyRecords;
 
-    if (records.length === 0) {
+    if (mergedRecords.length === 0) {
       throw new Error(`No ${utilityType} bills found for house ${normalizedHouse}.`);
     }
 
     const target = input.billingMonth
-      ? records.find((item) => item.billingMonth === input.billingMonth)
-      : [...records]
+      ? mergedRecords.find((item) => item.billingMonth === input.billingMonth)
+      : [...mergedRecords]
           .filter((item) => item.balanceKsh > 0)
           .sort((a, b) => monthSortAsc(a.billingMonth, b.billingMonth))[0];
 
@@ -441,6 +548,7 @@ export class UtilityBillingService {
     const event: UtilityPaymentEvent = {
       id: randomUUID(),
       utilityType,
+      buildingId: target.buildingId,
       houseNumber: normalizedHouse,
       billingMonth: target.billingMonth,
       provider: input.provider,
@@ -462,14 +570,21 @@ export class UtilityBillingService {
     };
   }
 
-  collectAutoReminders(houseNumber: string): UtilityReminderNotification[] {
+  collectAutoReminders(
+    buildingId: string,
+    houseNumber: string
+  ): UtilityReminderNotification[] {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
     const normalizedHouse = normalizeHouseNumber(houseNumber);
     const createdAt = nowIso();
     const todayKey = createdAt.slice(0, 10);
 
-    const bills = this.listBillsForHouse(normalizedHouse, undefined, 120).filter(
-      (item) => item.balanceKsh > 0
-    );
+    const bills = this.listBillsForHouse(
+      normalizedBuildingId,
+      normalizedHouse,
+      undefined,
+      120
+    ).filter((item) => item.balanceKsh > 0);
 
     const reminders: UtilityReminderNotification[] = [];
 
@@ -480,6 +595,7 @@ export class UtilityBillingService {
 
       if (bill.daysToDue === 3) {
         reminders.push({
+          buildingId: normalizedBuildingId,
           houseNumber: normalizedHouse,
           utilityType: bill.utilityType,
           billingMonth: bill.billingMonth,
@@ -487,12 +603,13 @@ export class UtilityBillingService {
           message: `${utilityLabel} balance ${balanceText} is due in 3 days for ${bill.billingMonth}.`,
           level: "info",
           createdAt,
-          dedupeKey: `utility-reminder-d3-${bill.utilityType}-${normalizedHouse}-${bill.billingMonth}`
+          dedupeKey: `utility-reminder-d3-${bill.utilityType}-${normalizedBuildingId}-${normalizedHouse}-${bill.billingMonth}`
         });
       }
 
       if (bill.daysToDue === 1) {
         reminders.push({
+          buildingId: normalizedBuildingId,
           houseNumber: normalizedHouse,
           utilityType: bill.utilityType,
           billingMonth: bill.billingMonth,
@@ -500,12 +617,13 @@ export class UtilityBillingService {
           message: `${utilityLabel} balance ${balanceText} is due tomorrow for ${bill.billingMonth}.`,
           level: "warning",
           createdAt,
-          dedupeKey: `utility-reminder-d1-${bill.utilityType}-${normalizedHouse}-${bill.billingMonth}`
+          dedupeKey: `utility-reminder-d1-${bill.utilityType}-${normalizedBuildingId}-${normalizedHouse}-${bill.billingMonth}`
         });
       }
 
       if (bill.daysToDue < 0) {
         reminders.push({
+          buildingId: normalizedBuildingId,
           houseNumber: normalizedHouse,
           utilityType: bill.utilityType,
           billingMonth: bill.billingMonth,
@@ -513,7 +631,7 @@ export class UtilityBillingService {
           message: `${utilityLabel} balance ${balanceText} is overdue for ${bill.billingMonth}.`,
           level: "warning",
           createdAt,
-          dedupeKey: `utility-reminder-overdue-${bill.utilityType}-${normalizedHouse}-${bill.billingMonth}-${todayKey}`
+          dedupeKey: `utility-reminder-overdue-${bill.utilityType}-${normalizedBuildingId}-${normalizedHouse}-${bill.billingMonth}-${todayKey}`
         });
       }
     }
@@ -526,6 +644,9 @@ export class UtilityBillingService {
       ? Math.min(Math.max(options.limit ?? 500, 1), 2_000)
       : 500;
 
+    const normalizedBuildingId = options.buildingId
+      ? normalizeBuildingId(options.buildingId)
+      : undefined;
     const normalizedHouse = options.houseNumber
       ? normalizeHouseNumber(options.houseNumber)
       : undefined;
@@ -535,6 +656,13 @@ export class UtilityBillingService {
       .flatMap((item) => item.payments)
       .filter((item) => {
         if (options.utilityType && item.utilityType !== options.utilityType) {
+          return false;
+        }
+
+        if (
+          normalizedBuildingId &&
+          !buildingMatchesScope(item.buildingId, normalizedBuildingId)
+        ) {
           return false;
         }
 
@@ -566,6 +694,7 @@ export class UtilityBillingService {
     return {
       id: record.id,
       utilityType: record.utilityType,
+      buildingId: record.buildingId,
       houseNumber: record.houseNumber,
       billingMonth: record.billingMonth,
       meterNumber: record.meterNumber,

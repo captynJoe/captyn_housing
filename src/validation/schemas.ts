@@ -27,6 +27,31 @@ export const createBuildingSchema = z.object({
   })
 });
 
+export const deleteBuildingSchema = z.object({
+  confirmBuildingId: nonEmptyString.max(80).optional(),
+  confirmationText: z.literal("DELETE").optional()
+});
+
+export const landlordAddBuildingHousesSchema = z.object({
+  houseNumbers: z.array(nonEmptyString.max(24)).min(1).max(1000)
+});
+
+export const landlordRemoveBuildingUserSchema = z.object({
+  confirmUserId: nonEmptyString.max(120).optional(),
+  confirmationText: z.literal("REMOVE").optional(),
+  note: z.string().trim().max(280).optional()
+});
+
+export const adminRevokeLandlordSchema = z.object({
+  confirmUserId: nonEmptyString.max(120).optional(),
+  confirmationText: z.literal("REVOKE").optional(),
+  note: z.string().trim().max(500).optional()
+});
+
+export const adminAssignBuildingLandlordSchema = z.object({
+  identifier: z.string().trim().min(3).max(160)
+});
+
 export const createIncidentSchema = z.object({
   title: nonEmptyString,
   details: nonEmptyString,
@@ -204,15 +229,13 @@ export const createUtilityBillSchema = z
   .superRefine((value, context) => {
     const hasCurrentReading = value.currentReading != null;
     const hasRate = value.ratePerUnitKsh != null;
-    const hasAnyReadingData =
-      value.previousReading != null || hasCurrentReading || hasRate;
+    const hasAnyReadingData = value.previousReading != null || hasCurrentReading;
 
-    if (hasCurrentReading !== hasRate) {
+    if (hasRate && !hasCurrentReading) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: hasCurrentReading ? ["ratePerUnitKsh"] : ["currentReading"],
-        message:
-          "Provide both current reading and rate per unit for metered billing."
+        path: ["currentReading"],
+        message: "Current reading is required when rate per unit is provided."
       });
     }
 
@@ -309,6 +332,11 @@ export const residentPasswordRecoveryRequestSchema = z.object({
   buildingId: nonEmptyString,
   houseNumber: nonEmptyString.max(24),
   phoneNumber: kenyaPhoneSchema,
+  note: z.string().trim().max(280).optional()
+});
+
+export const accountPasswordRecoveryRequestSchema = z.object({
+  identifier: z.string().trim().min(3).max(160),
   note: z.string().trim().max(280).optional()
 });
 
@@ -417,6 +445,7 @@ export const landlordPaymentAccessUpdateSchema = z
 
 const optionalMeterNumberSchema = z.string().trim().max(80).optional();
 const householdMembersSchema = z.number().int().min(0).max(20);
+const optionalFixedChargeSchema = z.number().min(0).max(200_000).optional();
 
 export const landlordUtilityRegistryUpsertSchema = z.object({
   rows: z
@@ -425,11 +454,62 @@ export const landlordUtilityRegistryUpsertSchema = z.object({
         houseNumber: nonEmptyString.max(24),
         waterMeterNumber: optionalMeterNumberSchema,
         electricityMeterNumber: optionalMeterNumberSchema,
-        householdMembers: householdMembersSchema.optional()
+        householdMembers: householdMembersSchema.optional(),
+        waterFixedChargeKsh: optionalFixedChargeSchema,
+        electricityFixedChargeKsh: optionalFixedChargeSchema
       })
     )
     .min(1)
-    .max(2_000)
+    .max(2_000),
+  rateDefaults: z
+    .object({
+      waterRatePerUnitKsh: z.number().min(0).max(50_000).optional(),
+      electricityRatePerUnitKsh: z.number().min(0).max(50_000).optional()
+    })
+    .optional()
+});
+
+export const landlordAssignCaretakerSchema = z.object({
+  identifier: z.string().trim().min(3).max(160),
+  houseNumber: nonEmptyString.max(24),
+  note: z.string().trim().max(280).optional()
+});
+
+export const caretakerAccessResolveSchema = z.object({
+  phoneNumber: kenyaPhoneSchema,
+  houseNumber: nonEmptyString.max(24),
+  buildingId: nonEmptyString.optional()
+});
+
+export const caretakerPasswordSetupSchema = z
+  .object({
+    phoneNumber: kenyaPhoneSchema,
+    houseNumber: nonEmptyString.max(24),
+    buildingId: nonEmptyString.optional(),
+    newPassword: z.string().min(8).max(128),
+    confirmPassword: z.string().min(8).max(128)
+  })
+  .superRefine((value, context) => {
+    if (value.newPassword !== value.confirmPassword) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["confirmPassword"],
+        message: "Confirmation password must match the new password."
+      });
+    }
+  });
+
+export const caretakerPhoneLoginSchema = z.object({
+  phoneNumber: kenyaPhoneSchema,
+  houseNumber: nonEmptyString.max(24),
+  buildingId: nonEmptyString.optional(),
+  password: z.string().min(1).max(128)
+});
+
+export const landlordUpdateTicketStatusSchema = z.object({
+  status: ticketStatusSchema,
+  resolutionNotes: z.string().trim().min(1).max(500).optional(),
+  adminNote: z.string().trim().max(500).optional()
 });
 
 export const landlordAccessRequestStatusSchema = z.enum([
@@ -497,6 +577,19 @@ export const verifyUtilityMpesaPaymentSchema = z.object({
 });
 
 export type CreateBuildingInput = z.infer<typeof createBuildingSchema>;
+export type DeleteBuildingInput = z.infer<typeof deleteBuildingSchema>;
+export type LandlordAddBuildingHousesInput = z.infer<
+  typeof landlordAddBuildingHousesSchema
+>;
+export type LandlordRemoveBuildingUserInput = z.infer<
+  typeof landlordRemoveBuildingUserSchema
+>;
+export type AdminRevokeLandlordInput = z.infer<
+  typeof adminRevokeLandlordSchema
+>;
+export type AdminAssignBuildingLandlordInput = z.infer<
+  typeof adminAssignBuildingLandlordSchema
+>;
 export type CreateIncidentInput = z.infer<typeof createIncidentSchema>;
 export type ResolveIncidentInput = z.infer<typeof resolveIncidentSchema>;
 export type UpdateIncidentStatusInput = z.infer<typeof updateIncidentStatusSchema>;
@@ -526,6 +619,9 @@ export type ResidentAdminPasswordResetInput = z.infer<
 export type ResidentPasswordRecoveryRequestInput = z.infer<
   typeof residentPasswordRecoveryRequestSchema
 >;
+export type AccountPasswordRecoveryRequestInput = z.infer<
+  typeof accountPasswordRecoveryRequestSchema
+>;
 export type ResidentPasswordRecoveryReviewInput = z.infer<
   typeof residentPasswordRecoveryReviewSchema
 >;
@@ -540,6 +636,21 @@ export type LandlordPaymentAccessUpdateInput = z.infer<
 >;
 export type LandlordUtilityRegistryUpsertInput = z.infer<
   typeof landlordUtilityRegistryUpsertSchema
+>;
+export type LandlordAssignCaretakerInput = z.infer<
+  typeof landlordAssignCaretakerSchema
+>;
+export type CaretakerAccessResolveInput = z.infer<
+  typeof caretakerAccessResolveSchema
+>;
+export type CaretakerPasswordSetupInput = z.infer<
+  typeof caretakerPasswordSetupSchema
+>;
+export type CaretakerPhoneLoginInput = z.infer<
+  typeof caretakerPhoneLoginSchema
+>;
+export type LandlordUpdateTicketStatusInput = z.infer<
+  typeof landlordUpdateTicketStatusSchema
 >;
 export type LandlordAccessRequestStatusInput = z.infer<
   typeof landlordAccessRequestStatusSchema

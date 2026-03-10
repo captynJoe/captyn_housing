@@ -23,11 +23,18 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
   font-family: "Outfit", "Segoe UI", sans-serif;
   color: var(--ink-950);
+  overflow-x: hidden;
   background:
     radial-gradient(1000px 440px at -5% -10%, #d8e7ee 0%, transparent 65%),
     radial-gradient(1000px 480px at 105% 0%, #f4e8d6 0%, transparent 66%),
@@ -47,6 +54,7 @@ body {
 
 .shell {
   width: min(1220px, calc(100% - 30px));
+  max-width: 100%;
   margin: 22px auto 50px;
   position: relative;
   z-index: 1;
@@ -66,6 +74,20 @@ body {
   letter-spacing: 0.09em;
   font-weight: 700;
   color: #0f6d67;
+}
+
+.user-link {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ink-950);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  font-size: 1.05rem;
 }
 
 .mode-switch {
@@ -112,6 +134,10 @@ body {
   flex-wrap: wrap;
 }
 
+.hero > div {
+  min-width: 0;
+}
+
 .eyebrow {
   margin: 0;
   font-size: 0.78rem;
@@ -139,6 +165,56 @@ body {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.hero-workspace {
+  width: min(100%, 360px);
+  min-width: 260px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: #fff;
+}
+
+.hero-workspace-label {
+  margin: 0 0 8px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-600);
+  font-weight: 700;
+}
+
+.hero-workspace-nav {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hero-workspace-btn {
+  border: 1px solid rgba(16, 28, 40, 0.18);
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--ink-950);
+  border-radius: 10px;
+  padding: 9px 10px;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.hero-workspace-btn.active {
+  border-color: rgba(15, 123, 118, 0.5);
+  background: linear-gradient(136deg, rgba(15, 123, 118, 0.16), rgba(11, 95, 91, 0.1));
+  color: #0b5f5b;
+}
+
+.hero-workspace-meta {
+  margin: 10px 0 0;
+  font-size: 0.82rem;
+  color: var(--ink-600);
+}
+
+.hero-workspace-meta strong {
+  color: var(--ink-950);
 }
 
 .status-chip {
@@ -189,7 +265,7 @@ body {
 .resident-workspace {
   display: grid;
   gap: 14px;
-  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
 }
 
@@ -197,6 +273,7 @@ body {
 .resident-view {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 
 .panel-card {
@@ -276,6 +353,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -305,6 +383,7 @@ body {
 .report-form label {
   display: grid;
   gap: 6px;
+  min-width: 0;
   font-size: 0.76rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -315,6 +394,9 @@ body {
 .report-form input,
 .report-form select,
 .report-form textarea {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   border: 1px solid rgba(16, 28, 40, 0.2);
   border-radius: 10px;
   padding: 10px 12px;
@@ -322,6 +404,47 @@ body {
   color: var(--ink-950);
   background: #fff;
   font-family: inherit;
+}
+
+.password-toggle-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.password-toggle-wrap input {
+  width: 100%;
+  padding-right: 68px;
+}
+
+.password-toggle-wrap .password-toggle-btn {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  border: 1px solid rgba(16, 28, 40, 0.24);
+  border-radius: 8px;
+  width: 34px;
+  height: 28px;
+  padding: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ink-800);
+  background: #fff;
+  cursor: pointer;
+  line-height: 1.2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.password-toggle-wrap .password-toggle-btn .password-eye-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.password-toggle-wrap .password-toggle-btn.is-visible .password-eye-icon {
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
 }
 
 .report-form textarea {
@@ -373,6 +496,26 @@ button,
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.85);
   color: var(--ink-950);
+}
+
+#resident-auth-panel .section-head {
+  align-items: flex-start;
+}
+
+#resident-auth-panel .section-head p {
+  max-width: 38ch;
+}
+
+#resident-auth-form .action-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  justify-content: stretch;
+}
+
+#resident-auth-form .action-row button {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 10px;
 }
 
 .stack-list {
@@ -538,15 +681,7 @@ button,
 }
 
 @media (max-width: 980px) {
-  .resident-workspace {
-    grid-template-columns: 1fr;
-  }
-
-  .resident-sidebar {
-    position: static;
-  }
-
-  .resident-nav {
+  .hero-workspace-nav {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
@@ -558,15 +693,50 @@ button,
   }
 
   .topbar {
-    flex-direction: column;
-    align-items: flex-start;
+    flex-direction: row;
+    align-items: center;
   }
 
   .hero {
     padding: 18px;
+    gap: 12px;
   }
 
-  .resident-nav {
+  .hero-workspace {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .hero > div {
+    flex: 1 1 100%;
+  }
+
+  .subtitle {
+    max-width: none;
+  }
+
+  #resident-auth-panel .section-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  #resident-auth-form .action-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: stretch;
+    gap: 8px;
+  }
+
+  #resident-forgot-btn {
+    grid-column: 1 / -1;
+  }
+
+  #resident-auth-form .action-row button {
+    width: 100%;
+    white-space: normal;
+  }
+
+  .hero-workspace-nav {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

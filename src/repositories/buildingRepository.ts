@@ -1,6 +1,7 @@
 import type { Building, Incident, VacancySnapshot } from "../domain/types.js";
 import type {
   CreateBuildingInput,
+  LandlordAddBuildingHousesInput,
   CreateIncidentInput,
   CreateVacancySnapshotInput,
   ResolveIncidentInput
@@ -13,6 +14,11 @@ export interface BuildingRepository {
     input: CreateBuildingInput,
     options?: { landlordUserId?: string }
   ): Promise<Building>;
+  addHouseUnits(
+    buildingId: string,
+    input: LandlordAddBuildingHousesInput
+  ): Promise<{ building: Building; addedHouseNumbers: string[] } | undefined>;
+  deleteBuilding(id: string): Promise<Building | undefined>;
   addIncident(
     buildingId: string,
     input: CreateIncidentInput

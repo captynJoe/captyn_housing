@@ -10,13 +10,16 @@
       href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Outfit:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/users.css?v=20260309c" />
+    <link rel="stylesheet" href="/users.css?v=20260310b" />
   </head>
   <body>
     <div class="ambient" aria-hidden="true"></div>
     <main class="shell">
       <header class="topbar">
         <a class="brand" href="/">CAPTYN Housing</a>
+        <a class="user-link" href="/user" aria-label="Open user page" title="User page">
+          <span aria-hidden="true">👤</span>
+        </a>
       </header>
 
       <header class="hero">
@@ -29,15 +32,26 @@
           </p>
         </div>
 
-        <div class="status-row">
-          <div class="status-chip">
-            <span>API Status</span>
-            <strong id="api-status">Checking...</strong>
+        <div class="hero-workspace" aria-label="Workspace quick navigation">
+          <p class="hero-workspace-label">Workspace</p>
+          <div class="hero-workspace-nav">
+            <button type="button" class="hero-workspace-btn active" data-resident-view="overview">
+              Overview
+            </button>
+            <button type="button" class="hero-workspace-btn" data-resident-view="support">
+              Support
+            </button>
+            <button type="button" class="hero-workspace-btn" data-resident-view="payments">
+              Payments
+            </button>
+            <button type="button" class="hero-workspace-btn" data-resident-view="notices">
+              Notices
+            </button>
           </div>
-          <div class="status-chip">
-            <span>Session</span>
+          <p class="hero-workspace-meta">
+            API <strong id="api-status">Checking...</strong> · Session
             <strong id="auth-state">Signed out</strong>
-          </div>
+          </p>
         </div>
       </header>
 
@@ -46,7 +60,7 @@
       <section id="resident-auth-panel" class="panel-card auth-stack">
         <section class="section-head">
           <h2>Resident access</h2>
-          <p>Create password once, then sign in with phone number.</p>
+          <p>Sign in with house number, phone number, and password.</p>
         </section>
 
         <form id="resident-auth-form" class="report-form">
@@ -91,7 +105,9 @@
           </label>
 
           <div class="action-row">
-            <button id="resident-setup-btn" type="button">Create Password</button>
+            <button id="resident-signup-btn" type="button" class="ghost-btn">
+              Sign Up
+            </button>
             <button id="resident-login-btn" type="submit">Sign In</button>
             <button id="resident-forgot-btn" type="button" class="ghost-btn">
               Forgot Password
@@ -149,25 +165,6 @@
       </section>
 
       <section id="resident-layout" class="resident-workspace hidden">
-        <aside class="resident-sidebar panel-card" aria-label="Resident navigation">
-          <p class="sidebar-label">Workspace</p>
-          <nav class="resident-nav" aria-label="Resident sections">
-            <button type="button" class="resident-nav-btn active" data-resident-view="overview">
-              Overview
-            </button>
-            <button type="button" class="resident-nav-btn" data-resident-view="support">
-              Support
-            </button>
-            <button type="button" class="resident-nav-btn" data-resident-view="payments">
-              Payments
-            </button>
-            <button type="button" class="resident-nav-btn" data-resident-view="notices">
-              Notices
-            </button>
-          </nav>
-          <p class="sidebar-note">Focus one workflow at a time to keep each page cleaner.</p>
-        </aside>
-
         <section class="resident-content">
           <section class="resident-view" data-resident-view-panel="overview">
             <article class="panel-card">
@@ -231,6 +228,7 @@
                     Request Type
                     <select id="report-type" required>
                       <option value="room_issue">Room Issue</option>
+                      <option value="stolen_item">Stolen Item</option>
                       <option value="general">General</option>
                     </select>
                   </label>
@@ -258,6 +256,64 @@
                     required
                   ></textarea>
                 </label>
+
+                <section id="theft-workflow-fields" class="theft-workflow hidden">
+                  <p class="item-details">
+                    Theft reports route directly to security and require incident timeline details.
+                  </p>
+                  <div class="field-grid">
+                    <label>
+                      Stolen Item
+                      <input
+                        id="report-stolen-item"
+                        name="stolenItem"
+                        type="text"
+                        maxlength="120"
+                        placeholder="Phone, wallet, laptop"
+                      />
+                    </label>
+                    <label>
+                      Incident Location
+                      <input
+                        id="report-incident-location"
+                        name="incidentLocation"
+                        type="text"
+                        maxlength="120"
+                        placeholder="Kitchen, corridor, parking slot"
+                      />
+                    </label>
+                  </div>
+
+                  <div class="field-grid">
+                    <label>
+                      Incident Start
+                      <input
+                        id="report-incident-start"
+                        name="incidentWindowStartAt"
+                        type="datetime-local"
+                      />
+                    </label>
+                    <label>
+                      Incident End
+                      <input
+                        id="report-incident-end"
+                        name="incidentWindowEndAt"
+                        type="datetime-local"
+                      />
+                    </label>
+                  </div>
+
+                  <label>
+                    Police/Case Reference (optional)
+                    <input
+                      id="report-case-reference"
+                      name="caseReference"
+                      type="text"
+                      maxlength="80"
+                      placeholder="OB-12345/26"
+                    />
+                  </label>
+                </section>
 
                 <div class="action-row">
                   <button id="submit-btn" type="submit">Submit Request</button>
@@ -432,6 +488,6 @@
       </article>
     </template>
 
-    <script type="module" src="/users.js?v=20260309c"></script>
+    <script type="module" src="/users.js?v=20260310c"></script>
   </body>
 </html>

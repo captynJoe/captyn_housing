@@ -44,13 +44,14 @@ export interface UserReport {
   statusHistory: Array<{
     status: TicketStatus;
     at: string;
-    actor: "resident" | "admin" | "system";
+    actor: "resident" | "admin" | "landlord" | "caretaker" | "system";
     note?: string;
   }>;
 }
 
 export interface UserNotification {
   id: string;
+  buildingId: string;
   houseNumber: string;
   title: string;
   message: string;
@@ -102,8 +103,32 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function normalizeBuildingId(value: string): string {
+  const normalized = String(value ?? "").trim();
+  return normalized || "__unknown_building__";
+}
+
 function normalizeHouseNumber(value: string): string {
   return value.trim().toUpperCase();
+}
+
+function scopeKey(buildingId: string, houseNumber: string): string {
+  return `${normalizeBuildingId(buildingId)}::${normalizeHouseNumber(houseNumber)}`;
+}
+
+function parseScopeKey(value: string): { buildingId: string; houseNumber: string } {
+  const separator = value.indexOf("::");
+  if (separator === -1) {
+    return {
+      buildingId: "__unknown_building__",
+      houseNumber: normalizeHouseNumber(value)
+    };
+  }
+
+  return {
+    buildingId: normalizeBuildingId(value.slice(0, separator)),
+    houseNumber: normalizeHouseNumber(value.slice(separator + 2))
+  };
 }
 
 function queueFor(reportType: UserReportType): TicketQueue {
@@ -147,12 +172,14 @@ function cctvGuidanceFor(
 }
 
 function createNotificationBase(
+  buildingId: string,
   houseNumber: string,
   createdAt = nowIso()
-): Pick<UserNotification, "id" | "houseNumber" | "createdAt"> {
+): Pick<UserNotification, "id" | "buildingId" | "houseNumber" | "createdAt"> {
   return {
     id: randomUUID(),
-    houseNumber,
+    buildingId: normalizeBuildingId(buildingId),
+    houseNumber: normalizeHouseNumber(houseNumber),
     createdAt
   };
 }
@@ -195,10 +222,10 @@ function canTransition(current: TicketStatus, next: TicketStatus): boolean {
 }
 
 export class UserSupportService {
-  private readonly reportsByHouse = new Map<string, UserReport[]>();
+  private readonly reportsByScope = new Map<string, UserReport[]>();
   private readonly reportIndex = new Map<string, string>();
-  private readonly notifications = new Map<string, UserNotification[]>();
-  private readonly notificationKeys = new Map<string, Set<string>>();
+  private readonly notificationsByScope = new Map<string, UserNotification[]>();
+  private readonly notificationKeysByScope = new Map<string, Set<string>>();
   private stateChangeHandler?: UserSupportStateChangeHandler;
 
   setStateChangeHandler(handler?: UserSupportStateChangeHandler): void {
@@ -206,7 +233,7 @@ export class UserSupportService {
   }
 
   exportState(): UserSupportPersistedState {
-    const reports = [...this.reportsByHouse.values()]
+    const reports = [...this.reportsByScope.values()]
       .flatMap((items) => items)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map((item) => ({
@@ -215,7 +242,7 @@ export class UserSupportService {
         statusHistory: [...item.statusHistory]
       }));
 
-    const notifications = [...this.notifications.values()]
+    const notifications = [...this.notificationsByScope.values()]
       .flatMap((items) => items)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map((item) => ({ ...item }));
@@ -224,10 +251,10 @@ export class UserSupportService {
   }
 
   importState(state: UserSupportPersistedState | null | undefined): void {
-    this.reportsByHouse.clear();
+    this.reportsByScope.clear();
     this.reportIndex.clear();
-    this.notifications.clear();
-    this.notificationKeys.clear();
+    this.notificationsByScope.clear();
+    this.notificationKeysByScope.clear();
 
     if (!state) {
       return;
@@ -239,24 +266,27 @@ export class UserSupportService {
           continue;
         }
 
+        const buildingId = normalizeBuildingId(item.buildingId);
         const houseNumber = normalizeHouseNumber(item.houseNumber);
-        const current = this.reportsByHouse.get(houseNumber) ?? [];
+        const key = scopeKey(buildingId, houseNumber);
+        const current = this.reportsByScope.get(key) ?? [];
         current.push({
           ...item,
+          buildingId,
           houseNumber,
           evidenceAttachments: Array.isArray(item.evidenceAttachments)
             ? [...item.evidenceAttachments]
             : [],
           statusHistory: Array.isArray(item.statusHistory) ? [...item.statusHistory] : []
         });
-        this.reportsByHouse.set(houseNumber, current);
-        this.reportIndex.set(item.id, houseNumber);
+        this.reportsByScope.set(key, current);
+        this.reportIndex.set(item.id, key);
       }
     }
 
-    for (const [houseNumber, reports] of this.reportsByHouse.entries()) {
+    for (const [key, reports] of this.reportsByScope.entries()) {
       reports.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-      this.reportsByHouse.set(houseNumber, reports);
+      this.reportsByScope.set(key, reports);
     }
 
     if (Array.isArray(state.notifications)) {
@@ -265,22 +295,25 @@ export class UserSupportService {
           continue;
         }
 
+        const buildingId = normalizeBuildingId(item.buildingId);
         const houseNumber = normalizeHouseNumber(item.houseNumber);
-        const current = this.notifications.get(houseNumber) ?? [];
-        current.push({ ...item, houseNumber });
-        this.notifications.set(houseNumber, current);
+        const key = scopeKey(buildingId, houseNumber);
+        const current = this.notificationsByScope.get(key) ?? [];
+        current.push({ ...item, buildingId, houseNumber });
+        this.notificationsByScope.set(key, current);
 
         if (item.dedupeKey) {
-          const dedupe = this.notificationKeys.get(houseNumber) ?? new Set<string>();
+          const dedupe =
+            this.notificationKeysByScope.get(key) ?? new Set<string>();
           dedupe.add(item.dedupeKey);
-          this.notificationKeys.set(houseNumber, dedupe);
+          this.notificationKeysByScope.set(key, dedupe);
         }
       }
     }
 
-    for (const [houseNumber, notifications] of this.notifications.entries()) {
+    for (const [key, notifications] of this.notificationsByScope.entries()) {
       notifications.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-      this.notifications.set(houseNumber, notifications);
+      this.notificationsByScope.set(key, notifications);
     }
   }
 
@@ -289,14 +322,16 @@ export class UserSupportService {
     building: BuildingSnapshot,
     resident: ResidentBinding
   ): { report: UserReport; notifications: UserNotification[] } {
+    const buildingId = normalizeBuildingId(building.id);
     const houseNumber = normalizeHouseNumber(resident.houseNumber);
+    const key = scopeKey(buildingId, houseNumber);
     const reportType = input.type;
     const createdAt = nowIso();
     const slaHours = slaHoursFor(reportType);
 
     const report: UserReport = {
       id: randomUUID(),
-      buildingId: building.id,
+      buildingId,
       buildingName: building.name,
       houseNumber,
       residentPhoneNumber: resident.phoneNumber,
@@ -332,13 +367,13 @@ export class UserSupportService {
     report.slaBreached = derived.breached;
     report.slaState = derived.state;
 
-    const existingReports = this.reportsByHouse.get(houseNumber) ?? [];
-    this.reportsByHouse.set(houseNumber, [report, ...existingReports]);
-    this.reportIndex.set(report.id, houseNumber);
+    const existingReports = this.reportsByScope.get(key) ?? [];
+    this.reportsByScope.set(key, [report, ...existingReports]);
+    this.reportIndex.set(report.id, key);
 
     const generatedNotifications: UserNotification[] = [
       {
-        ...createNotificationBase(houseNumber, createdAt),
+        ...createNotificationBase(buildingId, houseNumber, createdAt),
         title: "Ticket Opened",
         message: `Ticket ${report.id.slice(0, 8)} is open (${report.queue} queue). SLA target: ${report.slaHours}h.`,
         level: "info",
@@ -347,7 +382,7 @@ export class UserSupportService {
         dedupeKey: `ticket-open-${report.id}`
       },
       {
-        ...createNotificationBase(houseNumber, createdAt),
+        ...createNotificationBase(buildingId, houseNumber, createdAt),
         title: reportType === "stolen_item" ? "CCTV Theft Workflow" : "Triage Workflow",
         message: report.cctvGuidance,
         level:
@@ -360,7 +395,7 @@ export class UserSupportService {
       }
     ];
 
-    this.insertNotifications(houseNumber, generatedNotifications);
+    this.insertNotifications(buildingId, houseNumber, generatedNotifications);
     this.emitStateChange();
 
     return {
@@ -369,9 +404,8 @@ export class UserSupportService {
     };
   }
 
-  listReports(houseNumber: string): UserReport[] {
-    const key = normalizeHouseNumber(houseNumber);
-    const reports = this.reportsByHouse.get(key) ?? [];
+  listReports(houseNumber: string, buildingId?: string): UserReport[] {
+    const reports = this.listReportsByScope(houseNumber, buildingId);
 
     return reports.map((report) => {
       const derived = deriveSlaState(report);
@@ -384,7 +418,7 @@ export class UserSupportService {
   }
 
   listAllReports(filters: ListAllReportFilters = {}): UserReport[] {
-    const all = [...this.reportsByHouse.values()].flatMap((items) => items);
+    const all = [...this.reportsByScope.values()].flatMap((items) => items);
 
     const filtered = all.filter((report) => {
       if (filters.status && report.status !== filters.status) {
@@ -431,14 +465,15 @@ export class UserSupportService {
   updateReportStatus(
     reportId: string,
     input: UpdateTicketStatusInput,
-    actor: "admin" | "system" = "admin"
+    actor: "admin" | "landlord" | "caretaker" | "system" = "admin"
   ): { report: UserReport; notification: UserNotification } | undefined {
-    const houseNumber = this.reportIndex.get(reportId);
-    if (!houseNumber) {
+    const reportScopeKey = this.reportIndex.get(reportId);
+    if (!reportScopeKey) {
       return undefined;
     }
 
-    const reports = this.reportsByHouse.get(houseNumber);
+    const reportScope = parseScopeKey(reportScopeKey);
+    const reports = this.reportsByScope.get(reportScopeKey);
     if (!reports) {
       return undefined;
     }
@@ -476,7 +511,11 @@ export class UserSupportService {
     });
 
     const notification: UserNotification = {
-      ...createNotificationBase(houseNumber, updatedAt),
+      ...createNotificationBase(
+        reportScope.buildingId,
+        reportScope.houseNumber,
+        updatedAt
+      ),
       title: "Ticket Update",
       message: `Ticket ${report.id.slice(0, 8)} moved to ${report.status.replace("_", " ")}.`,
       level: report.status === "resolved" ? "success" : "info",
@@ -485,25 +524,58 @@ export class UserSupportService {
       dedupeKey: `ticket-status-${report.id}-${report.status}-${updatedAt.slice(0, 16)}`
     };
 
-    this.insertNotifications(houseNumber, [notification]);
+    this.insertNotifications(
+      reportScope.buildingId,
+      reportScope.houseNumber,
+      [notification]
+    );
     this.emitStateChange();
 
     return { report, notification };
   }
 
-  listNotifications(houseNumber: string): UserNotification[] {
-    const key = normalizeHouseNumber(houseNumber);
-    return this.notifications.get(key) ?? [];
+  getReportById(reportId: string): UserReport | undefined {
+    const reportScopeKey = this.reportIndex.get(reportId);
+    if (!reportScopeKey) {
+      return undefined;
+    }
+
+    const reports = this.reportsByScope.get(reportScopeKey);
+    if (!reports) {
+      return undefined;
+    }
+
+    const report = reports.find((item) => item.id === reportId);
+    if (!report) {
+      return undefined;
+    }
+
+    const derived = deriveSlaState(report);
+    return {
+      ...report,
+      slaBreached: derived.breached,
+      slaState: derived.state
+    };
+  }
+
+  listNotifications(houseNumber: string, buildingId?: string): UserNotification[] {
+    return this.listNotificationsByScope(houseNumber, buildingId);
   }
 
   enqueueSystemNotifications(
+    buildingId: string,
     houseNumber: string,
     notifications: SystemNotificationInput[]
   ): UserNotification[] {
-    const key = normalizeHouseNumber(houseNumber);
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const normalizedHouseNumber = normalizeHouseNumber(houseNumber);
 
     const mapped = notifications.map((item) => ({
-      ...createNotificationBase(key, item.createdAt),
+      ...createNotificationBase(
+        normalizedBuildingId,
+        normalizedHouseNumber,
+        item.createdAt
+      ),
       title: item.title,
       message: item.message,
       level: item.level,
@@ -511,7 +583,11 @@ export class UserSupportService {
       dedupeKey: item.dedupeKey
     }));
 
-    const inserted = this.insertNotifications(key, mapped);
+    const inserted = this.insertNotifications(
+      normalizedBuildingId,
+      normalizedHouseNumber,
+      mapped
+    );
     if (inserted.length > 0) {
       this.emitStateChange();
     }
@@ -531,12 +607,13 @@ export class UserSupportService {
   }
 
   private insertNotifications(
+    buildingId: string,
     houseNumber: string,
     notifications: UserNotification[]
   ): UserNotification[] {
-    const key = normalizeHouseNumber(houseNumber);
-    const dedupe = this.notificationKeys.get(key) ?? new Set<string>();
-    const existing = this.notifications.get(key) ?? [];
+    const key = scopeKey(buildingId, houseNumber);
+    const dedupe = this.notificationKeysByScope.get(key) ?? new Set<string>();
+    const existing = this.notificationsByScope.get(key) ?? [];
     const inserted: UserNotification[] = [];
 
     for (const item of notifications) {
@@ -552,11 +629,40 @@ export class UserSupportService {
       inserted.push(item);
     }
 
-    this.notificationKeys.set(key, dedupe);
+    this.notificationKeysByScope.set(key, dedupe);
     if (inserted.length > 0) {
-      this.notifications.set(key, [...inserted, ...existing]);
+      this.notificationsByScope.set(key, [...inserted, ...existing]);
     }
 
     return inserted;
+  }
+
+  private listReportsByScope(houseNumber: string, buildingId?: string): UserReport[] {
+    if (buildingId) {
+      return this.reportsByScope.get(scopeKey(buildingId, houseNumber)) ?? [];
+    }
+
+    const normalizedHouseNumber = normalizeHouseNumber(houseNumber);
+    return [...this.reportsByScope.entries()]
+      .filter(([key]) => parseScopeKey(key).houseNumber === normalizedHouseNumber)
+      .flatMap(([, items]) => items)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  private listNotificationsByScope(
+    houseNumber: string,
+    buildingId?: string
+  ): UserNotification[] {
+    if (buildingId) {
+      return (
+        this.notificationsByScope.get(scopeKey(buildingId, houseNumber)) ?? []
+      );
+    }
+
+    const normalizedHouseNumber = normalizeHouseNumber(houseNumber);
+    return [...this.notificationsByScope.entries()]
+      .filter(([key]) => parseScopeKey(key).houseNumber === normalizedHouseNumber)
+      .flatMap(([, items]) => items)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 }

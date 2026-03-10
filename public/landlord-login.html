@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/admin.css" />
+    <link rel="stylesheet" href="/admin.css?v=20260310a" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -22,6 +22,7 @@
           <p class="subtitle">
             Sign in with your CAPTYN Housing account (email or phone + password)
             to manage buildings, approve tenant applications, and publish utility bills.
+            Create account once, then use forgot password when needed.
           </p>
         </div>
         <a href="/" class="home-link">Back to Portal</a>
@@ -29,6 +30,10 @@
 
       <section class="panel auth-panel" style="grid-template-columns: 1fr; max-width: 700px;">
         <form id="landlord-login-form" class="package-card">
+          <p class="status-text">
+            Landlord login: use email/phone + password.
+            Caretaker login: enable caretaker mode, then use phone + house number.
+          </p>
           <label>
             Email or Phone
             <input
@@ -39,6 +44,20 @@
               required
             />
           </label>
+          <label style="display: flex; align-items: center; gap: 8px;">
+            <input id="landlord-caretaker-mode" type="checkbox" />
+            Use caretaker sign-in (phone + house number)
+          </label>
+          <label>
+            House Number (Caretaker only)
+            <input
+              id="landlord-house-number"
+              type="text"
+              maxlength="24"
+              autocomplete="off"
+              placeholder="A-12 (caretaker only)"
+            />
+          </label>
           <label>
             Password
             <input
@@ -46,13 +65,107 @@
               type="password"
               autocomplete="current-password"
               placeholder="Your password"
-              required
+            />
+          </label>
+          <label>
+            New Password (Caretaker first-time setup)
+            <input
+              id="landlord-caretaker-new-password"
+              type="password"
+              minlength="8"
+              maxlength="128"
+              autocomplete="new-password"
+              placeholder="Minimum 8 characters"
+            />
+          </label>
+          <label>
+            Confirm New Password
+            <input
+              id="landlord-caretaker-confirm-password"
+              type="password"
+              minlength="8"
+              maxlength="128"
+              autocomplete="new-password"
+              placeholder="Confirm new password"
             />
           </label>
 
           <button id="landlord-login-btn" type="submit">Sign In</button>
         </form>
         <p id="login-status" class="status-text">Session not established.</p>
+      </section>
+
+      <section class="panel auth-panel" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); max-width: 980px; align-items: start;">
+        <form id="landlord-register-form" class="package-card">
+          <h2 style="margin: 0;">Create Account</h2>
+          <p class="status-text">
+            Create your CAPTYN account once, then sign in and request landlord approval.
+          </p>
+          <label>
+            Full Name
+            <input
+              id="landlord-register-name"
+              type="text"
+              maxlength="120"
+              autocomplete="name"
+              placeholder="Your full name"
+              required
+            />
+          </label>
+          <label>
+            Email
+            <input
+              id="landlord-register-email"
+              type="email"
+              maxlength="160"
+              autocomplete="email"
+              placeholder="you@example.com"
+              required
+            />
+          </label>
+          <label>
+            Phone Number
+            <input
+              id="landlord-register-phone"
+              type="tel"
+              autocomplete="tel"
+              placeholder="07XXXXXXXX"
+              required
+            />
+          </label>
+          <label>
+            Password
+            <input
+              id="landlord-register-password"
+              type="password"
+              minlength="8"
+              maxlength="128"
+              autocomplete="new-password"
+              placeholder="Minimum 8 characters"
+              required
+            />
+          </label>
+          <button id="landlord-register-btn" type="submit">Create Account</button>
+        </form>
+
+        <form id="landlord-forgot-form" class="package-card">
+          <h2 style="margin: 0;">Forgot Password</h2>
+          <p class="status-text">
+            Enter email or phone. Admin will verify identity and issue a temporary password.
+          </p>
+          <label>
+            Email or Phone
+            <input
+              id="landlord-forgot-identifier"
+              type="text"
+              maxlength="160"
+              autocomplete="username"
+              placeholder="landlord@captyn.housing or 07XXXXXXXX"
+              required
+            />
+          </label>
+          <button id="landlord-forgot-btn" type="submit">Request Reset</button>
+        </form>
       </section>
 
       <section
@@ -82,6 +195,6 @@
       <section id="login-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord-login.js"></script>
+    <script type="module" src="/landlord-login.js?v=20260310e"></script>
   </body>
 </html>

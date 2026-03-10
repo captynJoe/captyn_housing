@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/admin.css" />
+    <link rel="stylesheet" href="/admin.css?v=20260310a" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -55,6 +55,7 @@
           </div>
           <p class="panel-note">
             Tenants request landlord access by email. Approve after ownership verification.
+            Approved landlords can also be revoked here.
           </p>
           <div class="table-wrap">
             <table>
@@ -101,7 +102,34 @@
           </div>
         </section>
 
-        <section class="panel wide-panel hidden">
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Account Password Recovery (Landlord)</h2>
+            <button id="refresh-account-password-recovery" type="button">Refresh</button>
+          </div>
+          <p class="panel-note">
+            Landlord-side forgot-password requests are reviewed here. Issue temporary passwords
+            only after identity verification.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Requested</th>
+                  <th>Name</th>
+                  <th>Role</th>
+                  <th>Identifier</th>
+                  <th>Status</th>
+                  <th>User Note</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="account-password-recovery-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
           <div class="panel-head">
             <h2>Ticket Lifecycle + SLA</h2>
             <button id="refresh-tickets" type="button">Refresh</button>
@@ -151,7 +179,7 @@
           </div>
         </section>
 
-        <section class="panel wide-panel hidden">
+        <section class="panel wide-panel">
           <div class="panel-head">
             <h2>Building Registry</h2>
             <button id="refresh-buildings" type="button">Refresh</button>
@@ -219,8 +247,10 @@
                   <th>County</th>
                   <th>Address</th>
                   <th>Units</th>
+                  <th>Landlord Owner</th>
                   <th>CCTV</th>
                   <th>Updated</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody id="buildings-body"></tbody>
@@ -228,7 +258,20 @@
           </div>
         </section>
 
-        <section class="panel wide-panel hidden">
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Utility Operations Ownership</h2>
+          </div>
+          <p class="panel-note">
+            Utility meters, monthly bills, and utility payment posting are managed by landlords.
+            Admin handles governance and oversight only.
+          </p>
+          <p class="status-text">
+            Use the <a href="/landlord" class="home-link">Landlord Portal</a> for utility workflows.
+          </p>
+        </section>
+
+        <section class="panel wide-panel hidden" aria-hidden="true">
           <div class="panel-head">
             <h2>Utility Bills (Water + Electricity)</h2>
             <button id="refresh-utility-bills" type="button">Refresh</button>
@@ -324,7 +367,7 @@
           </div>
         </section>
 
-        <section class="panel wide-panel hidden">
+        <section class="panel wide-panel hidden" aria-hidden="true">
           <div class="panel-head">
             <h2>Utility Payments</h2>
             <button id="refresh-utility-payments" type="button">Refresh</button>
@@ -398,7 +441,7 @@
           </div>
         </section>
 
-        <section class="panel hidden">
+        <section class="panel">
           <div class="panel-head">
             <h2>Rent Ledger</h2>
             <button id="refresh-rent-ledger" type="button">Refresh</button>
@@ -447,7 +490,7 @@
           </div>
         </section>
 
-        <section class="panel hidden">
+        <section class="panel">
           <div class="panel-head">
             <h2>Rent Payments</h2>
             <button id="refresh-rent-payments" type="button">Refresh</button>
@@ -544,6 +587,6 @@
       </form>
     </template>
 
-    <script type="module" src="/admin.js"></script>
+    <script type="module" src="/admin.js?v=20260310d"></script>
   </body>
 </html>

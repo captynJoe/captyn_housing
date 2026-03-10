@@ -19,6 +19,7 @@ body {
   min-height: 100vh;
   font-family: "Manrope", "Avenir Next", "Segoe UI", sans-serif;
   color: var(--ink-900);
+  overflow-x: hidden;
   background: radial-gradient(circle at 10% 10%, #dbe7ee 0%, transparent 45%),
     linear-gradient(155deg, var(--sand-100) 0%, #f2e7d4 45%, #e6f0f2 100%);
 }
@@ -174,6 +175,47 @@ button {
   font-size: 0.94rem;
 }
 
+.password-toggle-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.password-toggle-wrap input {
+  width: 100%;
+  padding-right: 68px;
+}
+
+.password-toggle-wrap .password-toggle-btn {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  border: 1px solid rgba(16, 35, 49, 0.24);
+  border-radius: 8px;
+  width: 34px;
+  height: 28px;
+  padding: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ink-700);
+  background: #fff;
+  cursor: pointer;
+  line-height: 1.2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.password-toggle-wrap .password-toggle-btn .password-eye-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.password-toggle-wrap .password-toggle-btn.is-visible .password-eye-icon {
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+
 textarea {
   border-radius: 10px;
   border: 1px solid rgba(16, 35, 49, 0.2);
@@ -194,6 +236,7 @@ button {
 .table-wrap {
   margin-top: 12px;
   overflow-x: auto;
+  max-width: 100%;
 }
 
 table {
@@ -241,10 +284,14 @@ tbody td {
 @media (max-width: 680px) {
   .shell {
     padding: 24px 12px 36px;
+    width: 100%;
+    max-width: 100%;
   }
 
   .hero {
     flex-direction: column;
+    width: 100%;
+    max-width: 100%;
   }
 
   .auth-panel {
@@ -253,6 +300,21 @@ tbody td {
 
   .inline-fields {
     grid-template-columns: 1fr;
+  }
+
+  .panel {
+    width: 100%;
+    max-width: 100%;
+    margin-inline: auto;
+  }
+
+  .action-row {
+    flex-wrap: wrap;
+  }
+
+  .panel-head {
+    flex-wrap: wrap;
+    align-items: flex-start;
   }
 }
 
@@ -291,6 +353,7 @@ tbody td {
   border-radius: 12px;
   padding: 12px;
   background: #fff;
+  min-width: 0;
 }
 
 .metric-card p {

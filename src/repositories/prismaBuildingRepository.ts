@@ -9,6 +9,7 @@ import type {
 import type { BuildingRepository } from "./buildingRepository.js";
 import type {
   CreateBuildingInput,
+  LandlordAddBuildingHousesInput,
   CreateIncidentInput,
   CreateVacancySnapshotInput,
   ResolveIncidentInput
@@ -178,6 +179,117 @@ export class PrismaBuildingRepository implements BuildingRepository {
     });
 
     return mapBuilding(building);
+  }
+
+  async addHouseUnits(
+    buildingId: string,
+    input: LandlordAddBuildingHousesInput
+  ): Promise<{ building: Building; addedHouseNumbers: string[] } | undefined> {
+    const normalizedHouseNumbers = Array.from(
+      new Set(
+        input.houseNumbers
+          .map((value) => value.trim().toUpperCase())
+          .filter((value) => value.length > 0)
+      )
+    );
+
+    const existing = await this.prisma.building.findUnique({
+      where: { id: buildingId },
+      include: {
+        incidents: { orderBy: { createdAt: "desc" } },
+        maintenanceRecords: { orderBy: { createdAt: "desc" } },
+        vacancySnapshots: { orderBy: { movedOutAt: "desc" } },
+        houseUnits: { orderBy: { houseNumber: "asc" } }
+      }
+    });
+
+    if (!existing) {
+      return undefined;
+    }
+
+    const existingSet = new Set(existing.houseUnits.map((item) => item.houseNumber));
+    const addedHouseNumbers = normalizedHouseNumbers.filter(
+      (houseNumber) => !existingSet.has(houseNumber)
+    );
+
+    if (addedHouseNumbers.length > 0) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.houseUnit.createMany({
+          data: addedHouseNumbers.map((houseNumber) => ({
+            buildingId,
+            houseNumber,
+            isActive: true
+          })),
+          skipDuplicates: true
+        });
+
+        const totalUnits = await tx.houseUnit.count({
+          where: { buildingId }
+        });
+
+        await tx.building.update({
+          where: { id: buildingId },
+          data: {
+            units: totalUnits
+          }
+        });
+      });
+    }
+
+    const updated = await this.prisma.building.findUnique({
+      where: { id: buildingId },
+      include: {
+        incidents: { orderBy: { createdAt: "desc" } },
+        maintenanceRecords: { orderBy: { createdAt: "desc" } },
+        vacancySnapshots: { orderBy: { movedOutAt: "desc" } },
+        houseUnits: { orderBy: { houseNumber: "asc" } }
+      }
+    });
+
+    if (!updated) {
+      return undefined;
+    }
+
+    return {
+      building: mapBuilding(updated),
+      addedHouseNumbers
+    };
+  }
+
+  async deleteBuilding(id: string): Promise<Building | undefined> {
+    const existing = await this.prisma.building.findUnique({
+      where: { id },
+      include: {
+        incidents: { orderBy: { createdAt: "desc" } },
+        maintenanceRecords: { orderBy: { createdAt: "desc" } },
+        vacancySnapshots: { orderBy: { movedOutAt: "desc" } },
+        houseUnits: { orderBy: { houseNumber: "asc" } }
+      }
+    });
+
+    if (!existing) {
+      return undefined;
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.tenancy.deleteMany({
+        where: { buildingId: id }
+      });
+
+      await tx.tenantApplication.deleteMany({
+        where: { buildingId: id }
+      });
+
+      await tx.householdMemberRegistry.deleteMany({
+        where: { buildingId: id }
+      });
+
+      await tx.building.delete({
+        where: { id }
+      });
+    });
+
+    return mapBuilding(existing);
   }
 
   async addIncident(

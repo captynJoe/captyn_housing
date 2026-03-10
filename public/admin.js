@@ -1,3 +1,5 @@
+import { initPasswordVisibilityToggles } from "./password-visibility.js";
+
 const authStatusEl = document.getElementById("auth-status");
 const adminRoleEl = document.getElementById("admin-role");
 const adminLogoutBtnEl = document.getElementById("admin-logout-btn");
@@ -14,6 +16,12 @@ const landlordAccessBodyEl = document.getElementById("landlord-access-body");
 const refreshLandlordAccessBtn = document.getElementById("refresh-landlord-access");
 const passwordRecoveryBodyEl = document.getElementById("password-recovery-body");
 const refreshPasswordRecoveryBtn = document.getElementById("refresh-password-recovery");
+const accountPasswordRecoveryBodyEl = document.getElementById(
+  "account-password-recovery-body"
+);
+const refreshAccountPasswordRecoveryBtn = document.getElementById(
+  "refresh-account-password-recovery"
+);
 
 const ticketsBodyEl = document.getElementById("tickets-body");
 const ticketFilterFormEl = document.getElementById("ticket-filter-form");
@@ -224,17 +232,39 @@ async function submitLandlordAccessDecision(requestId, action, note) {
   });
 }
 
+async function revokeLandlordRole(userId, note) {
+  return requestJson(`/api/admin/landlord-users/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      confirmUserId: userId,
+      confirmationText: "REVOKE",
+      note: note || undefined
+    })
+  });
+}
+
 function renderLandlordAccessRequests(requests) {
   landlordAccessBodyEl.replaceChildren();
+  const visibleRequests = Array.isArray(requests)
+    ? requests.filter((item) => {
+        if (item.status !== "approved") {
+          return true;
+        }
+        return item.user?.role === "landlord";
+      })
+    : [];
 
-  if (!Array.isArray(requests) || requests.length === 0) {
+  if (visibleRequests.length === 0) {
     const row = document.createElement("tr");
     row.innerHTML = '<td colspan="7">No landlord access requests found.</td>';
     landlordAccessBodyEl.append(row);
     return;
   }
 
-  requests.forEach((request) => {
+  visibleRequests.forEach((request) => {
     const row = document.createElement("tr");
     const reviewedBy =
       request.reviewedBy?.fullName ?? request.reviewedBy?.email ?? "legacy admin";
@@ -301,15 +331,73 @@ function renderLandlordAccessRequests(requests) {
         handleDecision("reject");
       });
     } else {
-      row.innerHTML = `
-        <td>${formatDateTime(request.requestedAt)}</td>
-        <td>${request.user.fullName}</td>
-        <td>${request.user.email}</td>
-        <td>${request.user.phone}</td>
-        <td><strong>${request.status}</strong></td>
-        <td>${reason}</td>
-        <td>${reviewedAt}<br /><small>${reviewedBy}</small></td>
-      `;
+      const canRevokeLandlord =
+        request.status === "approved" && request.user?.role === "landlord";
+
+      if (canRevokeLandlord) {
+        row.innerHTML = `
+          <td>${formatDateTime(request.requestedAt)}</td>
+          <td>${request.user.fullName}</td>
+          <td>${request.user.email}</td>
+          <td>${request.user.phone}</td>
+          <td><strong>${request.status}</strong></td>
+          <td>${reason}</td>
+          <td>
+            <button data-action="revoke-landlord" type="button" class="btn-danger">Remove Landlord</button>
+            <br /><small>${reviewedAt} • ${reviewedBy}</small>
+          </td>
+        `;
+
+        const revokeButton = row.querySelector(
+          'button[data-action="revoke-landlord"]'
+        );
+        if (revokeButton instanceof HTMLButtonElement) {
+          revokeButton.addEventListener("click", () => {
+            const shouldProceed = window.confirm(
+              `Remove landlord role for ${request.user.fullName} (${request.user.phone})?\nThis revokes active sessions and clears building ownership links.`
+            );
+            if (!shouldProceed) {
+              return;
+            }
+
+            const noteRaw = window.prompt(
+              "Optional admin note for this landlord removal. Leave blank to skip."
+            );
+            const note =
+              noteRaw == null || String(noteRaw).trim().length === 0
+                ? undefined
+                : String(noteRaw).trim();
+
+            clearError();
+            revokeButton.disabled = true;
+
+            void (async () => {
+              try {
+                const payload = await revokeLandlordRole(request.user.id, note);
+                const revoked = payload.data ?? {};
+                setStatus(
+                  `Removed landlord role from ${request.user.fullName}. Cleared ${Number(revoked.clearedBuildingsCount ?? 0)} building owner link(s).`
+                );
+                await Promise.all([loadLandlordAccessRequests(), loadBuildings()]);
+              } catch (error) {
+                handleAdminError(error, "Failed to remove landlord role.");
+              } finally {
+                revokeButton.disabled = false;
+              }
+            })();
+          });
+        }
+      } else {
+        row.innerHTML = `
+          <td>${formatDateTime(request.requestedAt)}</td>
+          <td>${request.user.fullName}</td>
+          <td>${request.user.email}</td>
+          <td>${request.user.phone}</td>
+          <td><strong>${request.status}</strong></td>
+          <td>${reason}</td>
+          <td>${reviewedAt}<br /><small>${reviewedBy}</small></td>
+        `;
+      }
     }
 
     landlordAccessBodyEl.append(row);
@@ -324,6 +412,28 @@ async function submitPasswordRecoveryDecision(
 ) {
   await requestJson(
     `/api/admin/auth/resident/password-recovery-requests/${encodeURIComponent(requestId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        action,
+        temporaryPassword: temporaryPassword || undefined,
+        note: note || undefined
+      })
+    }
+  );
+}
+
+async function submitAccountPasswordRecoveryDecision(
+  requestId,
+  action,
+  temporaryPassword,
+  note
+) {
+  await requestJson(
+    `/api/admin/auth/account/password-recovery-requests/${encodeURIComponent(requestId)}`,
     {
       method: "PATCH",
       headers: {
@@ -364,7 +474,7 @@ function renderPasswordRecoveryRequests(requests) {
         <td>${residentNote}</td>
         <td>
           <div class="inline-fields compact-fields" style="grid-template-columns: 1fr 1fr 1fr;">
-            <input data-action="temporary-password" type="text" minlength="8" maxlength="128" placeholder="Temp password" />
+            <input data-action="temporary-password" type="password" minlength="8" maxlength="128" placeholder="Temp password" />
             <input data-action="note" type="text" maxlength="500" placeholder="Admin note (optional)" />
             <div style="display:flex;gap:8px;align-items:center;">
               <button data-action="approve" type="button">Issue Reset</button>
@@ -434,6 +544,112 @@ function renderPasswordRecoveryRequests(requests) {
 
     passwordRecoveryBodyEl.append(row);
   });
+
+  initPasswordVisibilityToggles(passwordRecoveryBodyEl);
+}
+
+function renderAccountPasswordRecoveryRequests(requests) {
+  accountPasswordRecoveryBodyEl.replaceChildren();
+
+  if (!Array.isArray(requests) || requests.length === 0) {
+    const row = document.createElement("tr");
+    row.innerHTML = '<td colspan="7">No landlord account recovery requests found.</td>';
+    accountPasswordRecoveryBodyEl.append(row);
+    return;
+  }
+
+  requests.forEach((request) => {
+    const row = document.createElement("tr");
+    const accountNote = request.note ?? "-";
+    const reviewedBy = request.reviewedByRole ?? "-";
+    const reviewedAt = request.reviewedAt ? formatDateTime(request.reviewedAt) : "-";
+    const identifier =
+      request.identifierType === "phone"
+        ? request.phoneMask ?? request.phone
+        : request.email;
+
+    if (request.status === "pending") {
+      row.innerHTML = `
+        <td>${formatDateTime(request.requestedAt)}</td>
+        <td>${request.fullName}</td>
+        <td>${request.role}</td>
+        <td>${identifier}</td>
+        <td><strong>${request.status}</strong></td>
+        <td>${accountNote}</td>
+        <td>
+          <div class="inline-fields compact-fields" style="grid-template-columns: 1fr 1fr 1fr;">
+            <input data-action="temporary-password" type="password" minlength="8" maxlength="128" placeholder="Temp password" />
+            <input data-action="note" type="text" maxlength="500" placeholder="Admin note (optional)" />
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button data-action="approve" type="button">Issue Reset</button>
+              <button data-action="reject" type="button">Reject</button>
+            </div>
+          </div>
+        </td>
+      `;
+
+      const tempPasswordInput = row.querySelector(
+        'input[data-action="temporary-password"]'
+      );
+      const noteInput = row.querySelector('input[data-action="note"]');
+      const approveButton = row.querySelector('button[data-action="approve"]');
+      const rejectButton = row.querySelector('button[data-action="reject"]');
+
+      const handleDecision = (action) => {
+        clearError();
+        approveButton.disabled = true;
+        rejectButton.disabled = true;
+
+        void (async () => {
+          try {
+            const temporaryPassword = tempPasswordInput.value.trim();
+            if (action === "approve" && temporaryPassword.length < 8) {
+              throw new Error("Temporary password must be at least 8 characters.");
+            }
+            await submitAccountPasswordRecoveryDecision(
+              request.id,
+              action,
+              temporaryPassword,
+              noteInput.value.trim()
+            );
+            setStatus(
+              `Account recovery request ${request.id.slice(0, 8)} ${
+                action === "approve" ? "approved" : "rejected"
+              }.`
+            );
+            await loadAccountPasswordRecoveryRequests();
+          } catch (error) {
+            handleAdminError(error, "Failed to review account recovery request.");
+          } finally {
+            approveButton.disabled = false;
+            rejectButton.disabled = false;
+          }
+        })();
+      };
+
+      approveButton.addEventListener("click", () => {
+        handleDecision("approve");
+      });
+
+      rejectButton.addEventListener("click", () => {
+        handleDecision("reject");
+      });
+    } else {
+      row.innerHTML = `
+        <td>${formatDateTime(request.requestedAt)}</td>
+        <td>${request.fullName}</td>
+        <td>${request.role}</td>
+        <td>${identifier}</td>
+        <td><strong>${request.status}</strong></td>
+        <td>${accountNote}</td>
+        <td>${reviewedAt}<br /><small>${reviewedBy}</small></td>
+      `;
+    }
+
+    accountPasswordRecoveryBodyEl.append(row);
+  });
+
+  initPasswordVisibilityToggles(accountPasswordRecoveryBodyEl);
 }
 
 function createTicketStatusOptions(currentStatus) {
@@ -520,12 +736,16 @@ function renderBuildings(rows) {
 
   if (!Array.isArray(rows) || rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = `<td colspan="7">No buildings configured.</td>`;
+    row.innerHTML = `<td colspan="9">No buildings configured.</td>`;
     buildingsBodyEl.append(row);
     return;
   }
 
   rows.forEach((building) => {
+    const ownerLabel = building.landlordOwnerName
+      ? `${building.landlordOwnerName}<br /><small>${building.landlordOwnerPhone ?? "-"}</small>`
+      : "<small>Unassigned</small>";
+
     const row = document.createElement("tr");
     row.innerHTML = `
       <td><small>${building.id}</small></td>
@@ -533,8 +753,29 @@ function renderBuildings(rows) {
       <td>${building.county}</td>
       <td>${building.address}</td>
       <td>${building.units ?? "-"}</td>
+      <td>${ownerLabel}</td>
       <td>${building.cctvStatus}</td>
       <td>${formatDateTime(building.updatedAt)}</td>
+      <td>
+        <button
+          type="button"
+          data-action="assign-building-landlord"
+          data-building-id="${building.id}"
+          data-building-name="${building.name}"
+          data-owner-phone="${building.landlordOwnerPhone ?? ""}"
+        >
+          Assign Landlord
+        </button>
+        <button
+          type="button"
+          class="btn-danger"
+          data-action="delete-building"
+          data-building-id="${building.id}"
+          data-building-name="${building.name}"
+        >
+          Delete
+        </button>
+      </td>
     `;
     buildingsBodyEl.append(row);
   });
@@ -801,6 +1042,13 @@ async function loadPasswordRecoveryRequests() {
   renderPasswordRecoveryRequests(payload.data ?? []);
 }
 
+async function loadAccountPasswordRecoveryRequests() {
+  const payload = await requestJson(
+    "/api/admin/auth/account/password-recovery-requests?limit=500"
+  );
+  renderAccountPasswordRecoveryRequests(payload.data ?? []);
+}
+
 async function loadTickets() {
   const params = new URLSearchParams();
   const status = ticketFilterStatusEl.value.trim();
@@ -817,7 +1065,7 @@ async function loadTickets() {
 }
 
 async function loadBuildings() {
-  const payload = await requestJson("/api/buildings");
+  const payload = await requestJson("/api/admin/buildings");
   renderBuildings(payload.data ?? []);
 }
 
@@ -868,6 +1116,7 @@ async function loadAdminData() {
       loadOverview(),
       loadLandlordAccessRequests(),
       loadPasswordRecoveryRequests(),
+      loadAccountPasswordRecoveryRequests(),
       loadTickets(),
       loadBuildings(),
       loadUtilityBills(),
@@ -941,6 +1190,107 @@ buildingCreateFormEl.addEventListener("submit", (event) => {
       handleAdminError(error, "Failed to create building.");
     } finally {
       submitButton.disabled = false;
+    }
+  })();
+});
+
+buildingsBodyEl.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  const action = String(target.dataset.action || "");
+
+  const buildingId = String(target.dataset.buildingId || "").trim();
+  const buildingName = String(target.dataset.buildingName || buildingId).trim();
+  if (!buildingId) {
+    return;
+  }
+
+  if (action === "assign-building-landlord") {
+    const currentOwnerPhone = String(target.dataset.ownerPhone || "").trim();
+    const promptValue =
+      currentOwnerPhone && currentOwnerPhone !== "-" ? currentOwnerPhone : "";
+    const identifierRaw = window.prompt(
+      `Assign landlord for ${buildingName} (${buildingId}).\nEnter landlord phone or email:`,
+      promptValue
+    );
+    if (identifierRaw == null) {
+      return;
+    }
+
+    const identifier = String(identifierRaw).trim();
+    if (!identifier) {
+      showError("Provide landlord phone or email.");
+      return;
+    }
+
+    target.disabled = true;
+    clearError();
+
+    void (async () => {
+      try {
+        const payload = await requestJson(
+          `/api/admin/buildings/${encodeURIComponent(buildingId)}/landlord`,
+          {
+            method: "PATCH",
+            headers: {
+              "content-type": "application/json"
+            },
+            body: JSON.stringify({
+              identifier
+            })
+          }
+        );
+
+        const landlord = payload.data?.landlord;
+        setStatus(
+          `Assigned ${landlord?.fullName ?? "landlord"} (${landlord?.phone ?? "-"}) to ${buildingName}.`
+        );
+        await Promise.all([loadBuildings(), loadLandlordAccessRequests()]);
+      } catch (error) {
+        handleAdminError(error, "Failed to assign landlord to building.");
+      } finally {
+        target.disabled = false;
+      }
+    })();
+    return;
+  }
+
+  if (action !== "delete-building") {
+    return;
+  }
+
+  const shouldProceed = window.confirm(
+    `Delete ${buildingName} (${buildingId})? This action permanently removes the building and linked unit records.`
+  );
+  if (!shouldProceed) {
+    return;
+  }
+
+  target.disabled = true;
+  clearError();
+
+  void (async () => {
+    try {
+      await requestJson(`/api/admin/buildings/${encodeURIComponent(buildingId)}`, {
+        method: "DELETE",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          confirmBuildingId: buildingId,
+          confirmationText: "DELETE"
+        })
+      });
+
+      setStatus(`Deleted building ${buildingName} (${buildingId}).`);
+      await Promise.all([loadOverview(), loadBuildings()]);
+    } catch (error) {
+      handleAdminError(error, "Failed to delete building.");
+    } finally {
+      target.disabled = false;
     }
   })();
 });
@@ -1112,6 +1462,12 @@ refreshLandlordAccessBtn.addEventListener("click", () => {
 refreshPasswordRecoveryBtn.addEventListener("click", () => {
   void loadPasswordRecoveryRequests().catch((error) => {
     handleAdminError(error, "Unable to refresh password recovery requests.");
+  });
+});
+
+refreshAccountPasswordRecoveryBtn.addEventListener("click", () => {
+  void loadAccountPasswordRecoveryRequests().catch((error) => {
+    handleAdminError(error, "Unable to refresh account password recovery requests.");
   });
 });
 

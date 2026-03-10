@@ -1,3 +1,5 @@
+import { initPasswordVisibilityToggles } from "./password-visibility.js";
+
 const loginFormEl = document.getElementById("admin-login-form");
 const accessTokenEl = document.getElementById("admin-access-token");
 const usernameEl = document.getElementById("admin-username");
@@ -99,4 +101,5 @@ loginFormEl.addEventListener("submit", (event) => {
   void signIn(event);
 });
 
+initPasswordVisibilityToggles();
 void checkSession();

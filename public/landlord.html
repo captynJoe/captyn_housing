@@ -10,7 +10,8 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/admin.css" />
+    <link rel="stylesheet" href="/admin.css?v=20260310a" />
+    <link rel="stylesheet" href="/landlord.css?v=20260310e" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -27,7 +28,6 @@
         </div>
         <div class="action-row">
           <a href="/resident" class="home-link">Resident Portal</a>
-          <a href="/admin" class="home-link">Admin Portal</a>
           <span id="landlord-role" class="status-text">role: -</span>
           <button id="refresh-all-btn" type="button">Refresh All</button>
           <button id="landlord-logout-btn" type="button">Sign Out</button>
@@ -40,6 +40,7 @@
         </div>
         <div class="metrics-grid">
           <article class="metric-card"><p>Meters</p><strong id="metric-meters">-</strong></article>
+          <article class="metric-card"><p>Users</p><strong id="metric-users">-</strong></article>
           <article class="metric-card"><p>Posted Bills</p><strong id="metric-bills">-</strong></article>
           <article class="metric-card"><p>Unpaid Bills</p><strong id="metric-unpaid">-</strong></article>
           <article class="metric-card"><p>Overdue Bills</p><strong id="metric-overdue">-</strong></article>
@@ -48,8 +49,56 @@
         </div>
       </section>
 
-      <section class="layout">
-        <section class="panel wide-panel">
+      <div class="landlord-workspace">
+        <aside class="panel landlord-sidebar">
+          <p class="sidebar-label">Workspace</p>
+          <nav class="landlord-nav" aria-label="Landlord sections">
+            <button
+              type="button"
+              class="landlord-nav-btn active"
+              data-landlord-view="overview"
+            >
+              Overview
+            </button>
+            <button
+              type="button"
+              class="landlord-nav-btn"
+              data-landlord-view="buildings"
+            >
+              Buildings
+            </button>
+            <button
+              type="button"
+              class="landlord-nav-btn"
+              data-landlord-view="applications"
+            >
+              Applications
+            </button>
+            <button
+              type="button"
+              class="landlord-nav-btn"
+              data-landlord-view="utilities"
+            >
+              Utilities
+            </button>
+          </nav>
+          <p class="sidebar-note">
+            Keep each workflow focused. Building setup now opens in a side drawer.
+          </p>
+          <button
+            type="button"
+            class="landlord-primary-cta"
+            data-action="open-building-drawer"
+          >
+            + New Building
+          </button>
+        </aside>
+
+        <section class="layout landlord-content">
+        <section
+          class="panel wide-panel landlord-view"
+          data-landlord-view-panel="overview"
+        >
           <div class="panel-head">
             <h2>Resident Payment Access</h2>
             <button id="refresh-payment-access" type="button">Refresh</button>
@@ -75,43 +124,82 @@
           </div>
         </section>
 
-        <section class="panel wide-panel">
+        <section
+          class="panel wide-panel landlord-view hidden"
+          data-landlord-view-panel="buildings"
+        >
           <div class="panel-head">
             <h2>Building Management</h2>
-            <button id="refresh-buildings" type="button">Refresh</button>
+            <div class="action-row">
+              <button
+                type="button"
+                data-action="open-building-drawer"
+              >
+                + New Building
+              </button>
+              <button id="refresh-buildings" type="button">Refresh</button>
+            </div>
           </div>
+          <p class="status-text">
+            Buildings are created by admin. Use the side drawer to bulk-add rooms/houses.
+          </p>
 
-          <form id="building-form" class="package-card">
-            <div class="inline-fields compact-fields">
-              <label>
-                Building Name
-                <input id="building-name" type="text" maxlength="120" placeholder="Nyota Heights" required />
-              </label>
-              <label>
-                County
-                <input id="building-county" type="text" maxlength="80" placeholder="Nairobi" required />
-              </label>
+          <div id="caretaker-management-panel" class="package-card">
+            <div class="panel-head">
+              <h3>Caretaker / House Manager Access</h3>
+              <button id="refresh-caretakers" type="button">Refresh</button>
             </div>
-            <label>
-              Address
-              <input id="building-address" type="text" maxlength="180" placeholder="Mirema Drive, Nairobi" required />
-            </label>
-            <div class="inline-fields compact-fields">
+            <p class="status-text">
+              Approve a caretaker by phone/email for one building. Caretakers can post new utility
+              readings and respond to complaints, but cannot perform destructive landlord actions.
+            </p>
+            <form id="caretaker-form" class="inline-fields compact-fields">
               <label>
-                CCTV Status
-                <select id="building-cctv" required>
-                  <option value="none">none</option>
-                  <option value="partial">partial</option>
-                  <option value="verified">verified</option>
-                </select>
+                Building
+                <select id="caretaker-building-select"></select>
               </label>
               <label>
-                House Numbers (comma or new line separated)
-                <textarea id="building-house-numbers" rows="3" placeholder="A-1, A-2, A-3" required></textarea>
+                Caretaker Phone/Email
+                <input
+                  id="caretaker-identifier"
+                  type="text"
+                  maxlength="160"
+                  placeholder="+254711111111 or name@email.com"
+                  required
+                />
               </label>
+              <label>
+                Verification House
+                <input
+                  id="caretaker-house-number"
+                  type="text"
+                  maxlength="24"
+                  placeholder="A-12"
+                  required
+                />
+              </label>
+              <label>
+                Note (optional)
+                <input id="caretaker-note" type="text" maxlength="280" placeholder="Night shift manager" />
+              </label>
+              <button type="submit">Approve Caretaker</button>
+            </form>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Phone</th>
+                    <th>Email</th>
+                    <th>House</th>
+                    <th>Approved</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="caretakers-body"></tbody>
+              </table>
             </div>
-            <button type="submit">Create Building</button>
-          </form>
+          </div>
 
           <div class="table-wrap">
             <table>
@@ -123,6 +211,7 @@
                   <th>County</th>
                   <th>Units</th>
                   <th>Updated</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody id="buildings-body"></tbody>
@@ -130,7 +219,60 @@
           </div>
         </section>
 
-        <section class="panel wide-panel">
+        <section
+          class="panel wide-panel landlord-view hidden"
+          data-landlord-view-panel="applications"
+        >
+          <div class="panel-head">
+            <h2>Resident Complaints</h2>
+            <div class="action-row">
+              <label>
+                Status
+                <select id="landlord-ticket-filter-status">
+                  <option value="">all</option>
+                  <option value="open">open</option>
+                  <option value="triaged">triaged</option>
+                  <option value="in_progress">in_progress</option>
+                  <option value="resolved">resolved</option>
+                </select>
+              </label>
+              <label>
+                Queue
+                <select id="landlord-ticket-filter-queue">
+                  <option value="">all</option>
+                  <option value="maintenance">maintenance</option>
+                  <option value="security">security</option>
+                </select>
+              </label>
+              <label>
+                Building
+                <select id="landlord-ticket-building-select"></select>
+              </label>
+              <button id="refresh-landlord-tickets" type="button">Refresh</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Ticket</th>
+                  <th>House</th>
+                  <th>Queue</th>
+                  <th>Status</th>
+                  <th>SLA</th>
+                  <th>Created</th>
+                  <th>Reply</th>
+                </tr>
+              </thead>
+              <tbody id="landlord-tickets-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section
+          class="panel wide-panel landlord-view hidden"
+          data-landlord-view-panel="applications"
+        >
           <div class="panel-head">
             <h2>Tenant Applications</h2>
             <div class="action-row">
@@ -165,7 +307,10 @@
           </div>
         </section>
 
-        <section class="panel wide-panel">
+        <section
+          class="panel wide-panel landlord-view hidden"
+          data-landlord-view-panel="applications"
+        >
           <div class="panel-head">
             <h2>Rent Collection Status</h2>
             <button id="refresh-rent-status" type="button">Refresh</button>
@@ -188,7 +333,10 @@
           </div>
         </section>
 
-        <section class="panel wide-panel">
+        <section
+          class="panel wide-panel landlord-view hidden"
+          data-landlord-view-panel="utilities"
+        >
           <div class="panel-head">
             <h2>Building Utility + Members Registry</h2>
             <div class="action-row">
@@ -197,12 +345,14 @@
                 <select id="registry-building-select"></select>
               </label>
               <button id="registry-load-btn" type="button">Load</button>
+              <button id="open-utility-sheet-btn" type="button">Bulk Utility Sheet</button>
               <button id="registry-save-btn" type="button">Save All</button>
             </div>
           </div>
           <p class="status-text">
             Enter water/electricity meter numbers and number of members for every house in
-            the selected building, then save in one action.
+            the selected building, then save in one action. Set fixed charges for houses with
+            faulty or missing meters.
           </p>
           <div class="table-wrap">
             <table>
@@ -214,6 +364,9 @@
                   <th>Members</th>
                   <th>Water Meter</th>
                   <th>Electricity Meter</th>
+                  <th>Water Fixed (KSh)</th>
+                  <th>Electric Fixed (KSh)</th>
+                  <th>Resident Action</th>
                 </tr>
               </thead>
               <tbody id="registry-body"></tbody>
@@ -221,7 +374,10 @@
           </div>
         </section>
 
-        <section class="panel wide-panel">
+        <section
+          class="panel wide-panel landlord-view hidden"
+          data-landlord-view-panel="utilities"
+        >
           <div class="panel-head">
             <h2>Meter Registry</h2>
             <button id="refresh-meters" type="button">Refresh</button>
@@ -263,7 +419,10 @@
           </div>
         </section>
 
-        <section class="panel wide-panel">
+        <section
+          class="panel wide-panel landlord-view hidden"
+          data-landlord-view-panel="utilities"
+        >
           <div class="panel-head">
             <h2>Post Monthly Utility Bill</h2>
             <button id="refresh-bills" type="button">Refresh</button>
@@ -341,7 +500,10 @@
           </div>
         </section>
 
-        <section class="panel wide-panel">
+        <section
+          class="panel wide-panel landlord-view hidden"
+          data-landlord-view-panel="utilities"
+        >
           <div class="panel-head">
             <h2>Resident Utility Payments</h2>
             <button id="refresh-payments" type="button">Refresh</button>
@@ -365,10 +527,165 @@
           </div>
         </section>
       </section>
+      </div>
+
+      <div id="utility-sheet-backdrop" class="landlord-drawer-backdrop hidden"></div>
+      <aside id="utility-sheet-modal" class="landlord-sheet-modal hidden" aria-label="Bulk utility sheet">
+        <header class="landlord-drawer-head">
+          <h2>Bulk Utility Sheet</h2>
+          <button id="close-utility-sheet-btn" type="button" class="ghost-btn">Close</button>
+        </header>
+
+        <form id="utility-sheet-form" class="package-card landlord-sheet-form">
+          <p class="status-text">
+            Spreadsheet-style entry for all houses in the selected building. Fill meter numbers,
+            then add readings or fixed charges where needed and submit once.
+          </p>
+
+          <div class="inline-fields compact-fields">
+            <label>
+              Building
+              <select id="utility-sheet-building-select"></select>
+            </label>
+            <label>
+              Billing Month
+              <input id="utility-sheet-billing-month" type="month" required />
+            </label>
+            <label>
+              Due Date
+              <input id="utility-sheet-due-date" type="datetime-local" required />
+            </label>
+          </div>
+
+          <div class="inline-fields compact-fields">
+            <label>
+              Water Rate (KSh/unit)
+              <input id="utility-sheet-water-rate" type="number" min="0" step="0.01" />
+            </label>
+            <label>
+              Electricity Rate (KSh/unit)
+              <input id="utility-sheet-electric-rate" type="number" min="0" step="0.01" />
+            </label>
+          </div>
+
+          <label>
+            Note (optional, added to posted bills)
+            <input
+              id="utility-sheet-note"
+              type="text"
+              maxlength="280"
+              placeholder="Monthly bulk posting by landlord."
+            />
+          </label>
+
+          <div class="table-wrap utility-sheet-table-wrap">
+            <table class="utility-sheet-table">
+              <thead>
+                <tr>
+                  <th>House</th>
+                  <th>Water Meter</th>
+                  <th>Water Prev</th>
+                  <th>Water Current</th>
+                  <th>Water Fixed</th>
+                  <th>Electric Meter</th>
+                  <th>Electric Prev</th>
+                  <th>Electric Current</th>
+                  <th>Electric Fixed</th>
+                </tr>
+              </thead>
+              <tbody id="utility-sheet-body"></tbody>
+            </table>
+          </div>
+
+          <div class="action-row">
+            <button id="utility-sheet-submit-btn" type="submit">Save Meters + Post Bills</button>
+            <button id="utility-sheet-reload-btn" type="button" class="ghost-btn">Reload Houses</button>
+          </div>
+        </form>
+      </aside>
+
+      <div id="building-drawer-backdrop" class="landlord-drawer-backdrop hidden"></div>
+      <aside id="building-drawer" class="landlord-drawer hidden" aria-label="Add rooms">
+        <header class="landlord-drawer-head">
+          <h2>Add Rooms</h2>
+          <button id="close-building-drawer-btn" type="button" class="ghost-btn">Close</button>
+        </header>
+
+        <form id="building-form" class="package-card landlord-drawer-form">
+          <div class="inline-fields compact-fields">
+            <label>
+              Building
+              <select id="room-target-building" required></select>
+            </label>
+            <div class="status-text">
+              Rooms/houses are generated in bulk and added to the selected building.
+            </div>
+          </div>
+
+          <section class="landlord-generator">
+            <h3>Auto-generate room numbers</h3>
+            <div class="inline-fields compact-fields">
+              <label>
+                Format
+                <select id="building-house-format">
+                  <option value="numbers">Numbers only (1, 2, 3)</option>
+                  <option value="prefix_number">Prefix + number (A-1, A-2)</option>
+                </select>
+              </label>
+              <label>
+                Prefix (optional)
+                <input id="building-house-prefix" type="text" maxlength="6" placeholder="A" />
+              </label>
+            </div>
+            <div class="inline-fields compact-fields">
+              <label>
+                Separator
+                <select id="building-house-separator">
+                  <option value="-">Dash (-)</option>
+                  <option value="">None</option>
+                </select>
+              </label>
+              <label>
+                Order
+                <select id="building-house-order">
+                  <option value="asc">Ascending</option>
+                  <option value="desc">Descending</option>
+                </select>
+              </label>
+            </div>
+            <div class="inline-fields compact-fields">
+              <label>
+                Start number
+                <input id="building-house-start" type="number" min="1" value="1" required />
+              </label>
+              <label>
+                How many houses
+                <input id="building-house-count" type="number" min="1" max="2000" value="12" required />
+              </label>
+              <label>
+                Step
+                <input id="building-house-step" type="number" min="1" value="1" required />
+              </label>
+            </div>
+            <div class="action-row">
+              <button id="generate-house-numbers-btn" type="button">Generate</button>
+            </div>
+            <p id="building-house-preview" class="status-text">
+              Preview: A-1, A-2, A-3...
+            </p>
+          </section>
+
+          <label>
+            Room/House Numbers (comma or new line separated)
+            <textarea id="building-house-numbers" rows="5" placeholder="A-1, A-2, A-3" required></textarea>
+          </label>
+          <button type="submit">Add Rooms To Building</button>
+        </form>
+      </aside>
 
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js"></script>
+    <script type="module" src="/landlord.js?v=20260310f"></script>
   </body>
 </html>

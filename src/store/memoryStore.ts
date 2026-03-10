@@ -3,6 +3,7 @@ import type { Building } from "../domain/types.js";
 import type { BuildingRepository } from "../repositories/buildingRepository.js";
 import type {
   CreateBuildingInput,
+  LandlordAddBuildingHousesInput,
   CreateIncidentInput,
   CreateVacancySnapshotInput,
   ResolveIncidentInput
@@ -55,6 +56,51 @@ export class MemoryStore implements BuildingRepository {
 
     this.buildings.set(id, building);
     return building;
+  }
+
+  async addHouseUnits(
+    buildingId: string,
+    input: LandlordAddBuildingHousesInput
+  ): Promise<{ building: Building; addedHouseNumbers: string[] } | undefined> {
+    const building = this.buildings.get(buildingId);
+    if (!building) {
+      return undefined;
+    }
+
+    const normalized = Array.from(
+      new Set(
+        input.houseNumbers
+          .map((item) => item.trim().toUpperCase())
+          .filter((item) => item.length > 0)
+      )
+    );
+
+    if (normalized.length === 0) {
+      return { building, addedHouseNumbers: [] };
+    }
+
+    const existing = new Set((building.houseNumbers ?? []).map((item) => item.trim().toUpperCase()));
+    const addedHouseNumbers = normalized.filter((item) => !existing.has(item));
+    if (addedHouseNumbers.length === 0) {
+      return { building, addedHouseNumbers: [] };
+    }
+
+    building.houseNumbers = [...existing, ...addedHouseNumbers].sort((a, b) =>
+      a.localeCompare(b)
+    );
+    building.units = building.houseNumbers.length;
+    building.updatedAt = new Date().toISOString();
+    return { building, addedHouseNumbers };
+  }
+
+  async deleteBuilding(id: string): Promise<Building | undefined> {
+    const existing = this.buildings.get(id);
+    if (!existing) {
+      return undefined;
+    }
+
+    this.buildings.delete(id);
+    return existing;
   }
 
   async addIncident(buildingId: string, input: CreateIncidentInput) {

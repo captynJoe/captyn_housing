@@ -919,7 +919,8 @@ button,
   .field-grid,
   .rent-keyvals,
   .utility-bill-meta,
-  .payments-grid {
+  .payments-grid,
+  .payment-summary-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -943,6 +944,58 @@ button,
 
 .payments-shell {
   overflow: hidden;
+}
+
+.payment-summary-card {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid rgba(15, 123, 118, 0.16);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top right, rgba(15, 123, 118, 0.12), transparent 36%),
+    linear-gradient(135deg, rgba(243, 252, 249, 0.95), rgba(255, 255, 255, 0.94));
+}
+
+.payment-summary-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.payment-summary-copy h3 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: var(--ink-950);
+}
+
+.payment-summary-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+
+.payment-summary-grid div {
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(16, 28, 40, 0.08);
+}
+
+.payment-summary-grid dt {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-600);
+}
+
+.payment-summary-grid dd {
+  margin: 6px 0 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #0b5f5b;
 }
 
 .payments-grid {
@@ -1013,6 +1066,23 @@ button,
 
 .payment-state {
   margin: 0 0 8px;
+}
+
+.payment-encouragement {
+  margin: 0 0 8px;
+  color: #0b5f5b;
+  font-weight: 600;
+}
+
+.payment-remaining {
+  margin: 6px 0 0;
+  color: var(--ink-800);
+}
+
+.quick-pay-row-fixed button {
+  background: rgba(15, 123, 118, 0.08);
+  border-color: rgba(15, 123, 118, 0.18);
+  color: #0b5f5b;
 }
 
 .payment-section.is-disabled {

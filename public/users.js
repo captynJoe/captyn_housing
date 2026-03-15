@@ -63,6 +63,10 @@ const notificationListEl = document.getElementById("notification-list");
 const notificationCountEl = document.getElementById("notification-count");
 const rentDueEl = document.getElementById("rent-due");
 
+const paymentsSummaryActionEl = document.getElementById("payments-summary-action");
+const paymentsTotalOutstandingEl = document.getElementById("payments-total-outstanding");
+const paymentsRentOutstandingEl = document.getElementById("payments-rent-outstanding");
+const paymentsUtilityOutstandingEl = document.getElementById("payments-utility-outstanding");
 const utilityBillsSummaryEl = document.getElementById("utility-bills-summary");
 const utilityBillsListEl = document.getElementById("utility-bills-list");
 const rentPaymentClusterEl = document.querySelector(".payment-cluster-rent");
@@ -70,6 +74,7 @@ const rentPaymentSectionEl = document.getElementById("rent-payment-section");
 const rentPaymentStateEl = document.getElementById("rent-payment-state");
 const rentPaymentFormEl = document.getElementById("rent-payment-form");
 const rentPaymentAmountEl = document.getElementById("rent-payment-amount");
+const rentPaymentRemainingEl = document.getElementById("rent-payment-remaining");
 const rentPaymentMethodEl = document.getElementById("rent-payment-method");
 const rentPaymentPhoneEl = document.getElementById("rent-payment-phone");
 const rentPaymentBtnEl = document.getElementById("rent-payment-btn");
@@ -81,6 +86,7 @@ const utilityPaymentFormEl = document.getElementById("utility-payment-form");
 const utilityPaymentTypeEl = document.getElementById("utility-payment-type");
 const utilityPaymentMonthEl = document.getElementById("utility-payment-month");
 const utilityPaymentAmountEl = document.getElementById("utility-payment-amount");
+const utilityPaymentRemainingEl = document.getElementById("utility-payment-remaining");
 const utilityPaymentProviderEl = document.getElementById("utility-payment-provider");
 const utilityPaymentPhoneEl = document.getElementById("utility-payment-phone");
 const utilityPaymentReferenceEl = document.getElementById("utility-payment-reference");
@@ -180,12 +186,17 @@ const REQUIRED_DOM_BINDINGS = Object.freeze([
   ["notification-list", notificationListEl],
   ["notification-count", notificationCountEl],
   ["rent-due", rentDueEl],
+  ["payments-summary-action", paymentsSummaryActionEl],
+  ["payments-total-outstanding", paymentsTotalOutstandingEl],
+  ["payments-rent-outstanding", paymentsRentOutstandingEl],
+  ["payments-utility-outstanding", paymentsUtilityOutstandingEl],
   ["utility-bills-summary", utilityBillsSummaryEl],
   ["utility-bills-list", utilityBillsListEl],
   ["rent-payment-section", rentPaymentSectionEl],
   ["rent-payment-state", rentPaymentStateEl],
   ["rent-payment-form", rentPaymentFormEl],
   ["rent-payment-amount", rentPaymentAmountEl],
+  ["rent-payment-remaining", rentPaymentRemainingEl],
   ["rent-payment-method", rentPaymentMethodEl],
   ["rent-payment-phone", rentPaymentPhoneEl],
   ["rent-payment-btn", rentPaymentBtnEl],
@@ -197,6 +208,7 @@ const REQUIRED_DOM_BINDINGS = Object.freeze([
   ["utility-payment-type", utilityPaymentTypeEl],
   ["utility-payment-month", utilityPaymentMonthEl],
   ["utility-payment-amount", utilityPaymentAmountEl],
+  ["utility-payment-remaining", utilityPaymentRemainingEl],
   ["utility-payment-provider", utilityPaymentProviderEl],
   ["utility-payment-phone", utilityPaymentPhoneEl],
   ["utility-payment-reference", utilityPaymentReferenceEl],
@@ -261,6 +273,27 @@ function formatAmountValue(value) {
   return numeric > 0 ? String(numeric) : "";
 }
 
+function computeSuggestedStarterAmount(balance) {
+  const total = Math.ceil(toPositiveNumber(balance));
+  if (!total) {
+    return 0;
+  }
+
+  if (total <= 300) {
+    return total;
+  }
+
+  if (total <= 800) {
+    return Math.min(total, 200);
+  }
+
+  if (total <= 2000) {
+    return Math.min(total, 500);
+  }
+
+  return Math.min(total, 1000);
+}
+
 function computeQuickPayAmount(balance, mode) {
   const total = toPositiveNumber(balance);
   if (!total) {
@@ -282,14 +315,23 @@ function computeQuickPayAmount(balance, mode) {
   return Math.ceil(total);
 }
 
-function applyQuickPayAmount(inputEl, balance, mode) {
+function setPaymentAmountValue(inputEl, balance, amount) {
   if (!(inputEl instanceof HTMLInputElement)) {
     return;
   }
 
-  const amount = computeQuickPayAmount(balance, mode);
-  inputEl.value = formatAmountValue(amount);
+  const total = Math.ceil(toPositiveNumber(balance));
+  const requestedAmount = Math.ceil(toPositiveNumber(amount));
+  const nextAmount =
+    total > 0 ? Math.min(total, requestedAmount || total) : requestedAmount;
+  inputEl.value = formatAmountValue(nextAmount);
   inputEl.focus();
+  syncPaymentMessaging();
+}
+
+function applyQuickPayAmount(inputEl, balance, mode) {
+  const amount = computeQuickPayAmount(balance, mode);
+  setPaymentAmountValue(inputEl, balance, amount);
 }
 
 function captureRentPaymentBaseline() {
@@ -416,10 +458,141 @@ function getRentOutstandingBalance() {
   return toPositiveNumber(state.rentDue?.balanceKsh);
 }
 
+function getTotalUtilityOutstandingBalance() {
+  return Array.isArray(state.utilityBills)
+    ? state.utilityBills.reduce((sum, bill) => sum + toPositiveNumber(bill.balanceKsh), 0)
+    : 0;
+}
+
+function getTotalOutstandingBalance() {
+  return getRentOutstandingBalance() + getTotalUtilityOutstandingBalance();
+}
+
 function getUtilityOutstandingBalance(utilityType) {
   const selectedMonth = getSelectedUtilityBillMonth(utilityType);
   const bill = findOutstandingUtilityBill(utilityType, selectedMonth);
   return toPositiveNumber(bill?.balanceKsh);
+}
+
+function computeRemainingBalance(balance, amount) {
+  return Math.max(0, Math.ceil(toPositiveNumber(balance)) - Math.ceil(toPositiveNumber(amount)));
+}
+
+function updatePaymentsSummaryCard() {
+  const rentOutstanding = getRentOutstandingBalance();
+  const utilityOutstanding = getTotalUtilityOutstandingBalance();
+  const totalOutstanding = getTotalOutstandingBalance();
+
+  paymentsTotalOutstandingEl.textContent = formatCurrency(totalOutstanding);
+  paymentsRentOutstandingEl.textContent = formatCurrency(rentOutstanding);
+  paymentsUtilityOutstandingEl.textContent = formatCurrency(utilityOutstanding);
+
+  if (totalOutstanding <= 0) {
+    paymentsSummaryActionEl.textContent =
+      "All balances are clear right now. If a new bill is posted, you can still pay it in small steps.";
+    return;
+  }
+
+  const suggestedStarter = computeSuggestedStarterAmount(totalOutstanding);
+  if (suggestedStarter >= totalOutstanding) {
+    paymentsSummaryActionEl.textContent =
+      "Your current balance is manageable. You can clear it now or still enter a smaller custom amount.";
+    return;
+  }
+
+  paymentsSummaryActionEl.textContent = `You do not need to pay ${formatCurrency(
+    totalOutstanding
+  )} at once. A good start today is ${formatCurrency(
+    suggestedStarter
+  )}, and the remainder stays on your account.`;
+}
+
+function updateRentPaymentGuidance() {
+  if (!state.rentDue) {
+    rentPaymentRemainingEl.textContent =
+      "Rent payment will appear here once your room is configured for billing.";
+    return;
+  }
+
+  const balance = getRentOutstandingBalance();
+  const enteredAmount = toPositiveNumber(rentPaymentAmountEl.value);
+
+  if (balance <= 0) {
+    rentPaymentRemainingEl.textContent = "Your rent balance is clear right now.";
+    return;
+  }
+
+  if (enteredAmount <= 0) {
+    const suggestedStarter = computeSuggestedStarterAmount(balance);
+    rentPaymentRemainingEl.textContent = `Rent balance open: ${formatCurrency(
+      balance
+    )}. Suggested start today: ${formatCurrency(
+      suggestedStarter
+    )}. Enter any amount to preview what remains.`;
+    return;
+  }
+
+  if (enteredAmount >= balance) {
+    rentPaymentRemainingEl.textContent = `This payment clears the full rent balance of ${formatCurrency(
+      balance
+    )}.`;
+    return;
+  }
+
+  const remaining = computeRemainingBalance(balance, enteredAmount);
+  rentPaymentRemainingEl.textContent = `After paying ${formatCurrency(
+    enteredAmount
+  )}, you will still have ${formatCurrency(remaining)} remaining on rent.`;
+}
+
+function updateUtilityPaymentGuidance() {
+  const utilityType = String(utilityPaymentTypeEl.value ?? "water");
+  const bill = findOutstandingUtilityBill(
+    utilityType,
+    getSelectedUtilityBillMonth(utilityType)
+  );
+
+  if (!bill || toPositiveNumber(bill.balanceKsh) <= 0) {
+    utilityPaymentRemainingEl.textContent = `No ${utilityLabel(
+      utilityType
+    ).toLowerCase()} balance is open right now.`;
+    return;
+  }
+
+  const balance = toPositiveNumber(bill.balanceKsh);
+  const enteredAmount = toPositiveNumber(utilityPaymentAmountEl.value);
+
+  if (enteredAmount <= 0) {
+    const suggestedStarter = computeSuggestedStarterAmount(balance);
+    utilityPaymentRemainingEl.textContent = `${utilityLabel(
+      utilityType
+    )} ${bill.billingMonth} is open for ${formatCurrency(
+      balance
+    )}. Suggested start today: ${formatCurrency(
+      suggestedStarter
+    )}. Enter any amount to preview what remains.`;
+    return;
+  }
+
+  if (enteredAmount >= balance) {
+    utilityPaymentRemainingEl.textContent = `This payment clears the full ${utilityLabel(
+      utilityType
+    ).toLowerCase()} balance for ${bill.billingMonth}.`;
+    return;
+  }
+
+  const remaining = computeRemainingBalance(balance, enteredAmount);
+  utilityPaymentRemainingEl.textContent = `After paying ${formatCurrency(
+    enteredAmount
+  )}, you will still have ${formatCurrency(remaining)} remaining on this ${
+    bill.billingMonth
+  } ${utilityLabel(utilityType).toLowerCase()} bill.`;
+}
+
+function syncPaymentMessaging() {
+  updatePaymentsSummaryCard();
+  updateRentPaymentGuidance();
+  updateUtilityPaymentGuidance();
 }
 
 function updateResidentNavDots() {
@@ -434,12 +607,7 @@ function updateResidentNavDots() {
     ? state.reports.filter((report) => report.status !== "resolved").length
     : 0;
   const rentOutstanding = getRentOutstandingBalance();
-  const utilityOutstanding = Array.isArray(state.utilityBills)
-    ? state.utilityBills.reduce(
-        (sum, bill) => sum + toPositiveNumber(bill.balanceKsh),
-        0
-      )
-    : 0;
+  const utilityOutstanding = getTotalUtilityOutstandingBalance();
 
   if (noticesDot instanceof HTMLElement) {
     noticesDot.classList.toggle("hidden", notificationsCount === 0);
@@ -535,6 +703,7 @@ function applyPaymentAccessUi() {
   }
 
   syncUtilityPaymentProviderUi();
+  syncPaymentMessaging();
 }
 
 function getResidentToken() {
@@ -962,6 +1131,7 @@ function renderRentDue(rentDue, fallbackMessage) {
       fallbackMessage ??
       "Rent profile is not configured yet. Contact housing admin.";
     rentDueEl.append(empty);
+    updateRentPaymentGuidance();
     return;
   }
 
@@ -993,8 +1163,12 @@ function renderRentDue(rentDue, fallbackMessage) {
   rentDueEl.append(keyvals);
 
   if (!String(rentPaymentAmountEl.value ?? "").trim() && rentDue.balanceKsh > 0) {
-    rentPaymentAmountEl.value = formatAmountValue(rentDue.balanceKsh);
+    rentPaymentAmountEl.value = formatAmountValue(
+      computeSuggestedStarterAmount(rentDue.balanceKsh)
+    );
   }
+
+  updateRentPaymentGuidance();
 }
 
 function renderUtilityBills(bills, meters = []) {
@@ -1015,6 +1189,7 @@ function renderUtilityBills(bills, meters = []) {
     empty.textContent =
       "Water and electricity balances plus previous/current readings will appear once monthly bills are posted.";
     utilityBillsListEl.append(empty);
+    updateUtilityPaymentGuidance();
     return;
   }
 
@@ -1241,6 +1416,7 @@ function syncUtilityPaymentFormFromBalances() {
     utilityPaymentBalanceEl.textContent = `No ${utilityLabel(
       utilityType
     ).toLowerCase()} balance is open right now.`;
+    updateUtilityPaymentGuidance();
     return;
   }
 
@@ -1255,8 +1431,12 @@ function syncUtilityPaymentFormFromBalances() {
   utilityPaymentBalanceEl.append(balanceStrong);
 
   if (!String(utilityPaymentAmountEl.value ?? "").trim() && Number(bill.balanceKsh) > 0) {
-    utilityPaymentAmountEl.value = formatAmountValue(bill.balanceKsh);
+    utilityPaymentAmountEl.value = formatAmountValue(
+      computeSuggestedStarterAmount(bill.balanceKsh)
+    );
   }
+
+  updateUtilityPaymentGuidance();
 }
 
 function renderUtilityPayments(payments) {
@@ -1493,6 +1673,7 @@ async function loadTenantData() {
     syncUtilityPaymentFormFromBalances();
     state.utilityPayments = utilityPaymentsPayload.data ?? [];
     renderUtilityPayments(state.utilityPayments);
+    syncPaymentMessaging();
     updateResidentNavDots();
   } catch (error) {
     if (error.status === 401) {
@@ -2401,6 +2582,47 @@ function startResidentPortal() {
       });
     });
 
+  document.querySelectorAll("[data-fixed-pay]").forEach((row) => {
+    if (!(row instanceof HTMLElement)) {
+      return;
+    }
+
+    row.querySelectorAll("button[data-fixed]").forEach((button) => {
+      if (!(button instanceof HTMLButtonElement)) {
+        return;
+      }
+
+      button.addEventListener("click", () => {
+        const fixedAmount = Number(button.dataset.fixed ?? 0);
+        const target = row.dataset.fixedPay;
+
+        if (target === "rent") {
+          setPaymentAmountValue(
+            rentPaymentAmountEl,
+            getRentOutstandingBalance(),
+            fixedAmount
+          );
+          return;
+        }
+
+        const utilityType = String(utilityPaymentTypeEl.value || "water");
+        setPaymentAmountValue(
+          utilityPaymentAmountEl,
+          getUtilityOutstandingBalance(utilityType),
+          fixedAmount
+        );
+      });
+    });
+  });
+
+  rentPaymentAmountEl.addEventListener("input", () => {
+    updateRentPaymentGuidance();
+  });
+
+  utilityPaymentAmountEl.addEventListener("input", () => {
+    updateUtilityPaymentGuidance();
+  });
+
   utilityBillsListEl.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) {
@@ -2453,6 +2675,7 @@ function startResidentPortal() {
 
   syncReportTypeUi();
   syncUtilityPaymentProviderUi();
+  syncPaymentMessaging();
   syncUtilityPaymentFormFromBalances();
   applyPaymentAccessUi();
 

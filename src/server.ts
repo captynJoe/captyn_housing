@@ -105,6 +105,8 @@ const userSessionCookieName = "captyn_user_session";
 const TERMINAL_MPESA_FAILURE_CODES = new Set([1, 17, 26, 1032, 1037, 2001]);
 const MPESA_VERIFY_RATE_WINDOW_MS = 60 * 1000;
 const MPESA_VERIFY_RATE_MAX_PER_ID = 80;
+const AUTH_ROUTE_RATE_WINDOW_MS = 10 * 60 * 1000;
+const AUTH_ROUTE_RATE_MAX_PER_IP = 20;
 const PASSWORD_RECOVERY_RATE_WINDOW_MS = 15 * 60 * 1000;
 const PASSWORD_RECOVERY_RATE_MAX_PER_KEY = 3;
 const ACCOUNT_PASSWORD_RECOVERY_RATE_WINDOW_MS = 15 * 60 * 1000;
@@ -117,6 +119,23 @@ const WIFI_ACCESS_STATE_KEY = "wifi_access_v1";
 const PAYMENT_ACCESS_STATE_KEY = "payment_access_v1";
 const CARETAKER_ACCESS_STATE_KEY = "caretaker_access_v1";
 const RUNTIME_QUEUES_STATE_KEY = "runtime_queues_v1";
+const DEFAULT_ALLOWED_CORS_ORIGINS = ["https://housing.captyn.shop"];
+const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const COOKIE_PROTECTED_PATH_PREFIXES = ["/api/auth/", "/api/user/", "/api/landlord/", "/api/admin/"];
+const AUTH_RATE_LIMITED_PATHS = new Set([
+  "/api/auth/caretaker/resolve",
+  "/api/auth/caretaker/setup-password",
+  "/api/auth/caretaker/login-phone",
+  "/api/auth/register",
+  "/api/auth/login",
+  "/api/auth/password-recovery/request",
+  "/api/auth/resident/signup",
+  "/api/auth/resident/login-phone",
+  "/api/auth/resident/password-recovery/request",
+  "/api/auth/resident/change-password",
+  "/api/auth/admin/login",
+  "/api/auth/landlord/login"
+]);
 
 interface PendingRentStkRequest {
   buildingId: string;
@@ -364,6 +383,61 @@ function parseBooleanEnv(value: string | undefined): boolean | null {
   }
 
   return null;
+}
+
+function normalizeOriginValue(value: string | undefined): string | null {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+
+  try {
+    return new URL(value).origin.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function parseAllowedOrigins(...values: Array<string | undefined>): Set<string> {
+  const origins = new Set<string>();
+
+  values.forEach((value) => {
+    if (typeof value !== "string") {
+      return;
+    }
+
+    value
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0 && item !== "*")
+      .forEach((item) => {
+        const normalized = normalizeOriginValue(item);
+        if (normalized) {
+          origins.add(normalized);
+        }
+      });
+  });
+
+  if (origins.size === 0) {
+    DEFAULT_ALLOWED_CORS_ORIGINS.forEach((origin) => {
+      const normalized = normalizeOriginValue(origin);
+      if (normalized) {
+        origins.add(normalized);
+      }
+    });
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    [
+      "http://localhost",
+      "http://127.0.0.1",
+      "http://localhost:4000",
+      "http://127.0.0.1:4000",
+      "http://localhost:4100",
+      "http://127.0.0.1:4100"
+    ].forEach((origin) => origins.add(origin));
+  }
+
+  return origins;
 }
 
 function normalizeKenyaPhone(phoneNumber: string): string {
@@ -1316,7 +1390,12 @@ async function bootstrap() {
     string,
     { windowStartMs: number; count: number }
   >();
+  const authRouteRateWindow = new Map<string, { windowStartMs: number; count: number }>();
   const secureCookieOverride = parseBooleanEnv(process.env.HOUSING_COOKIE_SECURE);
+  const allowedCorsOrigins = parseAllowedOrigins(
+    process.env.CORS_ORIGIN,
+    process.env.BASE_URL
+  );
 
   const shouldUseSecureCookies = (req: express.Request): boolean => {
     if (secureCookieOverride !== null) {
@@ -1335,6 +1414,61 @@ async function bootstrap() {
     return forwardedProto
       .split(",")
       .some((part) => part.trim().toLowerCase() === "https");
+  };
+
+  const consumeWindowRateLimit = (
+    bucket: Map<string, { windowStartMs: number; count: number }>,
+    key: string,
+    windowMs: number,
+    maxPerWindow: number
+  ): boolean => {
+    const now = Date.now();
+    const snapshot = bucket.get(key);
+
+    if (!snapshot || now - snapshot.windowStartMs >= windowMs) {
+      bucket.set(key, {
+        windowStartMs: now,
+        count: 1
+      });
+      return true;
+    }
+
+    if (snapshot.count >= maxPerWindow) {
+      return false;
+    }
+
+    snapshot.count += 1;
+    return true;
+  };
+
+  const hasCookieBackedSession = (req: express.Request): boolean => {
+    const cookies = parseCookies(req.header("cookie"));
+    return Boolean(cookies[adminSessionCookieName] || cookies[userSessionCookieName]);
+  };
+
+  const normalizeRequestOrigin = (req: express.Request): string | null => {
+    const directOrigin = normalizeOriginValue(req.header("origin"));
+    if (directOrigin) {
+      return directOrigin;
+    }
+
+    return normalizeOriginValue(req.header("referer"));
+  };
+
+  const expectedOriginsForRequest = (req: express.Request): Set<string> => {
+    const expected = new Set<string>(allowedCorsOrigins);
+    const host = req.header("host");
+    if (!host) {
+      return expected;
+    }
+
+    const proto = shouldUseSecureCookies(req) ? "https" : "http";
+    const normalized = normalizeOriginValue(`${proto}://${host}`);
+    if (normalized) {
+      expected.add(normalized);
+    }
+
+    return expected;
   };
 
   const rememberRentStkRequest = (
@@ -2276,11 +2410,68 @@ async function bootstrap() {
 
   app.use(
     cors({
-      origin: process.env.CORS_ORIGIN ?? "*"
+      origin: (origin, callback) => {
+        if (!origin) {
+          callback(null, true);
+          return;
+        }
+
+        const normalizedOrigin = normalizeOriginValue(origin);
+        callback(null, Boolean(normalizedOrigin && allowedCorsOrigins.has(normalizedOrigin)));
+      },
+      credentials: true,
+      methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "X-Admin-Session",
+        "X-User-Session"
+      ],
+      maxAge: 600
     })
   );
   app.use(express.json({ limit: "1mb" }));
   app.use(express.static(publicDir));
+  app.use((req, res, next) => {
+    const pathValue = req.path ?? "";
+    if (
+      req.method === "POST" &&
+      AUTH_RATE_LIMITED_PATHS.has(pathValue) &&
+      !consumeWindowRateLimit(
+        authRouteRateWindow,
+        `${pathValue}:${req.ip || req.socket.remoteAddress || "unknown"}`,
+        AUTH_ROUTE_RATE_WINDOW_MS,
+        AUTH_ROUTE_RATE_MAX_PER_IP
+      )
+    ) {
+      return res.status(429).json({
+        error: "Too many authentication attempts from this IP. Please wait before trying again."
+      });
+    }
+
+    next();
+  });
+  app.use((req, res, next) => {
+    const pathValue = req.path ?? "";
+    if (
+      !STATE_CHANGING_METHODS.has(req.method) ||
+      !COOKIE_PROTECTED_PATH_PREFIXES.some((prefix) => pathValue.startsWith(prefix)) ||
+      !hasCookieBackedSession(req)
+    ) {
+      next();
+      return;
+    }
+
+    const requestOrigin = normalizeRequestOrigin(req);
+    const expectedOrigins = expectedOriginsForRequest(req);
+    if (!requestOrigin || !expectedOrigins.has(requestOrigin)) {
+      return res.status(403).json({
+        error: "Request origin denied for cookie-authenticated action."
+      });
+    }
+
+    next();
+  });
   app.use((req, res, next) => {
     const pathValue = req.path ?? "";
     if (

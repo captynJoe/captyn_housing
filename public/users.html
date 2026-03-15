@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Outfit:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/users.css?v=20260314a" />
+    <link rel="stylesheet" href="/users.css?v=20260315a" />
   </head>
   <body>
     <div class="ambient" aria-hidden="true"></div>
@@ -329,6 +329,29 @@
               <section class="section-head">
                 <h2>Payments</h2>
               </section>
+              <section class="payment-summary-card">
+                <div class="payment-summary-copy">
+                  <p class="subheading">Payment plan</p>
+                  <h3>Pay any amount today</h3>
+                  <p id="payments-summary-action" class="item-details">
+                    Even a small payment is recorded instantly and reduces what you owe.
+                  </p>
+                </div>
+                <dl class="payment-summary-grid">
+                  <div>
+                    <dt>Total outstanding</dt>
+                    <dd id="payments-total-outstanding">KSh 0</dd>
+                  </div>
+                  <div>
+                    <dt>Rent</dt>
+                    <dd id="payments-rent-outstanding">KSh 0</dd>
+                  </div>
+                  <div>
+                    <dt>Utilities</dt>
+                    <dd id="payments-utility-outstanding">KSh 0</dd>
+                  </div>
+                </dl>
+              </section>
               <div class="payments-grid">
                 <div class="payments-column">
                   <section class="payment-cluster">
@@ -360,17 +383,32 @@
                         <p id="utility-payment-balance" class="item-details">
                           Select a utility and bill month to load the current balance.
                         </p>
+                        <p class="item-details payment-encouragement">
+                          Pay any amount today. You do not need to clear the full utility balance at
+                          once.
+                        </p>
 
                         <label>
                           Amount (KSh)
                           <input id="utility-payment-amount" type="number" min="1" required />
                         </label>
+                        <p id="utility-payment-remaining" class="item-details payment-remaining">
+                          Enter any amount to preview what will remain after payment.
+                        </p>
                         <div class="quick-pay-row" data-quick-pay="utility">
-                          <button type="button" data-quick="half">Pay half</button>
-                          <button type="button" data-quick="finish">Finish later</button>
-                          <button type="button" data-quick="weekly">Pay weekly</button>
+                          <button type="button" data-quick="half">Start with half</button>
+                          <button type="button" data-quick="finish">Clear full balance</button>
+                          <button type="button" data-quick="weekly">Small weekly step</button>
                         </div>
-                        <p class="quick-pay-note">Choose a shortcut to fill the amount. You can edit it.</p>
+                        <div class="quick-pay-row quick-pay-row-fixed" data-fixed-pay="utility">
+                          <button type="button" data-fixed="100">KSh 100</button>
+                          <button type="button" data-fixed="200">KSh 200</button>
+                          <button type="button" data-fixed="500">KSh 500</button>
+                        </div>
+                        <p class="quick-pay-note">
+                          Use a shortcut or type your own amount. Every payment reduces your balance
+                          immediately.
+                        </p>
 
                         <div class="field-grid">
                           <label>
@@ -419,16 +457,31 @@
                         Active for your building.
                       </p>
                       <form id="rent-payment-form" class="report-form">
+                        <p class="item-details payment-encouragement">
+                          Pay any amount today. You do not need to clear the full rent balance at
+                          once.
+                        </p>
                         <label>
                           Amount (KSh)
                           <input id="rent-payment-amount" type="number" min="1" required />
                         </label>
+                        <p id="rent-payment-remaining" class="item-details payment-remaining">
+                          Enter any amount to preview what will remain after payment.
+                        </p>
                         <div class="quick-pay-row" data-quick-pay="rent">
-                          <button type="button" data-quick="half">Pay half</button>
-                          <button type="button" data-quick="finish">Finish later</button>
-                          <button type="button" data-quick="weekly">Pay weekly</button>
+                          <button type="button" data-quick="half">Start with half</button>
+                          <button type="button" data-quick="finish">Clear full balance</button>
+                          <button type="button" data-quick="weekly">Small weekly step</button>
                         </div>
-                        <p class="quick-pay-note">Choose a shortcut to fill the amount. You can edit it.</p>
+                        <div class="quick-pay-row quick-pay-row-fixed" data-fixed-pay="rent">
+                          <button type="button" data-fixed="100">KSh 100</button>
+                          <button type="button" data-fixed="200">KSh 200</button>
+                          <button type="button" data-fixed="500">KSh 500</button>
+                        </div>
+                        <p class="quick-pay-note">
+                          Use a shortcut or type your own amount. Every payment reduces your balance
+                          immediately.
+                        </p>
 
                         <div class="field-grid">
                           <label>
@@ -513,6 +566,6 @@
       </article>
     </template>
 
-    <script type="module" src="/users.js?v=20260314a"></script>
+    <script type="module" src="/users.js?v=20260315a"></script>
   </body>
 </html>

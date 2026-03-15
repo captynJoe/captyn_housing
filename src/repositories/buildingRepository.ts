@@ -18,6 +18,10 @@ export interface BuildingRepository {
     buildingId: string,
     input: LandlordAddBuildingHousesInput
   ): Promise<{ building: Building; addedHouseNumbers: string[] } | undefined>;
+  removeHouseUnit(
+    buildingId: string,
+    houseNumber: string
+  ): Promise<{ building: Building; removedHouseNumber: string } | undefined>;
   deleteBuilding(id: string): Promise<Building | undefined>;
   addIncident(
     buildingId: string,

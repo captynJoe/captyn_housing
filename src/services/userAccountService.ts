@@ -15,6 +15,7 @@ import type {
   ResidentPasswordSetupInput,
   ResidentPhoneLoginInput,
   ReviewLandlordAccessRequestInput,
+  TenantAgreementUpsertInput,
   TenantApplicationInput,
   UserLoginInput,
   UserRegisterInput
@@ -61,6 +62,19 @@ function normalizeKenyaPhone(phoneNumber: string): string {
 
 function normalizeHouseNumber(value: string): string {
   return value.trim().toUpperCase();
+}
+
+function normalizeOptionalText(value: string | null | undefined): string | undefined {
+  const normalized = String(value ?? "").trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function toDateOnlyString(value: Date | null | undefined): string | undefined {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    return undefined;
+  }
+
+  return value.toISOString().slice(0, 10);
 }
 
 function hashSessionToken(token: string): string {
@@ -126,6 +140,35 @@ type LandlordAccessRequestWithActors = Prisma.LandlordAccessRequestGetPayload<{
   };
 }>;
 
+type TenantAgreementRecord = Prisma.TenantAgreementGetPayload<{
+  select: {
+    id: true;
+    tenancyId: true;
+    buildingId: true;
+    houseNumber: true;
+    residentUserId: true;
+    identityType: true;
+    identityNumber: true;
+    occupationStatus: true;
+    occupationLabel: true;
+    organizationName: true;
+    organizationLocation: true;
+    studentRegistrationNumber: true;
+    sponsorName: true;
+    sponsorPhone: true;
+    emergencyContactName: true;
+    emergencyContactPhone: true;
+    leaseStartDate: true;
+    leaseEndDate: true;
+    monthlyRentKsh: true;
+    depositKsh: true;
+    paymentDueDay: true;
+    specialTerms: true;
+    createdAt: true;
+    updatedAt: true;
+  };
+}>;
+
 function mapLandlordAccessRequest(record: LandlordAccessRequestWithActors) {
   return {
     id: record.id,
@@ -149,6 +192,35 @@ function mapLandlordAccessRequest(record: LandlordAccessRequestWithActors) {
           role: record.reviewedBy.role
         }
       : null
+  };
+}
+
+function mapTenantAgreement(record: TenantAgreementRecord) {
+  return {
+    id: record.id,
+    tenancyId: record.tenancyId,
+    buildingId: record.buildingId,
+    houseNumber: record.houseNumber,
+    residentUserId: record.residentUserId,
+    identityType: record.identityType ?? undefined,
+    identityNumber: record.identityNumber ?? undefined,
+    occupationStatus: record.occupationStatus ?? undefined,
+    occupationLabel: record.occupationLabel ?? undefined,
+    organizationName: record.organizationName ?? undefined,
+    organizationLocation: record.organizationLocation ?? undefined,
+    studentRegistrationNumber: record.studentRegistrationNumber ?? undefined,
+    sponsorName: record.sponsorName ?? undefined,
+    sponsorPhone: record.sponsorPhone ?? undefined,
+    emergencyContactName: record.emergencyContactName ?? undefined,
+    emergencyContactPhone: record.emergencyContactPhone ?? undefined,
+    leaseStartDate: toDateOnlyString(record.leaseStartDate),
+    leaseEndDate: toDateOnlyString(record.leaseEndDate),
+    monthlyRentKsh: record.monthlyRentKsh ?? undefined,
+    depositKsh: record.depositKsh ?? undefined,
+    paymentDueDay: record.paymentDueDay ?? undefined,
+    specialTerms: record.specialTerms ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
   };
 }
 
@@ -962,17 +1034,14 @@ export class UserAccountService {
     };
   }
 
-  async createTenantApplication(
-    session: AuthenticatedUserSession,
+  private async upsertTenantApplicationForUser(
+    tx: Prisma.TransactionClient,
+    userId: string,
     input: TenantApplicationInput
   ) {
-    if (session.role !== "tenant") {
-      throw new Error("TENANT_ROLE_REQUIRED");
-    }
-
     const houseNumber = normalizeHouseNumber(input.houseNumber);
 
-    const building = await this.prisma.building.findUnique({
+    const building = await tx.building.findUnique({
       where: { id: input.buildingId },
       select: {
         id: true,
@@ -993,9 +1062,23 @@ export class UserAccountService {
       throw new Error("HOUSE_NUMBER_NOT_FOUND");
     }
 
-    const activeTenancy = await this.prisma.tenancy.findFirst({
+    const conflictingTenancy = await tx.tenancy.findFirst({
       where: {
-        userId: session.userId,
+        buildingId: building.id,
+        unitId: unit.id,
+        active: true,
+        userId: { not: userId }
+      },
+      select: { id: true }
+    });
+
+    if (conflictingTenancy) {
+      throw new Error("HOUSE_OCCUPIED");
+    }
+
+    const activeTenancy = await tx.tenancy.findFirst({
+      where: {
+        userId,
         buildingId: building.id,
         unitId: unit.id,
         active: true
@@ -1007,10 +1090,10 @@ export class UserAccountService {
       throw new Error("TENANCY_ALREADY_ACTIVE");
     }
 
-    const application = await this.prisma.tenantApplication.upsert({
+    const application = await tx.tenantApplication.upsert({
       where: {
         userId_buildingId_houseNumber: {
-          userId: session.userId,
+          userId,
           buildingId: building.id,
           houseNumber
         }
@@ -1023,7 +1106,7 @@ export class UserAccountService {
         reviewedByUserId: null
       },
       create: {
-        userId: session.userId,
+        userId,
         buildingId: building.id,
         unitId: unit.id,
         houseNumber,
@@ -1049,6 +1132,76 @@ export class UserAccountService {
       createdAt: application.createdAt.toISOString(),
       updatedAt: application.updatedAt.toISOString()
     };
+  }
+
+  async submitResidentSignupApplication(input: ResidentPasswordSetupInput) {
+    await this.purgeExpiredSessions();
+
+    const phoneNumber = normalizeKenyaPhone(input.phoneNumber);
+    const passwordHash = hashPassword(input.password);
+
+    return this.prisma.$transaction(async (tx) => {
+      let user = await tx.housingUser.findUnique({
+        where: { phone: phoneNumber }
+      });
+
+      if (!user) {
+        const email = await this.generateResidentPlaceholderEmail(tx, phoneNumber);
+        user = await tx.housingUser.create({
+          data: {
+            fullName: `Tenant ${normalizeHouseNumber(input.houseNumber)}`,
+            email,
+            phone: phoneNumber,
+            passwordHash,
+            role: "tenant",
+            status: "active"
+          }
+        });
+      } else {
+        if (user.status !== "active") {
+          throw new Error("ACCOUNT_DISABLED");
+        }
+        if (user.role !== "tenant") {
+          throw new Error("RESIDENT_SIGNUP_ROLE_CONFLICT");
+        }
+
+        user = await tx.housingUser.update({
+          where: { id: user.id },
+          data: {
+            passwordHash,
+            requirePasswordChange: false
+          }
+        });
+      }
+
+      const application = await this.upsertTenantApplicationForUser(tx, user.id, {
+        buildingId: input.buildingId,
+        houseNumber: input.houseNumber,
+        note: "Resident signup access request"
+      });
+
+      this.loginRateByPhone.delete(phoneNumber);
+      this.loginRateByEmail.delete(normalizeEmail(user.email));
+
+      return {
+        tenant: {
+          userId: user.id,
+          phone: user.phone
+        },
+        ...application
+      };
+    });
+  }
+
+  async createTenantApplication(
+    session: AuthenticatedUserSession,
+    input: TenantApplicationInput
+  ) {
+    if (session.role !== "tenant") {
+      throw new Error("TENANT_ROLE_REQUIRED");
+    }
+
+    return this.upsertTenantApplicationForUser(this.prisma, session.userId, input);
   }
 
   async listMyApplications(session: AuthenticatedUserSession) {
@@ -1174,10 +1327,23 @@ export class UserAccountService {
     const approvedUnitId = application.unitId;
 
     const approved = await this.prisma.$transaction(async (tx) => {
+      const conflictingTenancy = await tx.tenancy.findFirst({
+        where: {
+          buildingId: application.buildingId,
+          unitId: approvedUnitId,
+          active: true,
+          userId: { not: application.userId }
+        },
+        select: { id: true }
+      });
+
+      if (conflictingTenancy) {
+        throw new Error("HOUSE_OCCUPIED");
+      }
+
       await tx.tenancy.updateMany({
         where: {
           userId: application.userId,
-          buildingId: application.buildingId,
           active: true
         },
         data: {
@@ -1216,6 +1382,207 @@ export class UserAccountService {
       tenant: application.user,
       houseNumber: approved.houseNumber,
       reviewedAt: approved.reviewedAt?.toISOString()
+    };
+  }
+
+  async getActiveTenantAgreement(input: { buildingId: string; houseNumber: string }) {
+    const houseNumber = normalizeHouseNumber(input.houseNumber);
+    const tenancy = await this.prisma.tenancy.findFirst({
+      where: {
+        buildingId: input.buildingId,
+        active: true,
+        unit: {
+          houseNumber,
+          isActive: true
+        }
+      },
+      select: {
+        id: true,
+        userId: true,
+        user: {
+          select: {
+            fullName: true,
+            phone: true,
+            email: true
+          }
+        },
+        unit: {
+          select: {
+            houseNumber: true
+          }
+        }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+
+    if (!tenancy) {
+      return {
+        houseNumber,
+        hasActiveResident: false,
+        resident: null,
+        agreement: null
+      };
+    }
+
+    const agreement = await this.prisma.tenantAgreement.findUnique({
+      where: { tenancyId: tenancy.id },
+      select: {
+        id: true,
+        tenancyId: true,
+        buildingId: true,
+        houseNumber: true,
+        residentUserId: true,
+        identityType: true,
+        identityNumber: true,
+        occupationStatus: true,
+        occupationLabel: true,
+        organizationName: true,
+        organizationLocation: true,
+        studentRegistrationNumber: true,
+        sponsorName: true,
+        sponsorPhone: true,
+        emergencyContactName: true,
+        emergencyContactPhone: true,
+        leaseStartDate: true,
+        leaseEndDate: true,
+        monthlyRentKsh: true,
+        depositKsh: true,
+        paymentDueDay: true,
+        specialTerms: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+
+    return {
+      houseNumber,
+      hasActiveResident: true,
+      resident: {
+        userId: tenancy.userId,
+        fullName: tenancy.user.fullName,
+        phone: tenancy.user.phone,
+        email: tenancy.user.email
+      },
+      agreement: agreement ? mapTenantAgreement(agreement) : null
+    };
+  }
+
+  async upsertActiveTenantAgreement(input: {
+    buildingId: string;
+    houseNumber: string;
+    payload: TenantAgreementUpsertInput;
+  }) {
+    const houseNumber = normalizeHouseNumber(input.houseNumber);
+    const tenancy = await this.prisma.tenancy.findFirst({
+      where: {
+        buildingId: input.buildingId,
+        active: true,
+        unit: {
+          houseNumber,
+          isActive: true
+        }
+      },
+      select: {
+        id: true,
+        userId: true
+      },
+      orderBy: { createdAt: "desc" }
+    });
+
+    if (!tenancy) {
+      throw new Error("ACTIVE_TENANCY_NOT_FOUND");
+    }
+
+    const normalizedPayload = {
+      identityType: input.payload.identityType ?? null,
+      identityNumber: normalizeOptionalText(input.payload.identityNumber) ?? null,
+      occupationStatus: input.payload.occupationStatus ?? null,
+      occupationLabel: normalizeOptionalText(input.payload.occupationLabel) ?? null,
+      organizationName: normalizeOptionalText(input.payload.organizationName) ?? null,
+      organizationLocation:
+        normalizeOptionalText(input.payload.organizationLocation) ?? null,
+      studentRegistrationNumber:
+        normalizeOptionalText(input.payload.studentRegistrationNumber) ?? null,
+      sponsorName: normalizeOptionalText(input.payload.sponsorName) ?? null,
+      sponsorPhone: normalizeOptionalText(input.payload.sponsorPhone) ?? null,
+      emergencyContactName:
+        normalizeOptionalText(input.payload.emergencyContactName) ?? null,
+      emergencyContactPhone:
+        normalizeOptionalText(input.payload.emergencyContactPhone) ?? null,
+      leaseStartDate: input.payload.leaseStartDate
+        ? new Date(`${input.payload.leaseStartDate}T00:00:00.000Z`)
+        : null,
+      leaseEndDate: input.payload.leaseEndDate
+        ? new Date(`${input.payload.leaseEndDate}T00:00:00.000Z`)
+        : null,
+      monthlyRentKsh: input.payload.monthlyRentKsh ?? null,
+      depositKsh: input.payload.depositKsh ?? null,
+      paymentDueDay: input.payload.paymentDueDay ?? null,
+      specialTerms: normalizeOptionalText(input.payload.specialTerms) ?? null
+    };
+
+    const hasValue = Object.values(normalizedPayload).some((value) => value != null);
+    if (!hasValue) {
+      await this.prisma.tenantAgreement.deleteMany({
+        where: { tenancyId: tenancy.id }
+      });
+
+      return {
+        houseNumber,
+        hasActiveResident: true,
+        residentUserId: tenancy.userId,
+        agreement: null
+      };
+    }
+
+    const agreement = await this.prisma.tenantAgreement.upsert({
+      where: { tenancyId: tenancy.id },
+      update: {
+        buildingId: input.buildingId,
+        houseNumber,
+        residentUserId: tenancy.userId,
+        ...normalizedPayload
+      },
+      create: {
+        tenancyId: tenancy.id,
+        buildingId: input.buildingId,
+        houseNumber,
+        residentUserId: tenancy.userId,
+        ...normalizedPayload
+      },
+      select: {
+        id: true,
+        tenancyId: true,
+        buildingId: true,
+        houseNumber: true,
+        residentUserId: true,
+        identityType: true,
+        identityNumber: true,
+        occupationStatus: true,
+        occupationLabel: true,
+        organizationName: true,
+        organizationLocation: true,
+        studentRegistrationNumber: true,
+        sponsorName: true,
+        sponsorPhone: true,
+        emergencyContactName: true,
+        emergencyContactPhone: true,
+        leaseStartDate: true,
+        leaseEndDate: true,
+        monthlyRentKsh: true,
+        depositKsh: true,
+        paymentDueDay: true,
+        specialTerms: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+
+    return {
+      houseNumber,
+      hasActiveResident: true,
+      residentUserId: tenancy.userId,
+      agreement: mapTenantAgreement(agreement)
     };
   }
 

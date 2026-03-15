@@ -32,7 +32,7 @@
         <form id="landlord-login-form" class="package-card">
           <p class="status-text">
             Landlord login: use email/phone + password.
-            Caretaker login: enable caretaker mode, then use phone + house number.
+            House manager login: enable house manager mode, then use phone + house number.
           </p>
           <label>
             Email or Phone
@@ -46,16 +46,16 @@
           </label>
           <label style="display: flex; align-items: center; gap: 8px;">
             <input id="landlord-caretaker-mode" type="checkbox" />
-            Use caretaker sign-in (phone + house number)
+            Use house manager sign-in (phone + house number)
           </label>
           <label>
-            House Number (Caretaker only)
+            House Number (House manager only)
             <input
               id="landlord-house-number"
               type="text"
               maxlength="24"
               autocomplete="off"
-              placeholder="A-12 (caretaker only)"
+              placeholder="A-12 (house manager only)"
             />
           </label>
           <label>
@@ -68,7 +68,7 @@
             />
           </label>
           <label>
-            New Password (Caretaker first-time setup)
+            New Password (House manager first-time setup)
             <input
               id="landlord-caretaker-new-password"
               type="password"
@@ -195,6 +195,6 @@
       <section id="login-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord-login.js?v=20260310e"></script>
+    <script type="module" src="/landlord-login.js?v=20260311a"></script>
   </body>
 </html>

@@ -41,17 +41,27 @@ const landlordRegisterControlEls = [
 ];
 
 function setStatus(message) {
-  loginStatusEl.textContent = message;
+  loginStatusEl.textContent = formatHouseManagerText(message);
 }
 
 function showError(message) {
-  loginErrorEl.textContent = message;
+  loginErrorEl.textContent = formatHouseManagerText(message);
   loginErrorEl.classList.remove("hidden");
 }
 
 function clearError() {
   loginErrorEl.textContent = "";
   loginErrorEl.classList.add("hidden");
+}
+
+function formatHouseManagerText(message) {
+  return String(message ?? "")
+    .replace(/\bcaretakers\b/gi, (match) =>
+      match[0] === "C" ? "House managers" : "house managers"
+    )
+    .replace(/\bcaretaker\b/gi, (match) =>
+      match[0] === "C" ? "House manager" : "house manager"
+    );
 }
 
 function formatDateTime(value) {
@@ -255,12 +265,12 @@ async function signIn(event) {
   }
 
   if (caretakerPhoneLogin && !looksLikeKenyaPhone(identifier)) {
-    showError("Caretaker sign-in requires a phone number.");
+    showError("House manager sign-in requires a phone number.");
     return;
   }
 
   if (caretakerPhoneLogin && !houseNumber) {
-    showError("Caretaker sign-in requires house number.");
+    showError("House manager sign-in requires house number.");
     return;
   }
 
@@ -284,12 +294,12 @@ async function signIn(event) {
 
           if (probe.data?.requiresPasswordSetup) {
             setStatus(
-              `Caretaker verified for ${probe.data?.buildingName ?? probe.data?.buildingId}. Enter new password and confirm, then sign in again.`
+              `House manager verified for ${probe.data?.buildingName ?? probe.data?.buildingId}. Enter new password and confirm, then sign in again.`
             );
             return;
           }
 
-          showError("Caretaker password already set. Enter password to sign in.");
+          showError("House manager password already set. Enter password to sign in.");
           return;
         }
 
@@ -321,7 +331,7 @@ async function signIn(event) {
           setupPayload.data ?? {}
         );
         if (!handledSetup) {
-          throw new Error("Caretaker setup completed, but portal access was denied.");
+          throw new Error("House manager setup completed, but portal access was denied.");
         }
         return;
       }
@@ -344,7 +354,7 @@ async function signIn(event) {
         caretakerPayload.data ?? {}
       );
       if (!handledCaretaker) {
-        throw new Error("This caretaker account is not eligible for landlord portal.");
+        throw new Error("This house manager account is not eligible for landlord portal.");
       }
       return;
     }

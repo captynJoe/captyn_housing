@@ -132,6 +132,18 @@ body {
   color: var(--ink-700);
 }
 
+.ticket-details {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--ink-700);
+  line-height: 1.4;
+}
+
+.ticket-details.muted {
+  color: rgba(36, 64, 85, 0.7);
+  font-style: italic;
+}
+
 .package-list {
   margin-top: 12px;
   display: grid;

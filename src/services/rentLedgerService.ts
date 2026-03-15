@@ -4,8 +4,11 @@ import type {
   UpsertRentDueInput
 } from "../validation/schemas.js";
 
+export const RENT_LEGACY_BUILDING_ID = "__LEGACY__";
+
 export interface RentPaymentEvent {
   id: string;
+  buildingId: string;
   houseNumber: string;
   billingMonth: string;
   tenantUserId?: string;
@@ -25,6 +28,7 @@ interface ReminderState {
 }
 
 export interface RentDueRecord {
+  buildingId: string;
   houseNumber: string;
   monthlyRentKsh: number;
   balanceKsh: number;
@@ -43,6 +47,7 @@ export interface RentDueSnapshot extends Omit<RentDueRecord, "reminderState"> {
 }
 
 export interface RentReminderNotification {
+  buildingId: string;
   houseNumber: string;
   title: string;
   message: string;
@@ -62,6 +67,11 @@ interface ReferenceIndexEntry {
   applied: boolean;
 }
 
+interface ListRentPaymentsOptions {
+  buildingId?: string;
+  houseNumber?: string;
+}
+
 export interface RentLedgerPersistedState {
   records: RentDueRecord[];
   pendingPayments: RentPaymentEvent[];
@@ -73,6 +83,30 @@ type RentLedgerStateChangeHandler = (
 
 function normalizeHouseNumber(value: string): string {
   return value.trim().toUpperCase();
+}
+
+function normalizeBuildingId(value: string | undefined): string {
+  const normalized = String(value ?? "")
+    .trim()
+    .toUpperCase();
+  return normalized || RENT_LEGACY_BUILDING_ID;
+}
+
+function ledgerKey(buildingId: string, houseNumber: string): string {
+  return `${normalizeBuildingId(buildingId)}:${normalizeHouseNumber(houseNumber)}`;
+}
+
+function buildingMatchesScope(itemBuildingId: string, requestedBuildingId?: string): boolean {
+  if (!requestedBuildingId) {
+    return true;
+  }
+
+  const normalizedItem = normalizeBuildingId(itemBuildingId);
+  const normalizedRequested = normalizeBuildingId(requestedBuildingId);
+  return (
+    normalizedItem === normalizedRequested ||
+    normalizedItem === RENT_LEGACY_BUILDING_ID
+  );
 }
 
 function nowIso(): string {
@@ -169,8 +203,10 @@ export class RentLedgerService {
           continue;
         }
 
+        const buildingId = normalizeBuildingId(record.buildingId);
         const houseNumber = normalizeHouseNumber(record.houseNumber);
         const normalizedRecord: RentDueRecord = {
+          buildingId,
           houseNumber,
           monthlyRentKsh: Number(record.monthlyRentKsh ?? 0),
           balanceKsh: Number(record.balanceKsh ?? 0),
@@ -180,6 +216,7 @@ export class RentLedgerService {
           payments: Array.isArray(record.payments)
             ? record.payments.map((payment) => ({
                 ...payment,
+                buildingId: normalizeBuildingId(payment.buildingId ?? buildingId),
                 houseNumber,
                 providerReference: normalizeProviderReference(payment.providerReference)
               }))
@@ -191,7 +228,7 @@ export class RentLedgerService {
           }
         };
 
-        this.records.set(houseNumber, normalizedRecord);
+        this.records.set(ledgerKey(buildingId, houseNumber), normalizedRecord);
       }
     }
 
@@ -201,21 +238,28 @@ export class RentLedgerService {
           continue;
         }
 
+        const buildingId = normalizeBuildingId(payment.buildingId);
         const houseNumber = normalizeHouseNumber(payment.houseNumber);
-        const current = this.pendingPayments.get(houseNumber) ?? [];
+        const key = ledgerKey(buildingId, houseNumber);
+        const current = this.pendingPayments.get(key) ?? [];
         current.push({
           ...payment,
+          buildingId,
           houseNumber,
           providerReference: normalizeProviderReference(payment.providerReference)
         });
-        this.pendingPayments.set(houseNumber, current);
+        this.pendingPayments.set(key, current);
       }
     }
 
     for (const record of this.records.values()) {
       for (const payment of record.payments) {
         this.paymentReferenceIndex.set(normalizeProviderReference(payment.providerReference), {
-          event: { ...payment, houseNumber: record.houseNumber },
+          event: {
+            ...payment,
+            buildingId: record.buildingId,
+            houseNumber: record.houseNumber
+          },
           applied: true
         });
       }
@@ -236,12 +280,31 @@ export class RentLedgerService {
     }
   }
 
-  upsertRentDue(houseNumber: string, input: UpsertRentDueInput): RentDueSnapshot {
+  upsertRentDue(
+    buildingId: string,
+    houseNumber: string,
+    input: UpsertRentDueInput
+  ): RentDueSnapshot {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
     const normalizedHouse = normalizeHouseNumber(houseNumber);
-    const existing = this.records.get(normalizedHouse);
+    const key = ledgerKey(normalizedBuildingId, normalizedHouse);
+    const legacyKey =
+      normalizedBuildingId === RENT_LEGACY_BUILDING_ID
+        ? null
+        : ledgerKey(RENT_LEGACY_BUILDING_ID, normalizedHouse);
+    const existing =
+      this.records.get(key) ?? (legacyKey ? this.records.get(legacyKey) : undefined);
     const dueCycleKey = isoDateKey(input.dueDate);
 
-    const payments = existing?.payments ?? [];
+    const payments =
+      existing?.payments.map((payment) => ({
+        ...payment,
+        buildingId:
+          existing.buildingId === normalizedBuildingId
+            ? payment.buildingId
+            : normalizedBuildingId,
+        houseNumber: normalizedHouse
+      })) ?? [];
 
     const reminderState: ReminderState =
       existing && isoDateKey(existing.dueDate) === dueCycleKey
@@ -249,6 +312,7 @@ export class RentLedgerService {
         : {};
 
     const record: RentDueRecord = {
+      buildingId: normalizedBuildingId,
       houseNumber: normalizedHouse,
       monthlyRentKsh: input.monthlyRentKsh,
       balanceKsh: input.balanceKsh,
@@ -259,17 +323,26 @@ export class RentLedgerService {
       reminderState
     };
 
-    this.records.set(normalizedHouse, record);
-    this.applyPendingPayments(normalizedHouse);
+    this.records.set(key, record);
+    if (legacyKey && this.records.has(legacyKey)) {
+      this.records.delete(legacyKey);
+    }
+    payments.forEach((payment) => {
+      this.paymentReferenceIndex.set(payment.providerReference, {
+        event: payment,
+        applied: true
+      });
+    });
 
-    const refreshed = this.records.get(normalizedHouse)!;
+    this.applyPendingPayments(normalizedBuildingId, normalizedHouse);
+
+    const refreshed = this.records.get(key)!;
     this.emitStateChange();
     return this.toSnapshot(refreshed);
   }
 
-  getRentDue(houseNumber: string): RentDueSnapshot | null {
-    const normalizedHouse = normalizeHouseNumber(houseNumber);
-    const record = this.records.get(normalizedHouse);
+  getRentDue(buildingId: string, houseNumber: string): RentDueSnapshot | null {
+    const record = this.resolveRecord(buildingId, houseNumber);
     if (!record) {
       return null;
     }
@@ -277,44 +350,84 @@ export class RentLedgerService {
     return this.toSnapshot(record);
   }
 
-  listRentDueRecords(limit = 500): RentDueSnapshot[] {
+  listRentDueRecords(limit = 500, buildingId?: string): RentDueSnapshot[] {
     return [...this.records.values()]
+      .filter((record) => buildingMatchesScope(record.buildingId, buildingId))
       .map((record) => this.toSnapshot(record))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, Math.max(1, limit));
   }
 
-  listPayments(houseNumber?: string): RentPaymentEvent[] {
-    if (houseNumber) {
-      const key = normalizeHouseNumber(houseNumber);
-      const record = this.records.get(key);
-      const pending = this.pendingPayments.get(key) ?? [];
+  listPayments(options: ListRentPaymentsOptions = {}): RentPaymentEvent[] {
+    const normalizedBuildingId = options.buildingId
+      ? normalizeBuildingId(options.buildingId)
+      : undefined;
+    const normalizedHouse = options.houseNumber
+      ? normalizeHouseNumber(options.houseNumber)
+      : undefined;
 
-      return [...(record?.payments ?? []), ...pending].sort((a, b) =>
+    if (normalizedHouse && normalizedBuildingId) {
+      const exactKey = ledgerKey(normalizedBuildingId, normalizedHouse);
+      const legacyKey =
+        normalizedBuildingId === RENT_LEGACY_BUILDING_ID
+          ? null
+          : ledgerKey(RENT_LEGACY_BUILDING_ID, normalizedHouse);
+
+      const resolved = this.records.get(exactKey)?.payments ?? [];
+      const pending = this.pendingPayments.get(exactKey) ?? [];
+      const legacyResolved = legacyKey ? this.records.get(legacyKey)?.payments ?? [] : [];
+      const legacyPending = legacyKey ? this.pendingPayments.get(legacyKey) ?? [] : [];
+
+      return [...resolved, ...pending, ...legacyResolved, ...legacyPending].sort((a, b) =>
         b.paidAt.localeCompare(a.paidAt)
       );
     }
 
-    const resolved = [...this.records.values()].flatMap((item) => item.payments);
-    const pending = [...this.pendingPayments.values()].flatMap((item) => item);
+    const resolved = [...this.records.values()]
+      .filter((record) => {
+        if (!buildingMatchesScope(record.buildingId, normalizedBuildingId)) {
+          return false;
+        }
 
-    return [...resolved, ...pending].sort((a, b) =>
-      b.paidAt.localeCompare(a.paidAt)
-    );
+        if (normalizedHouse && record.houseNumber !== normalizedHouse) {
+          return false;
+        }
+
+        return true;
+      })
+      .flatMap((item) => item.payments);
+
+    const pending = [...this.pendingPayments.values()]
+      .flatMap((item) => item)
+      .filter((item) => {
+        if (!buildingMatchesScope(item.buildingId, normalizedBuildingId)) {
+          return false;
+        }
+
+        if (normalizedHouse && item.houseNumber !== normalizedHouse) {
+          return false;
+        }
+
+        return true;
+      });
+
+    return [...resolved, ...pending].sort((a, b) => b.paidAt.localeCompare(a.paidAt));
   }
 
   recordMpesaPayment(input: RentMpesaCallbackInput): RecordMpesaPaymentResult {
+    const normalizedBuildingId = normalizeBuildingId(input.buildingId);
     const normalizedHouse = normalizeHouseNumber(input.houseNumber);
     const normalizedReference = normalizeProviderReference(input.providerReference);
     const existingReference = this.paymentReferenceIndex.get(normalizedReference);
     if (existingReference) {
-      const snapshot = this.records.get(existingReference.event.houseNumber)
-        ? this.toSnapshot(this.records.get(existingReference.event.houseNumber)!)
-        : null;
+      const snapshot = this.resolveRecord(
+        existingReference.event.buildingId,
+        existingReference.event.houseNumber
+      );
       return {
         event: existingReference.event,
         applied: existingReference.applied,
-        snapshot
+        snapshot: snapshot ? this.toSnapshot(snapshot) : null
       };
     }
 
@@ -322,6 +435,7 @@ export class RentLedgerService {
     const billingMonth = input.billingMonth ?? billingMonthFromDateTime(paidAt);
     const event: RentPaymentEvent = {
       id: randomUUID(),
+      buildingId: normalizedBuildingId,
       houseNumber: normalizedHouse,
       billingMonth,
       tenantUserId: input.tenantUserId,
@@ -334,10 +448,11 @@ export class RentLedgerService {
       createdAt: nowIso()
     };
 
-    const record = this.records.get(normalizedHouse);
+    const record = this.resolveRecord(normalizedBuildingId, normalizedHouse);
     if (!record) {
-      const current = this.pendingPayments.get(normalizedHouse) ?? [];
-      this.pendingPayments.set(normalizedHouse, [event, ...current]);
+      const key = ledgerKey(normalizedBuildingId, normalizedHouse);
+      const current = this.pendingPayments.get(key) ?? [];
+      this.pendingPayments.set(key, [event, ...current]);
       this.paymentReferenceIndex.set(event.providerReference, {
         event,
         applied: false
@@ -348,6 +463,40 @@ export class RentLedgerService {
         event,
         applied: false,
         snapshot: null
+      };
+    }
+
+    if (record.buildingId !== normalizedBuildingId) {
+      const migratedRecord: RentDueRecord = {
+        ...record,
+        buildingId: normalizedBuildingId,
+        payments: record.payments.map((payment) => ({
+          ...payment,
+          buildingId: normalizedBuildingId
+        }))
+      };
+      this.records.delete(ledgerKey(record.buildingId, record.houseNumber));
+      this.records.set(ledgerKey(normalizedBuildingId, normalizedHouse), migratedRecord);
+      record.payments.forEach((payment) => {
+        this.paymentReferenceIndex.set(payment.providerReference, {
+          event: {
+            ...payment,
+            buildingId: normalizedBuildingId
+          },
+          applied: true
+        });
+      });
+      this.applyPaymentToRecord(migratedRecord, event);
+      this.paymentReferenceIndex.set(event.providerReference, {
+        event,
+        applied: true
+      });
+      this.emitStateChange();
+
+      return {
+        event,
+        applied: true,
+        snapshot: this.toSnapshot(migratedRecord)
       };
     }
 
@@ -365,9 +514,8 @@ export class RentLedgerService {
     };
   }
 
-  collectAutoReminders(houseNumber: string): RentReminderNotification[] {
-    const key = normalizeHouseNumber(houseNumber);
-    const record = this.records.get(key);
+  collectAutoReminders(buildingId: string, houseNumber: string): RentReminderNotification[] {
+    const record = this.resolveRecord(buildingId, houseNumber);
     if (!record || record.balanceKsh <= 0) {
       return [];
     }
@@ -377,28 +525,31 @@ export class RentLedgerService {
     const dueCycleKey = isoDateKey(record.dueDate);
     const createdAt = now.toISOString();
     const reminders: RentReminderNotification[] = [];
+    const dedupeBase = `${record.buildingId}-${record.houseNumber}`;
 
     if (daysToDue === 3 && record.reminderState.d3CycleKey !== dueCycleKey) {
       record.reminderState.d3CycleKey = dueCycleKey;
       reminders.push({
-        houseNumber: key,
+        buildingId: record.buildingId,
+        houseNumber: record.houseNumber,
         title: "Rent Reminder (D-3)",
         message: `Rent balance KSh ${record.balanceKsh.toLocaleString("en-US")} is due in 3 days.`,
         level: "info",
         createdAt,
-        dedupeKey: `rent-reminder-d3-${key}-${dueCycleKey}`
+        dedupeKey: `rent-reminder-d3-${dedupeBase}-${dueCycleKey}`
       });
     }
 
     if (daysToDue === 1 && record.reminderState.d1CycleKey !== dueCycleKey) {
       record.reminderState.d1CycleKey = dueCycleKey;
       reminders.push({
-        houseNumber: key,
+        buildingId: record.buildingId,
+        houseNumber: record.houseNumber,
         title: "Rent Reminder (D-1)",
         message: `Rent balance KSh ${record.balanceKsh.toLocaleString("en-US")} is due tomorrow.`,
         level: "warning",
         createdAt,
-        dedupeKey: `rent-reminder-d1-${key}-${dueCycleKey}`
+        dedupeKey: `rent-reminder-d1-${dedupeBase}-${dueCycleKey}`
       });
     }
 
@@ -407,12 +558,13 @@ export class RentLedgerService {
       if (record.reminderState.overdueDateKey !== todayKey) {
         record.reminderState.overdueDateKey = todayKey;
         reminders.push({
-          houseNumber: key,
+          buildingId: record.buildingId,
+          houseNumber: record.houseNumber,
           title: "Rent Overdue",
           message: `Rent is overdue by ${Math.abs(daysToDue)} day(s). Outstanding balance is KSh ${record.balanceKsh.toLocaleString("en-US")}.`,
           level: "warning",
           createdAt,
-          dedupeKey: `rent-reminder-overdue-${key}-${todayKey}`
+          dedupeKey: `rent-reminder-overdue-${dedupeBase}-${todayKey}`
         });
       }
     }
@@ -424,12 +576,14 @@ export class RentLedgerService {
     return reminders;
   }
 
-  listCollectionStatus(limit = 500) {
+  listCollectionStatus(limit = 500, buildingId?: string) {
     return [...this.records.values()]
+      .filter((record) => buildingMatchesScope(record.buildingId, buildingId))
       .map((record) => {
         const snapshot = this.toSnapshot(record);
         const latestPayment = record.payments[0];
         return {
+          buildingId: snapshot.buildingId,
           houseNumber: snapshot.houseNumber,
           monthlyRentKsh: snapshot.monthlyRentKsh,
           balanceKsh: snapshot.balanceKsh,
@@ -441,38 +595,71 @@ export class RentLedgerService {
           latestPaymentAmountKsh: latestPayment?.amountKsh
         };
       })
-      .sort((a, b) => a.houseNumber.localeCompare(b.houseNumber))
+      .sort((a, b) =>
+        `${a.buildingId}:${a.houseNumber}`.localeCompare(`${b.buildingId}:${b.houseNumber}`)
+      )
       .slice(0, Math.max(1, limit));
   }
 
-  private applyPendingPayments(houseNumber: string) {
-    const record = this.records.get(houseNumber);
+  private resolveRecord(buildingId: string, houseNumber: string): RentDueRecord | undefined {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const normalizedHouse = normalizeHouseNumber(houseNumber);
+    return (
+      this.records.get(ledgerKey(normalizedBuildingId, normalizedHouse)) ??
+      (normalizedBuildingId !== RENT_LEGACY_BUILDING_ID
+        ? this.records.get(ledgerKey(RENT_LEGACY_BUILDING_ID, normalizedHouse))
+        : undefined)
+    );
+  }
+
+  private applyPendingPayments(buildingId: string, houseNumber: string) {
+    const key = ledgerKey(buildingId, houseNumber);
+    const record = this.records.get(key);
     if (!record) {
       return;
     }
 
-    const pending = this.pendingPayments.get(houseNumber);
-    if (!pending || pending.length === 0) {
+    const pendingKeys = [key];
+    const legacyKey =
+      record.buildingId === RENT_LEGACY_BUILDING_ID
+        ? null
+        : ledgerKey(RENT_LEGACY_BUILDING_ID, record.houseNumber);
+    if (legacyKey) {
+      pendingKeys.push(legacyKey);
+    }
+
+    const byOldestFirst = pendingKeys
+      .flatMap((pendingKey) => this.pendingPayments.get(pendingKey) ?? [])
+      .sort((a, b) => a.paidAt.localeCompare(b.paidAt));
+
+    if (byOldestFirst.length === 0) {
       return;
     }
 
-    const byOldestFirst = [...pending].sort((a, b) =>
-      a.paidAt.localeCompare(b.paidAt)
-    );
-
     for (const event of byOldestFirst) {
-      this.applyPaymentToRecord(record, event);
-      this.paymentReferenceIndex.set(event.providerReference, {
-        event,
+      const normalizedEvent = {
+        ...event,
+        buildingId: record.buildingId,
+        houseNumber: record.houseNumber
+      };
+      this.applyPaymentToRecord(record, normalizedEvent);
+      this.paymentReferenceIndex.set(normalizedEvent.providerReference, {
+        event: normalizedEvent,
         applied: true
       });
     }
 
-    this.pendingPayments.delete(houseNumber);
+    pendingKeys.forEach((pendingKey) => {
+      this.pendingPayments.delete(pendingKey);
+    });
   }
 
   private applyPaymentToRecord(record: RentDueRecord, event: RentPaymentEvent) {
-    record.payments.unshift(event);
+    record.payments.unshift({
+      ...event,
+      buildingId: record.buildingId,
+      houseNumber: record.houseNumber
+    });
     record.balanceKsh = Math.max(0, record.balanceKsh - event.amountKsh);
     record.updatedAt = nowIso();
 
@@ -497,6 +684,7 @@ export class RentLedgerService {
     const daysToDue = dayDiff(new Date(), dueDate);
 
     return {
+      buildingId: record.buildingId,
       houseNumber: record.houseNumber,
       monthlyRentKsh: record.monthlyRentKsh,
       balanceKsh: record.balanceKsh,

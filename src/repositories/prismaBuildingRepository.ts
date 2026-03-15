@@ -256,6 +256,76 @@ export class PrismaBuildingRepository implements BuildingRepository {
     };
   }
 
+  async removeHouseUnit(
+    buildingId: string,
+    houseNumber: string
+  ): Promise<{ building: Building; removedHouseNumber: string } | undefined> {
+    const normalizedHouseNumber = houseNumber.trim().toUpperCase();
+
+    const unit = await this.prisma.houseUnit.findUnique({
+      where: {
+        buildingId_houseNumber: {
+          buildingId,
+          houseNumber: normalizedHouseNumber
+        }
+      },
+      include: {
+        tenancies: { select: { id: true } }
+      }
+    });
+
+    if (!unit) {
+      return undefined;
+    }
+
+    if (unit.tenancies.length > 0) {
+      throw new Error(
+        "Room has tenancy history and cannot be removed. Clear the resident or archive the room instead."
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.houseUnit.delete({
+        where: {
+          buildingId_houseNumber: {
+            buildingId,
+            houseNumber: normalizedHouseNumber
+          }
+        }
+      });
+
+      const totalUnits = await tx.houseUnit.count({
+        where: { buildingId }
+      });
+
+      await tx.building.update({
+        where: { id: buildingId },
+        data: {
+          units: totalUnits
+        }
+      });
+    });
+
+    const updated = await this.prisma.building.findUnique({
+      where: { id: buildingId },
+      include: {
+        incidents: { orderBy: { createdAt: "desc" } },
+        maintenanceRecords: { orderBy: { createdAt: "desc" } },
+        vacancySnapshots: { orderBy: { movedOutAt: "desc" } },
+        houseUnits: { orderBy: { houseNumber: "asc" } }
+      }
+    });
+
+    if (!updated) {
+      return undefined;
+    }
+
+    return {
+      building: mapBuilding(updated),
+      removedHouseNumber: normalizedHouseNumber
+    };
+  }
+
   async deleteBuilding(id: string): Promise<Building | undefined> {
     const existing = await this.prisma.building.findUnique({
       where: { id },

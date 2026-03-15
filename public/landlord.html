@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=20260310a" />
-    <link rel="stylesheet" href="/landlord.css?v=20260310e" />
+    <link rel="stylesheet" href="/landlord.css?v=20260314a" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -73,6 +73,13 @@
               data-landlord-view="applications"
             >
               Applications
+            </button>
+            <button
+              type="button"
+              class="landlord-nav-btn"
+              data-landlord-view="residents"
+            >
+              Residents
             </button>
             <button
               type="button"
@@ -146,12 +153,13 @@
 
           <div id="caretaker-management-panel" class="package-card">
             <div class="panel-head">
-              <h3>Caretaker / House Manager Access</h3>
+              <h3>House Manager Access</h3>
               <button id="refresh-caretakers" type="button">Refresh</button>
             </div>
             <p class="status-text">
-              Approve a caretaker by phone/email for one building. Caretakers can post new utility
-              readings and respond to complaints, but cannot perform destructive landlord actions.
+              Approve a house manager by phone/email for one building. House managers can post new
+              utility readings and respond to complaints, but cannot perform destructive landlord
+              actions.
             </p>
             <form id="caretaker-form" class="inline-fields compact-fields">
               <label>
@@ -159,7 +167,7 @@
                 <select id="caretaker-building-select"></select>
               </label>
               <label>
-                Caretaker Phone/Email
+                House Manager Phone/Email
                 <input
                   id="caretaker-identifier"
                   type="text"
@@ -182,7 +190,7 @@
                 Note (optional)
                 <input id="caretaker-note" type="text" maxlength="280" placeholder="Night shift manager" />
               </label>
-              <button type="submit">Approve Caretaker</button>
+              <button type="submit">Approve House Manager</button>
             </form>
             <div class="table-wrap">
               <table>
@@ -320,6 +328,7 @@
             <table>
               <thead>
                 <tr>
+                  <th>Building</th>
                   <th>House</th>
                   <th>Status</th>
                   <th>Monthly Rent</th>
@@ -329,6 +338,45 @@
                 </tr>
               </thead>
               <tbody id="rent-status-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section
+          class="panel wide-panel landlord-view hidden"
+          data-landlord-view-panel="residents"
+        >
+          <div class="panel-head">
+            <h2>Residents</h2>
+            <div class="action-row">
+              <label>
+                Building
+                <select id="residents-building-select"></select>
+              </label>
+              <button id="refresh-residents" type="button">Refresh</button>
+            </div>
+          </div>
+          <p class="status-text">
+            All rooms for the selected buildings. Click a room to open the side panel with status
+            details. Vacant rooms can be removed.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Building</th>
+                  <th>House</th>
+                  <th>Occupancy</th>
+                  <th>Resident</th>
+                  <th>Phone</th>
+                  <th>Rent Status</th>
+                  <th>Balance</th>
+                  <th>Due Date</th>
+                  <th>Action</th>
+                  <th>Room Action</th>
+                </tr>
+              </thead>
+              <tbody id="residents-body"></tbody>
             </table>
           </div>
         </section>
@@ -367,6 +415,7 @@
                   <th>Water Fixed (KSh)</th>
                   <th>Electric Fixed (KSh)</th>
                   <th>Resident Action</th>
+                  <th>Room Action</th>
                 </tr>
               </thead>
               <tbody id="registry-body"></tbody>
@@ -683,9 +732,18 @@
         </form>
       </aside>
 
+      <div id="resident-drawer-backdrop" class="landlord-drawer-backdrop hidden"></div>
+      <aside id="resident-drawer" class="landlord-drawer hidden" aria-label="Resident status">
+        <header class="landlord-drawer-head">
+          <h2>Resident Status</h2>
+          <button id="close-resident-drawer-btn" type="button" class="ghost-btn">Close</button>
+        </header>
+        <div id="resident-drawer-body" class="package-card landlord-drawer-form"></div>
+      </aside>
+
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=20260310f"></script>
+    <script type="module" src="/landlord.js?v=20260315a"></script>
   </body>
 </html>

@@ -63,6 +63,11 @@ export interface RecordUtilityPaymentResult {
   bill: UtilityBillSnapshot;
 }
 
+interface UtilityPaymentReferenceIndexEntry {
+  event: UtilityPaymentEvent;
+  billId: string;
+}
+
 export interface UtilityReminderNotification {
   buildingId: string;
   houseNumber: string;
@@ -111,6 +116,10 @@ function normalizeBuildingId(value: string | undefined): string {
     .trim()
     .toUpperCase();
   return normalized || UTILITY_LEGACY_BUILDING_ID;
+}
+
+function normalizeProviderReference(value: string): string {
+  return value.trim().toUpperCase();
 }
 
 function ledgerKey(
@@ -170,6 +179,10 @@ function monthSortDesc(a: string, b: string): number {
 export class UtilityBillingService {
   private readonly meters = new Map<string, UtilityMeterRecord>();
   private readonly billsByLedger = new Map<string, UtilityBillRecord[]>();
+  private readonly paymentReferenceIndex = new Map<
+    string,
+    UtilityPaymentReferenceIndexEntry
+  >();
   private stateChangeHandler?: UtilityBillingStateChangeHandler;
 
   setStateChangeHandler(handler?: UtilityBillingStateChangeHandler): void {
@@ -192,6 +205,7 @@ export class UtilityBillingService {
   importState(state: UtilityBillingPersistedState | null | undefined): void {
     this.meters.clear();
     this.billsByLedger.clear();
+    this.paymentReferenceIndex.clear();
 
     if (!state) {
       return;
@@ -264,7 +278,10 @@ export class UtilityBillingService {
                 buildingId:
                   (payment as { buildingId?: string }).buildingId ?? normalizedBuildingId,
                 houseNumber: normalizedHouse,
-                billingMonth: payment.billingMonth ?? snapshot.billingMonth
+                billingMonth: payment.billingMonth ?? snapshot.billingMonth,
+                providerReference: payment.providerReference
+                  ? normalizeProviderReference(payment.providerReference)
+                  : undefined
               }))
             : []
         };
@@ -276,6 +293,18 @@ export class UtilityBillingService {
 
     for (const records of this.billsByLedger.values()) {
       records.sort((a, b) => monthSortDesc(a.billingMonth, b.billingMonth));
+      for (const record of records) {
+        for (const payment of record.payments) {
+          if (!payment.providerReference) {
+            continue;
+          }
+
+          this.paymentReferenceIndex.set(payment.providerReference, {
+            event: { ...payment },
+            billId: record.id
+          });
+        }
+      }
     }
   }
 
@@ -545,6 +574,22 @@ export class UtilityBillingService {
       );
     }
 
+    const normalizedReference = input.providerReference?.trim()
+      ? normalizeProviderReference(input.providerReference)
+      : undefined;
+    if (normalizedReference) {
+      const existingReference = this.paymentReferenceIndex.get(normalizedReference);
+      if (existingReference) {
+        const existingBill = this.findBillById(existingReference.billId);
+        if (existingBill) {
+          return {
+            event: existingReference.event,
+            bill: this.toSnapshot(existingBill)
+          };
+        }
+      }
+    }
+
     const event: UtilityPaymentEvent = {
       id: randomUUID(),
       utilityType,
@@ -552,7 +597,7 @@ export class UtilityBillingService {
       houseNumber: normalizedHouse,
       billingMonth: target.billingMonth,
       provider: input.provider,
-      providerReference: input.providerReference?.trim() || undefined,
+      providerReference: normalizedReference,
       amountKsh: Math.round(input.amountKsh),
       paidAt: input.paidAt ?? nowIso(),
       note: input.note?.trim() || undefined,
@@ -562,6 +607,12 @@ export class UtilityBillingService {
     target.payments.unshift(event);
     target.balanceKsh = Math.max(0, target.balanceKsh - event.amountKsh);
     target.updatedAt = nowIso();
+    if (event.providerReference) {
+      this.paymentReferenceIndex.set(event.providerReference, {
+        event: { ...event },
+        billId: target.id
+      });
+    }
     this.emitStateChange();
 
     return {
@@ -713,5 +764,16 @@ export class UtilityBillingService {
       status: utilityStatus(record.balanceKsh, daysToDue),
       daysToDue
     };
+  }
+
+  private findBillById(billId: string): UtilityBillRecord | null {
+    for (const records of this.billsByLedger.values()) {
+      const match = records.find((item) => item.id === billId);
+      if (match) {
+        return match;
+      }
+    }
+
+    return null;
   }
 }

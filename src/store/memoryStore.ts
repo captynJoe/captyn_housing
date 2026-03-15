@@ -93,6 +93,32 @@ export class MemoryStore implements BuildingRepository {
     return { building, addedHouseNumbers };
   }
 
+  async removeHouseUnit(
+    buildingId: string,
+    houseNumber: string
+  ): Promise<{ building: Building; removedHouseNumber: string } | undefined> {
+    const building = this.buildings.get(buildingId);
+    if (!building) {
+      return undefined;
+    }
+
+    const normalized = houseNumber.trim().toUpperCase();
+    const existing = new Set(
+      (building.houseNumbers ?? []).map((item) => item.trim().toUpperCase())
+    );
+
+    if (!existing.has(normalized)) {
+      return undefined;
+    }
+
+    existing.delete(normalized);
+    building.houseNumbers = [...existing].sort((a, b) => a.localeCompare(b));
+    building.units = building.houseNumbers.length;
+    building.updatedAt = new Date().toISOString();
+
+    return { building, removedHouseNumber: normalized };
+  }
+
   async deleteBuilding(id: string): Promise<Building | undefined> {
     const existing = this.buildings.get(id);
     if (!existing) {

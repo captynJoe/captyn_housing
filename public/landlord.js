@@ -22,6 +22,10 @@ const openBuildingDrawerButtons = [
 const closeBuildingDrawerBtnEl = document.getElementById("close-building-drawer-btn");
 const buildingDrawerEl = document.getElementById("building-drawer");
 const buildingDrawerBackdropEl = document.getElementById("building-drawer-backdrop");
+const residentDrawerEl = document.getElementById("resident-drawer");
+const residentDrawerBackdropEl = document.getElementById("resident-drawer-backdrop");
+const residentDrawerBodyEl = document.getElementById("resident-drawer-body");
+const closeResidentDrawerBtnEl = document.getElementById("close-resident-drawer-btn");
 
 const buildingFormEl = document.getElementById("building-form");
 const roomTargetBuildingEl = document.getElementById("room-target-building");
@@ -55,6 +59,9 @@ const refreshCaretakersBtnEl = document.getElementById("refresh-caretakers");
 const applicationStatusFilterEl = document.getElementById("application-status-filter");
 const applicationsBodyEl = document.getElementById("applications-body");
 const refreshApplicationsBtnEl = document.getElementById("refresh-applications");
+const residentsBuildingSelectEl = document.getElementById("residents-building-select");
+const residentsBodyEl = document.getElementById("residents-body");
+const refreshResidentsBtnEl = document.getElementById("refresh-residents");
 const landlordTicketFilterStatusEl = document.getElementById(
   "landlord-ticket-filter-status"
 );
@@ -143,23 +150,43 @@ const state = {
   utilityRateDefaults: null,
   caretakers: [],
   tickets: [],
+  residentDirectory: [],
+  selectedResidentsBuildingId: "",
+  selectedResident: null,
+  selectedResidentAgreement: null,
+  selectedResidentAgreementError: "",
+  residentAgreementLoading: false,
   meters: [],
   bills: [],
   payments: []
 };
 
 function setStatus(message) {
-  authStatusEl.textContent = message;
+  authStatusEl.textContent = formatHouseManagerText(message);
 }
 
 function showError(message) {
-  landlordErrorEl.textContent = message;
+  landlordErrorEl.textContent = formatHouseManagerText(message);
   landlordErrorEl.classList.remove("hidden");
 }
 
 function clearError() {
   landlordErrorEl.textContent = "";
   landlordErrorEl.classList.add("hidden");
+}
+
+function formatHouseManagerText(message) {
+  return String(message ?? "")
+    .replace(/\bcaretakers\b/gi, (match) =>
+      match[0] === "C" ? "House managers" : "house managers"
+    )
+    .replace(/\bcaretaker\b/gi, (match) =>
+      match[0] === "C" ? "House manager" : "house manager"
+    );
+}
+
+function formatRoleLabel(role) {
+  return role === "caretaker" ? "house manager" : role;
 }
 
 function isCaretakerRole() {
@@ -190,6 +217,7 @@ function setActiveLandlordView(nextView) {
     nextView === "overview" ||
     nextView === "buildings" ||
     nextView === "applications" ||
+    nextView === "residents" ||
     nextView === "utilities"
       ? nextView
       : "overview";
@@ -239,6 +267,46 @@ function closeBuildingDrawer() {
   }
 }
 
+function openResidentDrawer(resident) {
+  if (!(residentDrawerEl instanceof HTMLElement)) {
+    return;
+  }
+
+  state.selectedResident = resident;
+  state.selectedResidentAgreement = null;
+  state.selectedResidentAgreementError = "";
+  state.residentAgreementLoading = Boolean(resident?.hasActiveResident);
+  renderResidentDrawer(resident);
+  residentDrawerEl.classList.remove("hidden");
+  if (residentDrawerBackdropEl instanceof HTMLElement) {
+    residentDrawerBackdropEl.classList.remove("hidden");
+  }
+
+  if (resident?.hasActiveResident) {
+    void loadResidentAgreement(resident).catch((error) => {
+      state.residentAgreementLoading = false;
+      state.selectedResidentAgreementError =
+        error instanceof Error ? error.message : "Unable to load tenant agreement.";
+      renderResidentDrawer(resident);
+      handleLandlordError(error, "Unable to load tenant agreement.");
+    });
+  }
+}
+
+function closeResidentDrawer() {
+  if (!(residentDrawerEl instanceof HTMLElement)) {
+    return;
+  }
+  residentDrawerEl.classList.add("hidden");
+  if (residentDrawerBackdropEl instanceof HTMLElement) {
+    residentDrawerBackdropEl.classList.add("hidden");
+  }
+  state.selectedResident = null;
+  state.selectedResidentAgreement = null;
+  state.selectedResidentAgreementError = "";
+  state.residentAgreementLoading = false;
+}
+
 function closeUtilitySheetModal() {
   if (utilitySheetModalEl instanceof HTMLElement) {
     utilitySheetModalEl.classList.add("hidden");
@@ -271,8 +339,50 @@ function formatDateTime(value) {
   }).format(date);
 }
 
+function formatDateOnly(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return "-";
+  }
+
+  const date = new Date(`${raw}T00:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium"
+  }).format(date);
+}
+
 function formatCurrency(value) {
   return `KSh ${Number(value ?? 0).toLocaleString("en-US")}`;
+}
+
+function getResidentOutstandingBalanceKsh(resident) {
+  const roomBalance = Number(resident?.roomBalanceKsh);
+  if (Number.isFinite(roomBalance)) {
+    return Math.max(0, roomBalance);
+  }
+
+  const rentBalance = Number(resident?.rentBalanceKsh);
+  const utilityBalance = Number(resident?.utilityBalanceKsh);
+  if (Number.isFinite(rentBalance) || Number.isFinite(utilityBalance)) {
+    return Math.max(
+      0,
+      (Number.isFinite(rentBalance) ? rentBalance : 0) +
+        (Number.isFinite(utilityBalance) ? utilityBalance : 0)
+    );
+  }
+
+  const legacyBalance = Number(
+    resident?.balanceKsh ?? resident?.outstandingBalanceKsh ?? 0
+  );
+  if (Number.isFinite(legacyBalance)) {
+    return Math.max(0, legacyBalance);
+  }
+
+  return 0;
 }
 
 function escapeHtml(value) {
@@ -286,6 +396,143 @@ function escapeHtml(value) {
 
 function normalizeHouse(value) {
   return String(value ?? "").trim().toUpperCase();
+}
+
+function sameResidentKey(a, b) {
+  return (
+    Boolean(a) &&
+    Boolean(b) &&
+    String(a.buildingId || "") === String(b.buildingId || "") &&
+    normalizeHouse(a.houseNumber) === normalizeHouse(b.houseNumber)
+  );
+}
+
+function buildResidentAgreementUrl(resident) {
+  return `/api/landlord/buildings/${encodeURIComponent(
+    resident.buildingId
+  )}/houses/${encodeURIComponent(resident.houseNumber)}/agreement`;
+}
+
+function formatAgreementIdentityType(value) {
+  switch (value) {
+    case "national_id":
+      return "National ID";
+    case "passport":
+      return "Passport";
+    case "alien_id":
+      return "Alien ID";
+    case "other":
+      return "Other ID";
+    default:
+      return "Not recorded";
+  }
+}
+
+function formatAgreementOccupationStatus(value) {
+  switch (value) {
+    case "employed":
+      return "Employed";
+    case "self_employed":
+      return "Self-employed";
+    case "student":
+      return "Student";
+    case "sponsored":
+      return "Sponsored";
+    case "unemployed":
+      return "Unemployed";
+    case "other":
+      return "Other";
+    default:
+      return "Not recorded";
+  }
+}
+
+function toDateInputValue(value) {
+  const raw = String(value ?? "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "";
+}
+
+async function loadResidentAgreement(resident) {
+  const payload = await requestJson(buildResidentAgreementUrl(resident), {
+    cache: "no-store"
+  });
+
+  if (!sameResidentKey(state.selectedResident, resident)) {
+    return;
+  }
+
+  state.selectedResidentAgreement = payload.data ?? null;
+  state.selectedResidentAgreementError = "";
+  state.residentAgreementLoading = false;
+  renderResidentDrawer(resident);
+}
+
+function buildResidentAgreementPayload(form) {
+  const formData = new FormData(form);
+  return {
+    identityType: String(formData.get("identityType") || "").trim() || undefined,
+    identityNumber: String(formData.get("identityNumber") || "").trim() || undefined,
+    occupationStatus: String(formData.get("occupationStatus") || "").trim() || undefined,
+    occupationLabel: String(formData.get("occupationLabel") || "").trim() || undefined,
+    organizationName: String(formData.get("organizationName") || "").trim() || undefined,
+    organizationLocation:
+      String(formData.get("organizationLocation") || "").trim() || undefined,
+    studentRegistrationNumber:
+      String(formData.get("studentRegistrationNumber") || "").trim() || undefined,
+    sponsorName: String(formData.get("sponsorName") || "").trim() || undefined,
+    sponsorPhone: String(formData.get("sponsorPhone") || "").trim() || undefined,
+    emergencyContactName:
+      String(formData.get("emergencyContactName") || "").trim() || undefined,
+    emergencyContactPhone:
+      String(formData.get("emergencyContactPhone") || "").trim() || undefined,
+    leaseStartDate: String(formData.get("leaseStartDate") || "").trim() || undefined,
+    leaseEndDate: String(formData.get("leaseEndDate") || "").trim() || undefined,
+    monthlyRentKsh: toOptionalNumber(formData.get("monthlyRentKsh")),
+    depositKsh: toOptionalNumber(formData.get("depositKsh")),
+    paymentDueDay: toOptionalNumber(formData.get("paymentDueDay")),
+    specialTerms: String(formData.get("specialTerms") || "").trim() || undefined
+  };
+}
+
+async function saveResidentAgreement(form) {
+  const resident = state.selectedResident;
+  if (!resident) {
+    showError("Resident details are no longer in view. Reopen the drawer and retry.");
+    return;
+  }
+
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton instanceof HTMLButtonElement) {
+    submitButton.disabled = true;
+  }
+
+  clearError();
+
+  try {
+    const response = await requestJson(buildResidentAgreementUrl(resident), {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(buildResidentAgreementPayload(form))
+    });
+
+    state.selectedResidentAgreement = response.data ?? null;
+    state.selectedResidentAgreementError = "";
+    state.residentAgreementLoading = false;
+    renderResidentDrawer(resident);
+    setStatus(
+      response.data?.agreement
+        ? `Tenant agreement updated for ${resident.houseNumber}.`
+        : `Tenant agreement cleared for ${resident.houseNumber}.`
+    );
+  } catch (error) {
+    handleLandlordError(error, "Unable to save tenant agreement.");
+  } finally {
+    if (submitButton instanceof HTMLButtonElement) {
+      submitButton.disabled = false;
+    }
+  }
 }
 
 function parseHouseNumbers(value) {
@@ -916,9 +1163,9 @@ async function ensureSession() {
     }
 
     state.role = role;
-    landlordRoleEl.textContent = `role: ${role}`;
+    landlordRoleEl.textContent = `role: ${formatRoleLabel(role)}`;
     applyRoleCapabilities();
-    setStatus(`Signed in as ${role}.`);
+    setStatus(`Signed in as ${formatRoleLabel(role)}.`);
     return true;
   } catch (error) {
     handleLandlordError(error, "Landlord session is not available.");
@@ -1045,6 +1292,51 @@ function renderRegistryBuildingOptions() {
   syncLandlordTicketBuildingOptions();
 }
 
+function renderResidentsBuildingOptions() {
+  if (!(residentsBuildingSelectEl instanceof HTMLSelectElement)) {
+    return;
+  }
+
+  residentsBuildingSelectEl.replaceChildren();
+
+  if (!Array.isArray(state.buildings) || state.buildings.length === 0) {
+    state.selectedResidentsBuildingId = "";
+    residentsBuildingSelectEl.disabled = true;
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No buildings";
+    residentsBuildingSelectEl.append(option);
+    renderResidentDirectory([]);
+    return;
+  }
+
+  const validSelection =
+    state.selectedResidentsBuildingId === "all" ||
+    state.buildings.some((item) => item.id === state.selectedResidentsBuildingId);
+
+  const selected = validSelection ? state.selectedResidentsBuildingId : "all";
+  state.selectedResidentsBuildingId = selected;
+  residentsBuildingSelectEl.disabled = false;
+
+  const allOption = document.createElement("option");
+  allOption.value = "all";
+  allOption.textContent = "All buildings";
+  if (selected === "all") {
+    allOption.selected = true;
+  }
+  residentsBuildingSelectEl.append(allOption);
+
+  state.buildings.forEach((building) => {
+    const option = document.createElement("option");
+    option.value = building.id;
+    option.textContent = `${building.name} (${building.id})`;
+    if (building.id === selected) {
+      option.selected = true;
+    }
+    residentsBuildingSelectEl.append(option);
+  });
+}
+
 function syncCaretakerBuildingOptions() {
   if (!(caretakerBuildingSelectEl instanceof HTMLSelectElement)) {
     return;
@@ -1125,7 +1417,7 @@ function renderCaretakers(rows) {
   caretakersBodyEl.replaceChildren();
   if (!Array.isArray(rows) || rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="6">No caretaker approved for this building.</td>';
+    row.innerHTML = '<td colspan="6">No house manager approved for this building.</td>';
     caretakersBodyEl.append(row);
     return;
   }
@@ -1179,8 +1471,15 @@ function renderLandlordTickets(tickets) {
     const slaText = ticket.slaBreached
       ? `BREACHED (${ticket.slaHours}h)`
       : `${ticket.slaHours}h (${ticket.slaState})`;
+    const detailsText = ticket.details
+      ? `<div class="ticket-details">${escapeHtml(ticket.details)}</div>`
+      : "";
+    const replyText = ticket.resolutionNotes || ticket.adminNote;
+    const replyLine = replyText
+      ? `<div class="ticket-details muted">Last update: ${escapeHtml(replyText)}</div>`
+      : "";
     row.innerHTML = `
-      <td><strong>${escapeHtml(ticket.title)}</strong><br /><small>${escapeHtml(ticket.id.slice(0, 8))} • ${escapeHtml(ticket.type)}</small></td>
+      <td><strong>${escapeHtml(ticket.title)}</strong><br /><small>${escapeHtml(ticket.id.slice(0, 8))} • ${escapeHtml(ticket.type)}</small>${detailsText}${replyLine}</td>
       <td>${escapeHtml(ticket.houseNumber)}</td>
       <td>${escapeHtml(ticket.queue)}</td>
       <td>${escapeHtml(ticket.status)}</td>
@@ -1249,7 +1548,7 @@ function renderRegistryRows(rows) {
 
   if (!Array.isArray(rows) || rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="9">No houses found for this building.</td>';
+    row.innerHTML = '<td colspan="10">No houses found for this building.</td>';
     registryBodyEl.append(row);
     return;
   }
@@ -1326,6 +1625,22 @@ function renderRegistryRows(rows) {
                 data-resident-name="${escapeHtml(item.residentName ?? "Resident")}"
               >
                 Clear Resident
+              </button>`
+            : "-"
+        }
+      </td>
+      <td>
+        ${
+          !isCaretakerRole()
+            ? `<button
+                type="button"
+                class="btn-danger"
+                data-action="remove-room"
+                data-building-id="${escapeHtml(state.selectedRegistryBuildingId)}"
+                data-house-number="${escapeHtml(houseNumber)}"
+                ${item.residentUserId ? "disabled" : ""}
+              >
+                ${item.residentUserId ? "Clear Resident First" : "Remove Room"}
               </button>`
             : "-"
         }
@@ -1441,14 +1756,20 @@ function renderRentStatus(rows) {
 
   if (!Array.isArray(rows) || rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="6">No rent status data available.</td>';
+    row.innerHTML = '<td colspan="7">No rent status data available.</td>';
     rentStatusBodyEl.append(row);
     return;
   }
 
+  const buildingNameMap = new Map(
+    (Array.isArray(state.buildings) ? state.buildings : []).map((item) => [item.id, item.name])
+  );
+
   rows.forEach((item) => {
     const row = document.createElement("tr");
+    const buildingLabel = buildingNameMap.get(item.buildingId) ?? item.buildingId ?? "-";
     row.innerHTML = `
+      <td>${escapeHtml(buildingLabel)}</td>
       <td>${item.houseNumber}</td>
       <td>${item.paymentStatus}</td>
       <td>${formatCurrency(item.monthlyRentKsh)}</td>
@@ -1458,6 +1779,473 @@ function renderRentStatus(rows) {
     `;
     rentStatusBodyEl.append(row);
   });
+}
+
+function getRentStatusByHouse() {
+  const map = new Map();
+  if (!Array.isArray(state.rentStatus)) {
+    return map;
+  }
+
+  state.rentStatus.forEach((item) => {
+    map.set(normalizeHouse(item.houseNumber), item);
+  });
+  return map;
+}
+
+function renderResidentDirectory(rows) {
+  if (!(residentsBodyEl instanceof HTMLElement)) {
+    return;
+  }
+
+  residentsBodyEl.replaceChildren();
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    const row = document.createElement("tr");
+    row.innerHTML = '<td colspan="10">No rooms found for this selection.</td>';
+    residentsBodyEl.append(row);
+    return;
+  }
+
+  rows.forEach((resident) => {
+    const row = document.createElement("tr");
+    const hasResident =
+      resident.hasActiveResident || resident.residentUserId || resident.residentName;
+    const hasRentProfile = Boolean(
+      resident.rentPaymentStatus ||
+        resident.rentDueDate ||
+        resident.latestRentPaymentReference ||
+        resident.latestRentPaymentAt
+    );
+    const rentStatus = hasResident && hasRentProfile ? resident.rentPaymentStatus ?? "-" : "-";
+    const outstandingBalanceKsh = getResidentOutstandingBalanceKsh(resident);
+    const rentBalance = hasResident ? formatCurrency(outstandingBalanceKsh) : "-";
+    const dueDate =
+      hasResident && resident.rentDueDate ? formatDateTime(resident.rentDueDate) : "-";
+    const buildingLabel = resident.buildingName ?? resident.buildingId ?? "-";
+    const occupancy = hasResident ? "Active" : "Vacant";
+    const residentName = hasResident ? resident.residentName ?? "Resident" : "Vacant";
+    const residentPhone = hasResident ? resident.residentPhone ?? "-" : "-";
+    const canRemoveResident =
+      hasResident && !isCaretakerRole() && Boolean(resident.residentUserId);
+    const canRemoveRoom = !hasResident && !isCaretakerRole();
+
+    row.innerHTML = `
+      <td>${escapeHtml(buildingLabel)}</td>
+      <td>${escapeHtml(resident.houseNumber)}</td>
+      <td>${escapeHtml(occupancy)}</td>
+      <td>${escapeHtml(residentName)}</td>
+      <td>${escapeHtml(residentPhone)}</td>
+      <td>${escapeHtml(rentStatus)}</td>
+      <td>${escapeHtml(rentBalance)}</td>
+      <td>${escapeHtml(dueDate)}</td>
+      <td>
+        <button
+          type="button"
+          data-action="open-resident-drawer"
+          data-building-id="${escapeHtml(resident.buildingId)}"
+          data-house-number="${escapeHtml(resident.houseNumber)}"
+        >
+          View
+        </button>
+      </td>
+      <td>
+        ${
+          isCaretakerRole()
+            ? "-"
+            : hasResident
+              ? `<button
+                  type="button"
+                  class="btn-danger"
+                  data-action="remove-resident"
+                  data-building-id="${escapeHtml(resident.buildingId)}"
+                  data-house-number="${escapeHtml(resident.houseNumber)}"
+                  data-user-id="${escapeHtml(resident.residentUserId ?? "")}"
+                  data-resident-name="${escapeHtml(resident.residentName ?? "Resident")}"
+                  ${canRemoveResident ? "" : "disabled"}
+                >
+                  Clear Resident
+                </button>`
+              : `<button
+                  type="button"
+                  class="btn-danger"
+                  data-action="remove-room"
+                  data-building-id="${escapeHtml(resident.buildingId)}"
+                  data-house-number="${escapeHtml(resident.houseNumber)}"
+                  ${canRemoveRoom ? "" : "disabled"}
+                >
+                  Remove Room
+                </button>`
+        }
+      </td>
+    `;
+
+    residentsBodyEl.append(row);
+  });
+}
+
+function renderResidentDrawer(resident) {
+  if (!(residentDrawerBodyEl instanceof HTMLElement)) {
+    return;
+  }
+
+  if (!resident) {
+    residentDrawerBodyEl.textContent = "Resident not found.";
+    return;
+  }
+
+  const hasResident =
+    resident.hasActiveResident || resident.residentUserId || resident.residentName;
+  const hasRentProfile = Boolean(
+    resident.rentPaymentStatus ||
+      resident.rentDueDate ||
+      resident.latestRentPaymentReference ||
+      resident.latestRentPaymentAt
+  );
+  const rentStatus =
+    hasResident && hasRentProfile ? resident.rentPaymentStatus ?? "-" : "-";
+  const outstandingBalanceKsh = getResidentOutstandingBalanceKsh(resident);
+  const rentBalanceKsh = Math.max(0, Number(resident.rentBalanceKsh ?? 0));
+  const utilityBalanceKsh = Math.max(0, outstandingBalanceKsh - rentBalanceKsh);
+  const totalOutstanding =
+    hasResident ? formatCurrency(outstandingBalanceKsh) : "-";
+  const rentBalance =
+    hasResident && hasRentProfile ? formatCurrency(rentBalanceKsh) : "-";
+  const utilityBalance =
+    hasResident ? formatCurrency(utilityBalanceKsh) : "-";
+  const rentDue =
+    hasResident && resident.rentDueDate ? formatDateTime(resident.rentDueDate) : "-";
+  const latestReceipt = hasResident ? resident.latestRentPaymentReference ?? "-" : "-";
+  const latestPaidAt =
+    hasResident && resident.latestRentPaymentAt
+      ? formatDateTime(resident.latestRentPaymentAt)
+      : "-";
+  const waterMeter = resident.waterMeterNumber || "Missing";
+  const electricityMeter = resident.electricityMeterNumber || "Missing";
+  const members = Number(resident.householdMembers ?? 0);
+  const buildingLabel = resident.buildingName ?? resident.buildingId ?? "-";
+  const residentName = hasResident ? resident.residentName ?? "Resident" : "Vacant";
+  const residentPhone = hasResident ? resident.residentPhone ?? "-" : "-";
+  const agreementPayload =
+    sameResidentKey(state.selectedResident, resident) && state.selectedResidentAgreement
+      ? state.selectedResidentAgreement
+      : null;
+  const agreement = agreementPayload?.agreement ?? null;
+  const agreementResident = agreementPayload?.resident ?? null;
+  const agreementError =
+    sameResidentKey(state.selectedResident, resident) && state.selectedResidentAgreementError
+      ? state.selectedResidentAgreementError
+      : "";
+  const agreementStatusText = state.residentAgreementLoading
+    ? "Loading tenant agreement..."
+    : agreement?.updatedAt
+      ? `Agreement last updated ${formatDateTime(agreement.updatedAt)}.`
+      : hasResident
+        ? "No tenant agreement saved yet for this active resident."
+        : "Assign an active resident before capturing agreement details.";
+  const canEditAgreement = hasResident && !isCaretakerRole();
+  const disabledAttr = canEditAgreement ? "" : "disabled";
+  const identitySummary = agreement?.identityNumber
+    ? `${formatAgreementIdentityType(agreement.identityType)} • ${agreement.identityNumber}`
+    : "Not recorded";
+  const workSchoolSummary = agreement?.organizationName
+    ? `${agreement.organizationName}${
+        agreement.organizationLocation ? ` • ${agreement.organizationLocation}` : ""
+      }`
+    : "Not recorded";
+  const leaseSummary =
+    agreement?.leaseStartDate || agreement?.leaseEndDate
+      ? `${agreement?.leaseStartDate ? formatDateOnly(agreement.leaseStartDate) : "open"} -> ${
+          agreement?.leaseEndDate ? formatDateOnly(agreement.leaseEndDate) : "ongoing"
+        }`
+      : "Not recorded";
+
+  residentDrawerBodyEl.innerHTML = `
+    <div class="resident-summary">
+      <p class="status-text">${escapeHtml(buildingLabel)} • House ${escapeHtml(
+        resident.houseNumber
+      )}</p>
+      <h3>${escapeHtml(residentName)}</h3>
+      <p class="status-text">Phone ${escapeHtml(residentPhone)}</p>
+    </div>
+    <div class="resident-grid">
+      <div><span>Occupancy</span><strong>${
+        resident.hasActiveResident ? "Active" : "Vacant"
+      }</strong></div>
+      <div><span>Household Members</span><strong>${members}</strong></div>
+      <div><span>Rent Status</span><strong>${escapeHtml(rentStatus)}</strong></div>
+      <div><span>Outstanding</span><strong>${escapeHtml(totalOutstanding)}</strong></div>
+      <div><span>Rent Balance</span><strong>${escapeHtml(rentBalance)}</strong></div>
+      <div><span>Utility Balance</span><strong>${escapeHtml(utilityBalance)}</strong></div>
+      <div><span>Rent Due</span><strong>${escapeHtml(rentDue)}</strong></div>
+      <div><span>Latest Receipt</span><strong>${escapeHtml(
+        latestReceipt
+      )}</strong></div>
+      <div><span>Latest Payment</span><strong>${escapeHtml(
+        latestPaidAt
+      )}</strong></div>
+      <div><span>Water Meter</span><strong>${escapeHtml(waterMeter)}</strong></div>
+      <div><span>Electric Meter</span><strong>${escapeHtml(
+        electricityMeter
+      )}</strong></div>
+    </div>
+    <section class="package-card resident-agreement-card">
+      <div class="panel-head resident-agreement-head">
+        <div>
+          <h3>Tenant Agreement</h3>
+          <p class="status-text">${escapeHtml(agreementStatusText)}</p>
+        </div>
+        <span class="status-text resident-agreement-role">${
+          canEditAgreement ? "Landlord can edit" : hasResident ? "Read only" : "No active resident"
+        }</span>
+      </div>
+      <div class="resident-agreement-overview">
+        <div><span>ID</span><strong>${escapeHtml(identitySummary)}</strong></div>
+        <div><span>Occupation</span><strong>${escapeHtml(
+          formatAgreementOccupationStatus(agreement?.occupationStatus)
+        )}</strong></div>
+        <div><span>Work / School</span><strong>${escapeHtml(workSchoolSummary)}</strong></div>
+        <div><span>Lease</span><strong>${escapeHtml(leaseSummary)}</strong></div>
+      </div>
+      ${
+        agreementResident
+          ? `<p class="status-text resident-agreement-note">Active resident on this agreement: ${escapeHtml(
+              agreementResident.fullName ?? residentName
+            )} • ${escapeHtml(agreementResident.phone ?? residentPhone)}</p>`
+          : ""
+      }
+      ${
+        agreementError
+          ? `<p class="status-text resident-agreement-error">${escapeHtml(agreementError)}</p>`
+          : ""
+      }
+      <p class="status-text resident-agreement-note">
+        Capture ID, work or school information, sponsor contacts for students, emergency contact,
+        and core lease terms in one place.
+      </p>
+      <form id="resident-agreement-form" class="resident-agreement-form">
+        <div class="inline-fields compact-fields resident-agreement-grid">
+          <label>
+            ID Type
+            <select name="identityType" ${disabledAttr}>
+              <option value="">Select</option>
+              <option value="national_id" ${
+                agreement?.identityType === "national_id" ? "selected" : ""
+              }>National ID</option>
+              <option value="passport" ${
+                agreement?.identityType === "passport" ? "selected" : ""
+              }>Passport</option>
+              <option value="alien_id" ${
+                agreement?.identityType === "alien_id" ? "selected" : ""
+              }>Alien ID</option>
+              <option value="other" ${agreement?.identityType === "other" ? "selected" : ""}>Other</option>
+            </select>
+          </label>
+          <label>
+            ID Number
+            <input
+              name="identityNumber"
+              type="text"
+              maxlength="80"
+              placeholder="ID / passport number"
+              value="${escapeHtml(agreement?.identityNumber ?? "")}"
+              ${disabledAttr}
+            />
+          </label>
+          <label>
+            Occupation Status
+            <select name="occupationStatus" ${disabledAttr}>
+              <option value="">Select</option>
+              <option value="employed" ${
+                agreement?.occupationStatus === "employed" ? "selected" : ""
+              }>Employed</option>
+              <option value="self_employed" ${
+                agreement?.occupationStatus === "self_employed" ? "selected" : ""
+              }>Self-employed</option>
+              <option value="student" ${
+                agreement?.occupationStatus === "student" ? "selected" : ""
+              }>Student</option>
+              <option value="sponsored" ${
+                agreement?.occupationStatus === "sponsored" ? "selected" : ""
+              }>Sponsored</option>
+              <option value="unemployed" ${
+                agreement?.occupationStatus === "unemployed" ? "selected" : ""
+              }>Unemployed</option>
+              <option value="other" ${
+                agreement?.occupationStatus === "other" ? "selected" : ""
+              }>Other</option>
+            </select>
+          </label>
+          <label>
+            Role / Course / Trade
+            <input
+              name="occupationLabel"
+              type="text"
+              maxlength="120"
+              placeholder="Teacher, Nursing, Online business"
+              value="${escapeHtml(agreement?.occupationLabel ?? "")}"
+              ${disabledAttr}
+            />
+          </label>
+        </div>
+        <div class="inline-fields compact-fields resident-agreement-grid">
+          <label>
+            Employer / Business / School
+            <input
+              name="organizationName"
+              type="text"
+              maxlength="160"
+              placeholder="ABC School or Riverside Ltd"
+              value="${escapeHtml(agreement?.organizationName ?? "")}"
+              ${disabledAttr}
+            />
+          </label>
+          <label>
+            Place of Work / School
+            <input
+              name="organizationLocation"
+              type="text"
+              maxlength="160"
+              placeholder="Westlands, Nairobi"
+              value="${escapeHtml(agreement?.organizationLocation ?? "")}"
+              ${disabledAttr}
+            />
+          </label>
+          <label>
+            Student / Admission No.
+            <input
+              name="studentRegistrationNumber"
+              type="text"
+              maxlength="80"
+              placeholder="ADM-2026-0042"
+              value="${escapeHtml(agreement?.studentRegistrationNumber ?? "")}"
+              ${disabledAttr}
+            />
+          </label>
+        </div>
+        <div class="inline-fields compact-fields resident-agreement-grid">
+          <label>
+            Sponsor / Guardian Name
+            <input
+              name="sponsorName"
+              type="text"
+              maxlength="120"
+              placeholder="Parent or sponsor name"
+              value="${escapeHtml(agreement?.sponsorName ?? "")}"
+              ${disabledAttr}
+            />
+          </label>
+          <label>
+            Sponsor / Guardian Phone
+            <input
+              name="sponsorPhone"
+              type="tel"
+              inputmode="tel"
+              maxlength="20"
+              placeholder="07XXXXXXXX"
+              value="${escapeHtml(agreement?.sponsorPhone ?? "")}"
+              ${disabledAttr}
+            />
+          </label>
+          <label>
+            Emergency Contact Name
+            <input
+              name="emergencyContactName"
+              type="text"
+              maxlength="120"
+              placeholder="Next of kin"
+              value="${escapeHtml(agreement?.emergencyContactName ?? "")}"
+              ${disabledAttr}
+            />
+          </label>
+          <label>
+            Emergency Contact Phone
+            <input
+              name="emergencyContactPhone"
+              type="tel"
+              inputmode="tel"
+              maxlength="20"
+              placeholder="07XXXXXXXX"
+              value="${escapeHtml(agreement?.emergencyContactPhone ?? "")}"
+              ${disabledAttr}
+            />
+          </label>
+        </div>
+        <div class="inline-fields compact-fields resident-agreement-grid">
+          <label>
+            Lease Start
+            <input
+              name="leaseStartDate"
+              type="date"
+              value="${escapeHtml(toDateInputValue(agreement?.leaseStartDate))}"
+              ${disabledAttr}
+            />
+          </label>
+          <label>
+            Lease End
+            <input
+              name="leaseEndDate"
+              type="date"
+              value="${escapeHtml(toDateInputValue(agreement?.leaseEndDate))}"
+              ${disabledAttr}
+            />
+          </label>
+          <label>
+            Monthly Rent (KSh)
+            <input
+              name="monthlyRentKsh"
+              type="number"
+              min="0"
+              step="1"
+              value="${escapeHtml(numberToInputString(agreement?.monthlyRentKsh))}"
+              ${disabledAttr}
+            />
+          </label>
+          <label>
+            Deposit (KSh)
+            <input
+              name="depositKsh"
+              type="number"
+              min="0"
+              step="1"
+              value="${escapeHtml(numberToInputString(agreement?.depositKsh))}"
+              ${disabledAttr}
+            />
+          </label>
+          <label>
+            Due Day
+            <input
+              name="paymentDueDay"
+              type="number"
+              min="1"
+              max="31"
+              step="1"
+              placeholder="5"
+              value="${escapeHtml(numberToInputString(agreement?.paymentDueDay))}"
+              ${disabledAttr}
+            />
+          </label>
+        </div>
+        <label>
+          Special Terms
+          <textarea
+            name="specialTerms"
+            rows="4"
+            maxlength="1200"
+            placeholder="Quiet hours, visitor rules, move-out notice period, utility arrangements."
+            ${disabledAttr}
+          >${escapeHtml(agreement?.specialTerms ?? "")}</textarea>
+        </label>
+        ${
+          canEditAgreement
+            ? `<div class="action-row">
+                <button type="submit">Save Agreement</button>
+              </div>`
+            : ""
+        }
+      </form>
+    </section>
+  `;
 }
 
 function renderPaymentAccess(rows) {
@@ -1619,6 +2407,7 @@ async function loadBuildings() {
   renderBuildings(state.buildings);
   renderRoomBuildingOptions();
   renderRegistryBuildingOptions();
+  renderResidentsBuildingOptions();
   renderMetrics();
 }
 
@@ -1635,6 +2424,66 @@ async function loadRentStatus() {
   const payload = await requestJson("/api/landlord/rent-collection-status?limit=1200");
   state.rentStatus = payload.data ?? [];
   renderRentStatus(state.rentStatus);
+}
+
+async function loadResidents() {
+  if (!(residentsBuildingSelectEl instanceof HTMLSelectElement)) {
+    return;
+  }
+
+  const selection = String(
+    residentsBuildingSelectEl.value || state.selectedResidentsBuildingId || ""
+  ).trim();
+
+  if (!selection && Array.isArray(state.buildings) && state.buildings.length > 0) {
+    state.selectedResidentsBuildingId = "all";
+  } else {
+    state.selectedResidentsBuildingId = selection;
+  }
+
+  const buildingIds =
+    state.selectedResidentsBuildingId === "all"
+      ? state.buildings.map((item) => item.id)
+      : state.selectedResidentsBuildingId
+        ? [state.selectedResidentsBuildingId]
+        : [];
+
+  if (buildingIds.length === 0) {
+    state.residentDirectory = [];
+    renderResidentDirectory([]);
+    return;
+  }
+
+  const buildingNameMap = new Map(
+    state.buildings.map((building) => [building.id, building.name])
+  );
+
+  const payloads = await Promise.all(
+    buildingIds.map((buildingId) =>
+      requestJson(
+        `/api/landlord/buildings/${encodeURIComponent(buildingId)}/utility-registry`
+      )
+    )
+  );
+
+  const residents = [];
+
+  payloads.forEach((payload, index) => {
+    const buildingId = buildingIds[index];
+    const buildingName = buildingNameMap.get(buildingId) ?? buildingId;
+    const rows = payload.data ?? [];
+
+    rows.forEach((row) => {
+      residents.push({
+        ...row,
+        buildingId,
+        buildingName
+      });
+    });
+  });
+
+  state.residentDirectory = residents;
+  renderResidentDirectory(state.residentDirectory);
 }
 
 async function loadPaymentAccess() {
@@ -1781,7 +2630,8 @@ async function loadData() {
       loadPayments()
     ]);
     await loadRegistryRows();
-    setStatus(`Signed in as ${state.role}. Data refreshed.`);
+    await loadResidents();
+    setStatus(`Signed in as ${formatRoleLabel(state.role)}. Data refreshed.`);
   } catch (error) {
     handleLandlordError(error, "Unable to load landlord data.");
     setStatus("Landlord data load failed.");
@@ -1827,6 +2677,14 @@ buildingDrawerBackdropEl?.addEventListener("click", () => {
   closeBuildingDrawer();
 });
 
+closeResidentDrawerBtnEl?.addEventListener("click", () => {
+  closeResidentDrawer();
+});
+
+residentDrawerBackdropEl?.addEventListener("click", () => {
+  closeResidentDrawer();
+});
+
 openUtilitySheetBtnEl?.addEventListener("click", () => {
   void openUtilitySheetModal();
 });
@@ -1847,6 +2705,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeBuildingDrawer();
     closeUtilitySheetModal();
+    closeResidentDrawer();
   }
 });
 
@@ -1868,7 +2727,7 @@ roomTargetBuildingEl?.addEventListener("change", () => {
 caretakerBuildingSelectEl?.addEventListener("change", () => {
   state.selectedCaretakerBuildingId = String(caretakerBuildingSelectEl.value || "").trim();
   void loadCaretakers().catch((error) => {
-    handleLandlordError(error, "Unable to load caretakers.");
+    handleLandlordError(error, "Unable to load house managers.");
   });
 });
 
@@ -1877,7 +2736,7 @@ caretakerFormEl?.addEventListener("submit", (event) => {
   clearError();
 
   if (isCaretakerRole()) {
-    showError("Caretaker accounts cannot approve caretakers.");
+    showError("House manager accounts cannot approve house managers.");
     return;
   }
 
@@ -1886,7 +2745,7 @@ caretakerFormEl?.addEventListener("submit", (event) => {
   const houseNumber = normalizeHouse(caretakerHouseNumberEl?.value || "");
   const note = String(caretakerNoteEl?.value || "").trim() || undefined;
   if (!buildingId || !identifier || !houseNumber) {
-    showError("Caretaker approval requires building, phone/email, and house.");
+    showError("House manager approval requires building, phone/email, and house.");
     return;
   }
 
@@ -1922,10 +2781,10 @@ caretakerFormEl?.addEventListener("submit", (event) => {
         caretakerNoteEl.value = "";
       }
 
-      setStatus(`Caretaker approved for ${buildingId}.`);
+      setStatus(`House manager approved for ${buildingId}.`);
       await loadCaretakers();
     } catch (error) {
-      handleLandlordError(error, "Failed to approve caretaker.");
+      handleLandlordError(error, "Failed to approve house manager.");
     } finally {
       if (submitButton instanceof HTMLButtonElement) {
         submitButton.disabled = false;
@@ -1950,7 +2809,7 @@ caretakersBodyEl?.addEventListener("click", (event) => {
     return;
   }
 
-  const shouldProceed = window.confirm("Revoke caretaker access for this building?");
+  const shouldProceed = window.confirm("Revoke house manager access for this building?");
   if (!shouldProceed) {
     return;
   }
@@ -1967,10 +2826,10 @@ caretakersBodyEl?.addEventListener("click", (event) => {
         }
       );
 
-      setStatus(`Caretaker access revoked for ${buildingId}.`);
+      setStatus(`House manager access revoked for ${buildingId}.`);
       await loadCaretakers();
     } catch (error) {
-      handleLandlordError(error, "Failed to revoke caretaker.");
+      handleLandlordError(error, "Failed to revoke house manager.");
     } finally {
       target.disabled = false;
     }
@@ -1984,7 +2843,7 @@ paymentAccessBodyEl.addEventListener("click", (event) => {
   }
 
   if (isCaretakerRole()) {
-    showError("Caretaker accounts cannot change payment access controls.");
+    showError("House manager accounts cannot change payment access controls.");
     return;
   }
 
@@ -2177,26 +3036,64 @@ buildingsBodyEl.addEventListener("click", (event) => {
   openBuildingDrawer(buildingId);
 });
 
-registryBodyEl.addEventListener("click", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLButtonElement)) {
-    return;
-  }
-
-  if (target.dataset.action !== "remove-resident") {
-    return;
-  }
-
+function handleRemoveRoomClick(target, buildingId, houseNumber) {
   if (isCaretakerRole()) {
-    showError("Caretaker accounts cannot remove residents.");
+    showError("House manager accounts cannot remove rooms.");
     return;
   }
 
-  const buildingId = String(target.dataset.buildingId || "").trim();
-  const userId = String(target.dataset.userId || "").trim();
-  const houseNumber = String(target.dataset.houseNumber || "").trim();
-  const residentName = String(target.dataset.residentName || "Resident").trim();
-  if (!buildingId || !userId) {
+  const shouldProceed = window.confirm(
+    `Remove room ${houseNumber} from building ${buildingId}?\nThis cannot be undone if the room has no tenancy history.`
+  );
+  if (!shouldProceed) {
+    return;
+  }
+
+  target.disabled = true;
+  clearError();
+
+  void (async () => {
+    try {
+      await requestJson(
+        `/api/landlord/buildings/${encodeURIComponent(buildingId)}/houses/${encodeURIComponent(houseNumber)}/remove`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            confirmationText: "REMOVE",
+            confirmHouseNumber: houseNumber
+          })
+        }
+      );
+
+      setStatus(`Removed room ${houseNumber} from ${buildingId}.`);
+      await loadBuildings();
+      await loadRegistryRows();
+      await loadResidents();
+    } catch (error) {
+      handleLandlordError(error, "Failed to remove room.");
+    } finally {
+      target.disabled = false;
+    }
+  })();
+}
+
+function handleRemoveResidentClick(
+  target,
+  buildingId,
+  userId,
+  houseNumber,
+  residentName
+) {
+  if (isCaretakerRole()) {
+    showError("House manager accounts cannot remove residents.");
+    return;
+  }
+
+  if (!userId) {
+    showError("Resident details are missing. Refresh and try again.");
     return;
   }
 
@@ -2221,9 +3118,9 @@ registryBodyEl.addEventListener("click", (event) => {
   void (async () => {
     try {
       await requestJson(
-        `/api/landlord/buildings/${encodeURIComponent(buildingId)}/users/${encodeURIComponent(userId)}`,
+        `/api/landlord/buildings/${encodeURIComponent(buildingId)}/users/${encodeURIComponent(userId)}/remove`,
         {
-          method: "DELETE",
+          method: "POST",
           headers: {
             "content-type": "application/json"
           },
@@ -2238,12 +3135,118 @@ registryBodyEl.addEventListener("click", (event) => {
       setStatus(`Removed ${residentName} from house ${houseNumber}.`);
       await Promise.all([loadApplications(), loadBuildings()]);
       await loadRegistryRows();
+      await loadResidents();
     } catch (error) {
       handleLandlordError(error, "Failed to remove resident user.");
     } finally {
       target.disabled = false;
     }
   })();
+}
+
+registryBodyEl.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  const action = target.dataset.action;
+  if (!action) {
+    return;
+  }
+
+  if (action === "remove-resident") {
+    const buildingId = String(target.dataset.buildingId || "").trim();
+    const userId = String(target.dataset.userId || "").trim();
+    const houseNumber = String(target.dataset.houseNumber || "").trim();
+    const residentName = String(target.dataset.residentName || "Resident").trim();
+    if (!buildingId || !userId) {
+      return;
+    }
+
+    handleRemoveResidentClick(
+      target,
+      buildingId,
+      userId,
+      houseNumber,
+      residentName
+    );
+    return;
+  }
+
+  if (action === "remove-room") {
+    const buildingId = String(target.dataset.buildingId || "").trim();
+    const houseNumber = String(target.dataset.houseNumber || "").trim();
+    if (!buildingId || !houseNumber) {
+      return;
+    }
+
+    handleRemoveRoomClick(target, buildingId, houseNumber);
+  }
+});
+
+residentsBodyEl?.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  const action = target.dataset.action;
+  if (!action) {
+    return;
+  }
+
+  const buildingId = String(target.dataset.buildingId || "").trim();
+  const houseNumber = String(target.dataset.houseNumber || "").trim();
+  if (!buildingId || !houseNumber) {
+    showError("Resident details missing. Refresh and retry.");
+    return;
+  }
+
+  if (action === "remove-resident") {
+    const userId = String(target.dataset.userId || "").trim();
+    const residentName = String(target.dataset.residentName || "Resident").trim();
+    handleRemoveResidentClick(
+      target,
+      buildingId,
+      userId,
+      houseNumber,
+      residentName
+    );
+    return;
+  }
+
+  if (action === "remove-room") {
+    handleRemoveRoomClick(target, buildingId, houseNumber);
+    return;
+  }
+
+  if (action !== "open-resident-drawer") {
+    return;
+  }
+
+  const resident = state.residentDirectory.find(
+    (item) =>
+      item.buildingId === buildingId &&
+      normalizeHouse(item.houseNumber) === normalizeHouse(houseNumber)
+  );
+
+  if (!resident) {
+    showError("Resident details not found. Refresh and retry.");
+    return;
+  }
+
+  openResidentDrawer(resident);
+});
+
+residentDrawerBodyEl?.addEventListener("submit", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLFormElement) || target.id !== "resident-agreement-form") {
+    return;
+  }
+
+  event.preventDefault();
+  void saveResidentAgreement(target);
 });
 
 applicationsBodyEl.addEventListener("click", (event) => {
@@ -2253,7 +3256,7 @@ applicationsBodyEl.addEventListener("click", (event) => {
   }
 
   if (isCaretakerRole()) {
-    showError("Caretaker accounts cannot approve/reject applications.");
+    showError("House manager accounts cannot approve/reject applications.");
     return;
   }
 
@@ -2662,7 +3665,7 @@ refreshRentStatusBtnEl.addEventListener("click", () => {
 
 refreshCaretakersBtnEl?.addEventListener("click", () => {
   void loadCaretakers().catch((error) => {
-    handleLandlordError(error, "Unable to refresh caretakers.");
+    handleLandlordError(error, "Unable to refresh house managers.");
   });
 });
 
@@ -2676,6 +3679,19 @@ landlordTicketFilterStatusEl?.addEventListener("change", refreshLandlordTickets)
 landlordTicketFilterQueueEl?.addEventListener("change", refreshLandlordTickets);
 landlordTicketBuildingSelectEl?.addEventListener("change", refreshLandlordTickets);
 refreshLandlordTicketsBtnEl?.addEventListener("click", refreshLandlordTickets);
+
+residentsBuildingSelectEl?.addEventListener("change", () => {
+  state.selectedResidentsBuildingId = String(residentsBuildingSelectEl.value || "");
+  void loadResidents().catch((error) => {
+    handleLandlordError(error, "Unable to load residents.");
+  });
+});
+
+refreshResidentsBtnEl?.addEventListener("click", () => {
+  void loadResidents().catch((error) => {
+    handleLandlordError(error, "Unable to refresh residents.");
+  });
+});
 
 refreshPaymentAccessBtnEl.addEventListener("click", () => {
   void loadPaymentAccess().catch((error) => {

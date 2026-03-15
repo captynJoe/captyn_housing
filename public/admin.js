@@ -80,6 +80,7 @@ const refreshUtilityPaymentsBtn = document.getElementById(
 );
 
 const rentUpsertFormEl = document.getElementById("rent-upsert-form");
+const rentBuildingEl = document.getElementById("rent-building");
 const rentHouseEl = document.getElementById("rent-house");
 const rentDueDateEl = document.getElementById("rent-due-date");
 const rentMonthlyEl = document.getElementById("rent-monthly");
@@ -89,6 +90,7 @@ const rentLedgerBodyEl = document.getElementById("rent-ledger-body");
 const refreshRentLedgerBtn = document.getElementById("refresh-rent-ledger");
 
 const rentPaymentsFilterFormEl = document.getElementById("rent-payments-filter-form");
+const rentPaymentsBuildingEl = document.getElementById("rent-payments-building");
 const rentPaymentsHouseEl = document.getElementById("rent-payments-house");
 const rentPaymentsBodyEl = document.getElementById("rent-payments-body");
 const refreshRentPaymentsBtn = document.getElementById("refresh-rent-payments");
@@ -137,6 +139,15 @@ function formatDateTime(value) {
 
 function formatCurrency(value) {
   return `KSh ${Number(value ?? 0).toLocaleString("en-US")}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function normalizeHouse(value) {
@@ -678,11 +689,19 @@ function renderTickets(tickets) {
       ? `BREACHED (${ticket.slaHours}h)`
       : `${ticket.slaHours}h (${ticket.slaState})`;
 
+    const detailsText = ticket.details
+      ? `<div class="ticket-details">${escapeHtml(ticket.details)}</div>`
+      : "";
+    const replyText = ticket.resolutionNotes || ticket.adminNote;
+    const replyLine = replyText
+      ? `<div class="ticket-details muted">Last update: ${escapeHtml(replyText)}</div>`
+      : "";
+
     row.innerHTML = `
-      <td><strong>${ticket.title}</strong><br /><small>${ticket.id.slice(0, 8)} • ${ticket.type}</small></td>
-      <td>${ticket.houseNumber}</td>
-      <td>${ticket.queue}</td>
-      <td>${ticket.status}</td>
+      <td><strong>${escapeHtml(ticket.title)}</strong><br /><small>${escapeHtml(ticket.id.slice(0, 8))} • ${escapeHtml(ticket.type)}</small>${detailsText}${replyLine}</td>
+      <td>${escapeHtml(ticket.houseNumber)}</td>
+      <td>${escapeHtml(ticket.queue)}</td>
+      <td>${escapeHtml(ticket.status)}</td>
       <td>${slaText}</td>
       <td>${formatDateTime(ticket.createdAt)}</td>
       <td>
@@ -839,7 +858,7 @@ function renderRentLedger(rows) {
 
   if (!Array.isArray(rows) || rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = `<td colspan="5">No rent profiles configured.</td>`;
+    row.innerHTML = `<td colspan="6">No rent profiles configured.</td>`;
     rentLedgerBodyEl.append(row);
     return;
   }
@@ -847,6 +866,7 @@ function renderRentLedger(rows) {
   rows.forEach((item) => {
     const row = document.createElement("tr");
     row.innerHTML = `
+      <td>${item.buildingId ?? "-"}</td>
       <td>${item.houseNumber}</td>
       <td>${item.status}</td>
       <td>${formatCurrency(item.balanceKsh)}</td>
@@ -862,7 +882,7 @@ function renderRentPayments(rows) {
 
   if (!Array.isArray(rows) || rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = `<td colspan="5">No rent payments found.</td>`;
+    row.innerHTML = `<td colspan="6">No rent payments found.</td>`;
     rentPaymentsBodyEl.append(row);
     return;
   }
@@ -871,6 +891,7 @@ function renderRentPayments(rows) {
     const row = document.createElement("tr");
     row.innerHTML = `
       <td>${item.providerReference}</td>
+      <td>${item.buildingId ?? "-"}</td>
       <td>${item.houseNumber}</td>
       <td>${formatCurrency(item.amountKsh)}</td>
       <td>${item.phoneNumber ?? "-"}</td>
@@ -1086,7 +1107,11 @@ async function loadRentLedger() {
 
 async function loadRentPayments() {
   const params = new URLSearchParams();
+  const buildingId = String(rentPaymentsBuildingEl.value ?? "").trim().toUpperCase();
   const house = normalizeHouse(rentPaymentsHouseEl.value);
+  if (buildingId) {
+    params.set("buildingId", buildingId);
+  }
   if (house) {
     params.set("houseNumber", house);
   }
@@ -1413,15 +1438,17 @@ rentUpsertFormEl.addEventListener("submit", (event) => {
   event.preventDefault();
   clearError();
 
+  const buildingId = String(rentBuildingEl.value ?? "").trim().toUpperCase();
   const houseNumber = normalizeHouse(rentHouseEl.value);
   const dueDateIso = toIsoFromDateTimeLocal(rentDueDateEl.value);
 
-  if (!houseNumber || !dueDateIso) {
-    showError("Provide a valid house and due date.");
+  if (!buildingId || !houseNumber || !dueDateIso) {
+    showError("Provide a building, valid house, and due date.");
     return;
   }
 
   const payload = {
+    buildingId,
     monthlyRentKsh: Number(rentMonthlyEl.value),
     balanceKsh: Number(rentBalanceEl.value),
     dueDate: dueDateIso,
@@ -1438,7 +1465,7 @@ rentUpsertFormEl.addEventListener("submit", (event) => {
         body: JSON.stringify(payload)
       });
 
-      setStatus(`Rent profile saved for house ${houseNumber}.`);
+      setStatus(`Rent profile saved for ${buildingId} house ${houseNumber}.`);
       await Promise.all([loadOverview(), loadRentLedger(), loadRentPayments()]);
     } catch (error) {
       handleAdminError(error, "Failed to save rent profile.");

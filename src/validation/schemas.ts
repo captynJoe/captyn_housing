@@ -36,6 +36,12 @@ export const landlordAddBuildingHousesSchema = z.object({
   houseNumbers: z.array(nonEmptyString.max(24)).min(1).max(1000)
 });
 
+export const landlordRemoveBuildingHouseSchema = z.object({
+  confirmHouseNumber: nonEmptyString.max(24).optional(),
+  confirmationText: z.literal("REMOVE").optional(),
+  note: z.string().trim().max(280).optional()
+});
+
 export const landlordRemoveBuildingUserSchema = z.object({
   confirmUserId: nonEmptyString.max(120).optional(),
   confirmationText: z.literal("REMOVE").optional(),
@@ -420,6 +426,84 @@ export const tenantApplicationSchema = z.object({
   note: z.string().trim().max(280).optional()
 });
 
+const tenantAgreementDateSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, {
+    message: "Use YYYY-MM-DD format."
+  });
+
+export const tenantIdentityTypeSchema = z.enum([
+  "national_id",
+  "passport",
+  "alien_id",
+  "other"
+]);
+
+export const tenantOccupationStatusSchema = z.enum([
+  "employed",
+  "self_employed",
+  "student",
+  "sponsored",
+  "unemployed",
+  "other"
+]);
+
+export const tenantAgreementUpsertSchema = z
+  .object({
+    identityType: tenantIdentityTypeSchema.optional(),
+    identityNumber: z.string().trim().max(80).optional(),
+    occupationStatus: tenantOccupationStatusSchema.optional(),
+    occupationLabel: z.string().trim().max(120).optional(),
+    organizationName: z.string().trim().max(160).optional(),
+    organizationLocation: z.string().trim().max(160).optional(),
+    studentRegistrationNumber: z.string().trim().max(80).optional(),
+    sponsorName: z.string().trim().max(120).optional(),
+    sponsorPhone: kenyaPhoneSchema.optional(),
+    emergencyContactName: z.string().trim().max(120).optional(),
+    emergencyContactPhone: kenyaPhoneSchema.optional(),
+    leaseStartDate: tenantAgreementDateSchema.optional(),
+    leaseEndDate: tenantAgreementDateSchema.optional(),
+    monthlyRentKsh: z.number().int().min(0).max(10_000_000).optional(),
+    depositKsh: z.number().int().min(0).max(10_000_000).optional(),
+    paymentDueDay: z.number().int().min(1).max(31).optional(),
+    specialTerms: z.string().trim().max(1_200).optional()
+  })
+  .superRefine((value, context) => {
+    if (value.identityNumber && !value.identityType) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["identityType"],
+        message: "Select the ID type for the provided ID number."
+      });
+    }
+
+    if (
+      value.occupationStatus &&
+      ["employed", "self_employed", "student"].includes(value.occupationStatus) &&
+      !value.organizationName
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["organizationName"],
+        message:
+          "Employer, business, or school name is required for this occupation status."
+      });
+    }
+
+    if (value.leaseStartDate && value.leaseEndDate) {
+      const startAt = new Date(`${value.leaseStartDate}T00:00:00.000Z`);
+      const endAt = new Date(`${value.leaseEndDate}T00:00:00.000Z`);
+      if (endAt.getTime() < startAt.getTime()) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["leaseEndDate"],
+          message: "Lease end date must be on or after the lease start date."
+        });
+      }
+    }
+  });
+
 export const landlordDecisionSchema = z.object({
   action: z.enum(["approve", "reject"]),
   note: z.string().trim().max(280).optional()
@@ -528,6 +612,7 @@ export const reviewLandlordAccessRequestSchema = z.object({
 });
 
 export const rentMpesaCallbackSchema = z.object({
+  buildingId: nonEmptyString.optional(),
   houseNumber: nonEmptyString.max(24),
   amountKsh: z.number().positive().max(500_000),
   providerReference: nonEmptyString.max(120),
@@ -581,6 +666,9 @@ export type DeleteBuildingInput = z.infer<typeof deleteBuildingSchema>;
 export type LandlordAddBuildingHousesInput = z.infer<
   typeof landlordAddBuildingHousesSchema
 >;
+export type LandlordRemoveBuildingHouseInput = z.infer<
+  typeof landlordRemoveBuildingHouseSchema
+>;
 export type LandlordRemoveBuildingUserInput = z.infer<
   typeof landlordRemoveBuildingUserSchema
 >;
@@ -630,6 +718,7 @@ export type UserRoleInput = z.infer<typeof userRoleSchema>;
 export type UserRegisterInput = z.infer<typeof userRegisterSchema>;
 export type UserLoginInput = z.infer<typeof userLoginSchema>;
 export type TenantApplicationInput = z.infer<typeof tenantApplicationSchema>;
+export type TenantAgreementUpsertInput = z.infer<typeof tenantAgreementUpsertSchema>;
 export type LandlordDecisionInput = z.infer<typeof landlordDecisionSchema>;
 export type LandlordPaymentAccessUpdateInput = z.infer<
   typeof landlordPaymentAccessUpdateSchema

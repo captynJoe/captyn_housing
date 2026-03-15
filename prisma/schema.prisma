@@ -48,6 +48,22 @@ enum LandlordAccessRequestStatus {
   rejected
 }
 
+enum TenantIdentityType {
+  national_id
+  passport
+  alien_id
+  other
+}
+
+enum TenantOccupationStatus {
+  employed
+  self_employed
+  student
+  sponsored
+  unemployed
+  other
+}
+
 model Building {
   id                       String              @id
   name                     String
@@ -66,6 +82,7 @@ model Building {
   landlordUser             HousingUser?        @relation("BuildingLandlord", fields: [landlordUserId], references: [id], onDelete: SetNull)
   houseUnits               HouseUnit[]
   tenantApplications       TenantApplication[]
+  tenantAgreements         TenantAgreement[]
   tenancies                Tenancy[]
   householdMemberRegistries HouseholdMemberRegistry[]
   createdAt                DateTime            @default(now())
@@ -131,6 +148,7 @@ model HousingUser {
   ownedBuildings        Building[]          @relation("BuildingLandlord")
   sessions              UserSession[]
   tenantApplications    TenantApplication[]
+  tenantAgreements      TenantAgreement[]
   reviewedApplications  TenantApplication[] @relation("TenantApplicationReviewer")
   tenancies             Tenancy[]
   landlordAccessRequests LandlordAccessRequest[] @relation("LandlordAccessRequester")
@@ -216,9 +234,43 @@ model Tenancy {
   user       HousingUser @relation(fields: [userId], references: [id], onDelete: Cascade)
   building   Building    @relation(fields: [buildingId], references: [id], onDelete: Cascade)
   unit       HouseUnit   @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  agreement  TenantAgreement?
 
   @@index([userId, active])
   @@index([buildingId, active])
+}
+
+model TenantAgreement {
+  id                        String                 @id @default(uuid())
+  tenancyId                 String                 @unique
+  buildingId                String
+  houseNumber               String
+  residentUserId            String
+  identityType              TenantIdentityType?
+  identityNumber            String?
+  occupationStatus          TenantOccupationStatus?
+  occupationLabel           String?
+  organizationName          String?
+  organizationLocation      String?
+  studentRegistrationNumber String?
+  sponsorName               String?
+  sponsorPhone              String?
+  emergencyContactName      String?
+  emergencyContactPhone     String?
+  leaseStartDate            DateTime?
+  leaseEndDate              DateTime?
+  monthlyRentKsh            Int?
+  depositKsh                Int?
+  paymentDueDay             Int?
+  specialTerms              String?
+  createdAt                 DateTime               @default(now())
+  updatedAt                 DateTime               @updatedAt
+  building                  Building               @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  resident                  HousingUser            @relation(fields: [residentUserId], references: [id], onDelete: Cascade)
+  tenancy                   Tenancy                @relation(fields: [tenancyId], references: [id], onDelete: Cascade)
+
+  @@index([buildingId, houseNumber, updatedAt])
+  @@index([residentUserId])
 }
 
 model HouseholdMemberRegistry {

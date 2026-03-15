@@ -105,6 +105,41 @@ test("records utility payment against oldest outstanding bill", () => {
   assert.equal(payments[0].providerReference, "UTIL-123");
 });
 
+test("does not apply the same provider reference twice", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.upsertMeter("water", BUILDING_A, "B-6", {
+    meterNumber: "WTR-9299"
+  });
+
+  const bill = service.createBill("water", BUILDING_A, "B-6", {
+    billingMonth: "2026-03",
+    currentReading: 40,
+    ratePerUnitKsh: 25,
+    fixedChargeKsh: 200,
+    dueDate
+  });
+
+  const first = service.recordPayment("water", BUILDING_A, "B-6", {
+    amountKsh: 500,
+    provider: "mpesa",
+    providerReference: "util-dup-1"
+  });
+  const second = service.recordPayment("water", BUILDING_A, "B-6", {
+    amountKsh: 500,
+    provider: "mpesa",
+    providerReference: "UTIL-DUP-1"
+  });
+
+  assert.equal(first.event.id, second.event.id);
+  assert.equal(second.bill.balanceKsh, bill.amountKsh - 500);
+
+  const payments = service.listPayments({ buildingId: BUILDING_A, houseNumber: "B-6" });
+  assert.equal(payments.length, 1);
+  assert.equal(payments[0].providerReference, "UTIL-DUP-1");
+});
+
 test("generates utility payment reminders for due balances", () => {
   const service = new UtilityBillingService();
   const dueDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();

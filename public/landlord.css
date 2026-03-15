@@ -57,6 +57,18 @@
   color: rgba(255, 255, 255, 0.86);
 }
 
+.ticket-details {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: rgba(16, 35, 49, 0.75);
+  line-height: 1.4;
+}
+
+.ticket-details.muted {
+  color: rgba(16, 35, 49, 0.6);
+  font-style: italic;
+}
+
 .landlord-primary-cta {
   margin-top: 14px;
   width: 100%;
@@ -112,6 +124,108 @@
 
 .landlord-drawer-form {
   gap: 12px;
+}
+
+.resident-summary h3 {
+  margin: 0;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.2rem;
+}
+
+.resident-summary .status-text {
+  margin: 4px 0 0;
+}
+
+.resident-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.resident-grid div {
+  border: 1px solid rgba(16, 35, 49, 0.12);
+  border-radius: 12px;
+  padding: 10px;
+  background: #fff;
+}
+
+.resident-grid span {
+  display: block;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(16, 35, 49, 0.7);
+}
+
+.resident-grid strong {
+  font-size: 0.95rem;
+  color: #102331;
+}
+
+.resident-agreement-card {
+  display: grid;
+  gap: 14px;
+}
+
+.resident-agreement-head {
+  align-items: start;
+}
+
+.resident-agreement-head h3 {
+  margin: 0;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.05rem;
+}
+
+.resident-agreement-role {
+  white-space: nowrap;
+}
+
+.resident-agreement-overview {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.resident-agreement-overview div {
+  border: 1px solid rgba(16, 35, 49, 0.12);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.resident-agreement-overview span {
+  display: block;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(16, 35, 49, 0.7);
+}
+
+.resident-agreement-overview strong {
+  font-size: 0.95rem;
+  color: #102331;
+}
+
+.resident-agreement-form {
+  display: grid;
+  gap: 12px;
+}
+
+.resident-agreement-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.resident-agreement-note {
+  margin: 0;
+}
+
+.resident-agreement-error {
+  margin: 0;
+  color: #8a1c1c;
+  font-weight: 600;
 }
 
 .landlord-generator {
@@ -233,5 +347,14 @@
   .landlord-content {
     width: 100%;
     max-width: 100%;
+  }
+
+  .resident-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .resident-agreement-overview,
+  .resident-agreement-grid {
+    grid-template-columns: 1fr;
   }
 }

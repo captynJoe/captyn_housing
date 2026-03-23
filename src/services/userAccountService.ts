@@ -69,6 +69,22 @@ function normalizeOptionalText(value: string | null | undefined): string | undef
   return normalized.length > 0 ? normalized : undefined;
 }
 
+function isMissingTenantApplicationIdentityColumnsError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : "";
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? String((error as { code?: unknown }).code ?? "")
+      : "";
+
+  if (code !== "P2022") {
+    return false;
+  }
+
+  return /TenantApplication\.(identityType|identityNumber|occupationStatus|occupationLabel)/i.test(
+    message
+  );
+}
+
 function toDateOnlyString(value: Date | null | undefined): string | undefined {
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
     return undefined;
@@ -290,7 +306,7 @@ export class UserAccountService {
     };
   }
 
-  async createSession(input: UserLoginInput): Promise<AuthenticatedUserSession | null> {
+  async createSession(input: UserLoginInput): Promise<AuthenticatedUserSession> {
     await this.purgeExpiredSessions();
 
     const emailRaw = typeof input.email === "string" ? input.email.trim() : "";
@@ -336,13 +352,22 @@ export class UserAccountService {
       });
     }
 
-    if (!user || !verifyPassword(input.password, user.passwordHash)) {
+    if (!user) {
       if (failedKeyType === "phone") {
         this.trackFailedPhoneLogin(failedKeyValue);
       } else {
         this.trackFailedLogin(failedKeyValue);
       }
-      return null;
+      throw new Error("ACCOUNT_NOT_FOUND");
+    }
+
+    if (!verifyPassword(input.password, user.passwordHash)) {
+      if (failedKeyType === "phone") {
+        this.trackFailedPhoneLogin(failedKeyValue);
+      } else {
+        this.trackFailedLogin(failedKeyValue);
+      }
+      throw new Error("INVALID_PASSWORD");
     }
 
     if (user.status !== "active") {
@@ -396,29 +421,49 @@ export class UserAccountService {
 
   async createResidentPhoneSession(
     input: ResidentPhoneLoginInput
-  ): Promise<AuthenticatedUserSession | null> {
+  ): Promise<AuthenticatedUserSession> {
     await this.purgeExpiredSessions();
     const phone = normalizeKenyaPhone(input.phoneNumber);
+    const houseNumber = normalizeHouseNumber(input.houseNumber);
 
     if (this.isRateLimited(this.loginRateByPhone, phone)) {
       throw new Error("LOGIN_RATE_LIMITED");
     }
 
-    const tenancy = await this.findActiveTenancyByHouseAndPhone({
+    let tenancy = await this.findActiveTenancyByHouseAndPhone({
       buildingId: input.buildingId,
-      houseNumber: input.houseNumber,
+      houseNumber,
       phoneNumber: phone
     });
 
-    if (!tenancy) {
-      this.trackFailedPhoneLogin(phone);
-      return null;
+    let user = tenancy?.user ?? null;
+    if (!user) {
+      const pendingApplication = await this.prisma.tenantApplication.findFirst({
+        where: {
+          buildingId: input.buildingId,
+          houseNumber,
+          status: "pending",
+          user: {
+            phone
+          }
+        },
+        include: {
+          user: true
+        },
+        orderBy: { updatedAt: "desc" }
+      });
+
+      if (!pendingApplication) {
+        this.trackFailedPhoneLogin(phone);
+        throw new Error("TENANCY_NOT_FOUND");
+      }
+
+      user = pendingApplication.user;
     }
 
-    const user = tenancy.user;
     if (!verifyPassword(input.password, user.passwordHash)) {
       this.trackFailedPhoneLogin(phone);
-      return null;
+      throw new Error("RESIDENT_PASSWORD_INCORRECT");
     }
 
     if (user.status !== "active") {
@@ -426,6 +471,15 @@ export class UserAccountService {
     }
     if (user.role !== "tenant") {
       throw new Error("RESIDENT_LOGIN_ROLE_CONFLICT");
+    }
+
+    if (!tenancy) {
+      user = await this.provisionResidentForSetup({
+        buildingId: input.buildingId,
+        houseNumber,
+        phoneNumber: phone,
+        password: input.password
+      });
     }
 
     this.loginRateByPhone.delete(phone);
@@ -1076,57 +1130,110 @@ export class UserAccountService {
       throw new Error("HOUSE_OCCUPIED");
     }
 
-    const activeTenancy = await tx.tenancy.findFirst({
-      where: {
+    const where = {
+      userId_buildingId_houseNumber: {
         userId,
         buildingId: building.id,
-        unitId: unit.id,
-        active: true
-      },
-      select: { id: true }
-    });
+        houseNumber
+      }
+    };
+    const [existingApplication, activeTenancy] = await Promise.all([
+      tx.tenantApplication.findUnique({
+        where,
+        select: {
+          status: true
+        }
+      }),
+      tx.tenancy.findFirst({
+        where: {
+          userId,
+          buildingId: building.id,
+          unitId: unit.id,
+          active: true
+        },
+        select: {
+          id: true
+        }
+      })
+    ]);
 
-    if (activeTenancy) {
+    if (activeTenancy && existingApplication?.status !== "pending") {
       throw new Error("TENANCY_ALREADY_ACTIVE");
     }
 
-    const application = await tx.tenantApplication.upsert({
-      where: {
-        userId_buildingId_houseNumber: {
-          userId,
-          buildingId: building.id,
-          houseNumber
-        }
-      },
-      update: {
-        unitId: unit.id,
-        status: "pending",
-        note: input.note,
-        reviewedAt: null,
-        reviewedByUserId: null
-      },
-      create: {
-        userId,
-        buildingId: building.id,
-        unitId: unit.id,
-        houseNumber,
-        note: input.note,
-        status: "pending"
-      },
-      include: {
-        building: {
-          select: {
-            id: true,
-            name: true
-          }
+    const include = {
+      building: {
+        select: {
+          id: true,
+          name: true
         }
       }
-    });
+    };
+
+    let application;
+
+    try {
+      application = await tx.tenantApplication.upsert({
+        where,
+        update: {
+          unitId: unit.id,
+          identityType: input.identityType ?? null,
+          identityNumber: normalizeOptionalText(input.identityNumber) ?? null,
+          occupationStatus: input.occupationStatus ?? null,
+          occupationLabel: normalizeOptionalText(input.occupationLabel) ?? null,
+          status: "pending",
+          note: input.note,
+          reviewedAt: null,
+          reviewedByUserId: null
+        },
+        create: {
+          userId,
+          buildingId: building.id,
+          unitId: unit.id,
+          houseNumber,
+          identityType: input.identityType ?? null,
+          identityNumber: normalizeOptionalText(input.identityNumber) ?? null,
+          occupationStatus: input.occupationStatus ?? null,
+          occupationLabel: normalizeOptionalText(input.occupationLabel) ?? null,
+          note: input.note,
+          status: "pending"
+        },
+        include
+      });
+    } catch (error) {
+      if (!isMissingTenantApplicationIdentityColumnsError(error)) {
+        throw error;
+      }
+
+      application = await tx.tenantApplication.upsert({
+        where,
+        update: {
+          unitId: unit.id,
+          status: "pending",
+          note: input.note,
+          reviewedAt: null,
+          reviewedByUserId: null
+        },
+        create: {
+          userId,
+          buildingId: building.id,
+          unitId: unit.id,
+          houseNumber,
+          note: input.note,
+          status: "pending"
+        },
+        include
+      });
+    }
 
     return {
       id: application.id,
       status: application.status,
       houseNumber: application.houseNumber,
+      identityType: application.identityType ?? undefined,
+      identityNumber: application.identityNumber ?? undefined,
+      occupationStatus: application.occupationStatus ?? undefined,
+      occupationLabel: application.occupationLabel ?? undefined,
       note: application.note ?? undefined,
       building: application.building,
       createdAt: application.createdAt.toISOString(),
@@ -1139,8 +1246,9 @@ export class UserAccountService {
 
     const phoneNumber = normalizeKenyaPhone(input.phoneNumber);
     const passwordHash = hashPassword(input.password);
+    const houseNumber = normalizeHouseNumber(input.houseNumber);
 
-    return this.prisma.$transaction(async (tx) => {
+    const { application } = await this.prisma.$transaction(async (tx) => {
       let user = await tx.housingUser.findUnique({
         where: { phone: phoneNumber }
       });
@@ -1176,21 +1284,38 @@ export class UserAccountService {
 
       const application = await this.upsertTenantApplicationForUser(tx, user.id, {
         buildingId: input.buildingId,
-        houseNumber: input.houseNumber,
+        houseNumber,
+        identityType: input.identityType,
+        identityNumber: input.identityNumber,
+        occupationStatus: input.occupationStatus,
+        occupationLabel: input.occupationLabel,
         note: "Resident signup access request"
       });
 
-      this.loginRateByPhone.delete(phoneNumber);
-      this.loginRateByEmail.delete(normalizeEmail(user.email));
-
       return {
-        tenant: {
-          userId: user.id,
-          phone: user.phone
-        },
-        ...application
+        application
       };
     });
+
+    const provisionedUser = await this.provisionResidentForSetup({
+      buildingId: input.buildingId,
+      houseNumber,
+      phoneNumber,
+      password: input.password
+    });
+    const session = await this.issueSessionForUser(provisionedUser);
+
+    this.loginRateByPhone.delete(phoneNumber);
+    this.loginRateByEmail.delete(normalizeEmail(provisionedUser.email));
+
+    return {
+      tenant: {
+        userId: provisionedUser.id,
+        phone: provisionedUser.phone
+      },
+      session,
+      ...application
+    };
   }
 
   async createTenantApplication(
@@ -1217,6 +1342,10 @@ export class UserAccountService {
       id: item.id,
       status: item.status,
       houseNumber: item.houseNumber,
+      identityType: item.identityType ?? undefined,
+      identityNumber: item.identityNumber ?? undefined,
+      occupationStatus: item.occupationStatus ?? undefined,
+      occupationLabel: item.occupationLabel ?? undefined,
       note: item.note ?? undefined,
       building: item.building,
       reviewedAt: item.reviewedAt?.toISOString(),
@@ -1260,6 +1389,10 @@ export class UserAccountService {
       id: item.id,
       status: item.status,
       houseNumber: item.houseNumber,
+      identityType: item.identityType ?? undefined,
+      identityNumber: item.identityNumber ?? undefined,
+      occupationStatus: item.occupationStatus ?? undefined,
+      occupationLabel: item.occupationLabel ?? undefined,
       note: item.note ?? undefined,
       building: item.building,
       tenant: item.user,
@@ -1299,14 +1432,40 @@ export class UserAccountService {
     }
 
     if (input.action === "reject") {
-      const rejected = await this.prisma.tenantApplication.update({
-        where: { id: application.id },
-        data: {
-          status: "rejected",
-          reviewedAt: new Date(),
-          reviewedByUserId: session.userId,
-          note: input.note ?? application.note
-        }
+      const rejectedAt = new Date();
+      const rejected = await this.prisma.$transaction(async (tx) => {
+        await tx.tenancy.updateMany({
+          where: {
+            userId: application.userId,
+            buildingId: application.buildingId,
+            unitId: application.unitId ?? undefined,
+            active: true
+          },
+          data: {
+            active: false,
+            endedAt: rejectedAt
+          }
+        });
+
+        await tx.userSession.updateMany({
+          where: {
+            userId: application.userId,
+            revokedAt: null
+          },
+          data: {
+            revokedAt: rejectedAt
+          }
+        });
+
+        return tx.tenantApplication.update({
+          where: { id: application.id },
+          data: {
+            status: "rejected",
+            reviewedAt: rejectedAt,
+            reviewedByUserId: session.userId,
+            note: input.note ?? application.note
+          }
+        });
       });
 
       return {
@@ -1341,25 +1500,51 @@ export class UserAccountService {
         throw new Error("HOUSE_OCCUPIED");
       }
 
-      await tx.tenancy.updateMany({
+      const existingTenancy = await tx.tenancy.findFirst({
         where: {
-          userId: application.userId,
-          active: true
-        },
-        data: {
-          active: false,
-          endedAt: new Date()
-        }
-      });
-
-      await tx.tenancy.create({
-        data: {
           userId: application.userId,
           buildingId: application.buildingId,
           unitId: approvedUnitId,
           active: true
+        },
+        select: {
+          id: true
         }
       });
+
+      if (existingTenancy) {
+        await tx.tenancy.updateMany({
+          where: {
+            userId: application.userId,
+            active: true,
+            id: { not: existingTenancy.id }
+          },
+          data: {
+            active: false,
+            endedAt: new Date()
+          }
+        });
+      } else {
+        await tx.tenancy.updateMany({
+          where: {
+            userId: application.userId,
+            active: true
+          },
+          data: {
+            active: false,
+            endedAt: new Date()
+          }
+        });
+
+        await tx.tenancy.create({
+          data: {
+            userId: application.userId,
+            buildingId: application.buildingId,
+            unitId: approvedUnitId,
+            active: true
+          }
+        });
+      }
 
       return tx.tenantApplication.update({
         where: { id: application.id },

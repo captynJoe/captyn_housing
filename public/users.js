@@ -1,6 +1,16 @@
 import { initPasswordVisibilityToggles } from "./password-visibility.js";
+import {
+  createUploadedImageGallery,
+  renderSelectedImagePreviews,
+  uploadImageFiles,
+  validateImageFiles
+} from "./cloudinary-upload.js";
 
 const RESIDENT_TOKEN_KEY = "captyn_resident_session_token";
+const RESIDENT_SW_URL = "/resident-sw.js?v=20260315g";
+
+let deferredInstallPrompt = null;
+let residentSwRegistrationPromise = null;
 
 const apiStatusEl = document.getElementById("api-status");
 const authStateEl = document.getElementById("auth-state");
@@ -38,9 +48,14 @@ const authBuildingIdEl = document.getElementById("auth-building-id");
 const authHouseNumberEl = document.getElementById("auth-house-number");
 const authPhoneNumberEl = document.getElementById("auth-phone-number");
 const authPasswordEl = document.getElementById("auth-password");
+const signupIdentityTypeEl = document.getElementById("signup-identity-type");
+const signupIdentityNumberEl = document.getElementById("signup-identity-number");
+const signupOccupationStatusEl = document.getElementById("signup-occupation-status");
+const signupOccupationLabelEl = document.getElementById("signup-occupation-label");
 const residentSignupBtnEl = document.getElementById("resident-signup-btn");
 const residentLoginBtnEl = document.getElementById("resident-login-btn");
 const residentForgotBtnEl = document.getElementById("resident-forgot-btn");
+const residentAuthFeedbackEl = document.getElementById("resident-auth-feedback");
 
 const refreshAllBtnEl = document.getElementById("refresh-all-btn");
 const reportFormEl = document.getElementById("report-form");
@@ -49,6 +64,8 @@ const boundHouseNumberEl = document.getElementById("bound-house-number");
 const reportTypeEl = document.getElementById("report-type");
 const reportTitleEl = document.getElementById("report-title");
 const reportDetailsEl = document.getElementById("report-details");
+const reportAttachmentsEl = document.getElementById("report-attachments");
+const reportAttachmentPreviewEl = document.getElementById("report-attachment-preview");
 const theftWorkflowFieldsEl = document.getElementById("theft-workflow-fields");
 const reportStolenItemEl = document.getElementById("report-stolen-item");
 const reportIncidentLocationEl = document.getElementById("report-incident-location");
@@ -61,6 +78,11 @@ const reportsListEl = document.getElementById("reports-list");
 const reportsCountEl = document.getElementById("reports-count");
 const notificationListEl = document.getElementById("notification-list");
 const notificationCountEl = document.getElementById("notification-count");
+const installAppStatusEl = document.getElementById("install-app-status");
+const pushStatusTextEl = document.getElementById("push-status-text");
+const installAppBtnEl = document.getElementById("install-app-btn");
+const pushEnableBtnEl = document.getElementById("push-enable-btn");
+const pushDisableBtnEl = document.getElementById("push-disable-btn");
 const rentDueEl = document.getElementById("rent-due");
 
 const paymentsSummaryActionEl = document.getElementById("payments-summary-action");
@@ -94,6 +116,23 @@ const utilityPaymentBalanceEl = document.getElementById("utility-payment-balance
 const utilityPaymentBtnEl = document.getElementById("utility-payment-btn");
 const utilityPaymentsCountEl = document.getElementById("utility-payments-count");
 const utilityPaymentsListEl = document.getElementById("utility-payments-list");
+const mpesaStatusModalEl = document.getElementById("mpesa-status-modal");
+const mpesaStatusBackdropEl = document.getElementById("mpesa-status-backdrop");
+const mpesaStatusTitleEl = document.getElementById("mpesa-status-title");
+const mpesaStatusBadgeEl = document.getElementById("mpesa-status-badge");
+const mpesaStatusCopyEl = document.getElementById("mpesa-status-copy");
+const mpesaStatusMetaEl = document.getElementById("mpesa-status-meta");
+const mpesaStatusNoteEl = document.getElementById("mpesa-status-note");
+const mpesaStatusCloseEl = document.getElementById("mpesa-status-close");
+const mpesaStatusCheckBtnEl = document.getElementById("mpesa-status-check-btn");
+const mpesaStatusRetryBtnEl = document.getElementById("mpesa-status-retry-btn");
+const mpesaStatusCloseBtnEl = document.getElementById("mpesa-status-close-btn");
+const paymentReceiptModalEl = document.getElementById("payment-receipt-modal");
+const paymentReceiptBackdropEl = document.getElementById("payment-receipt-backdrop");
+const paymentReceiptCardEl = document.getElementById("payment-receipt-card");
+const paymentReceiptCloseEl = document.getElementById("payment-receipt-close");
+const paymentReceiptSaveBtnEl = document.getElementById("payment-receipt-save-btn");
+const paymentReceiptDismissBtnEl = document.getElementById("payment-receipt-dismiss-btn");
 
 const reportItemTemplate = document.getElementById("report-item-template");
 const notificationItemTemplate = document.getElementById("notification-item-template");
@@ -104,6 +143,7 @@ const DEFAULT_PAYMENT_ACCESS = Object.freeze({
   electricityEnabled: true
 });
 const VALID_RESIDENT_VIEWS = new Set(["overview", "support", "payments", "notices"]);
+const REPORT_ATTACHMENT_LIMIT = 4;
 
 const state = {
   buildings: [],
@@ -111,6 +151,8 @@ const state = {
   rentDue: null,
   reports: [],
   notifications: [],
+  pushConfig: null,
+  pushSubscriptionEndpoint: "",
   utilityBills: [],
   utilityMeters: [],
   rentPayments: [],
@@ -126,11 +168,15 @@ const state = {
   utilityCheckoutRequestId: null,
   utilityCheckoutType: null,
   utilityPaymentBaseline: null,
+  activeMpesaFlow: null,
+  mpesaStatusModalDismissed: false,
+  activeReceipt: null,
   activeResidentView: "payments",
   utilitySelectedBillMonthByType: {
     water: null,
     electricity: null
-  }
+  },
+  pwaInstalled: false
 };
 
 const RENT_PAYMENT_POLL_INTERVAL_MS = 5000;
@@ -164,9 +210,14 @@ const REQUIRED_DOM_BINDINGS = Object.freeze([
   ["auth-house-number", authHouseNumberEl],
   ["auth-phone-number", authPhoneNumberEl],
   ["auth-password", authPasswordEl],
+  ["signup-identity-type", signupIdentityTypeEl],
+  ["signup-identity-number", signupIdentityNumberEl],
+  ["signup-occupation-status", signupOccupationStatusEl],
+  ["signup-occupation-label", signupOccupationLabelEl],
   ["resident-signup-btn", residentSignupBtnEl],
   ["resident-login-btn", residentLoginBtnEl],
   ["resident-forgot-btn", residentForgotBtnEl],
+  ["resident-auth-feedback", residentAuthFeedbackEl],
   ["refresh-all-btn", refreshAllBtnEl],
   ["report-form", reportFormEl],
   ["bound-building", boundBuildingEl],
@@ -185,6 +236,11 @@ const REQUIRED_DOM_BINDINGS = Object.freeze([
   ["reports-count", reportsCountEl],
   ["notification-list", notificationListEl],
   ["notification-count", notificationCountEl],
+  ["install-app-status", installAppStatusEl],
+  ["push-status-text", pushStatusTextEl],
+  ["install-app-btn", installAppBtnEl],
+  ["push-enable-btn", pushEnableBtnEl],
+  ["push-disable-btn", pushDisableBtnEl],
   ["rent-due", rentDueEl],
   ["payments-summary-action", paymentsSummaryActionEl],
   ["payments-total-outstanding", paymentsTotalOutstandingEl],
@@ -216,12 +272,56 @@ const REQUIRED_DOM_BINDINGS = Object.freeze([
   ["utility-payment-btn", utilityPaymentBtnEl],
   ["utility-payments-count", utilityPaymentsCountEl],
   ["utility-payments-list", utilityPaymentsListEl],
+  ["mpesa-status-modal", mpesaStatusModalEl],
+  ["mpesa-status-backdrop", mpesaStatusBackdropEl],
+  ["mpesa-status-title", mpesaStatusTitleEl],
+  ["mpesa-status-badge", mpesaStatusBadgeEl],
+  ["mpesa-status-copy", mpesaStatusCopyEl],
+  ["mpesa-status-meta", mpesaStatusMetaEl],
+  ["mpesa-status-note", mpesaStatusNoteEl],
+  ["mpesa-status-close", mpesaStatusCloseEl],
+  ["mpesa-status-check-btn", mpesaStatusCheckBtnEl],
+  ["mpesa-status-retry-btn", mpesaStatusRetryBtnEl],
+  ["mpesa-status-close-btn", mpesaStatusCloseBtnEl],
+  ["payment-receipt-modal", paymentReceiptModalEl],
+  ["payment-receipt-backdrop", paymentReceiptBackdropEl],
+  ["payment-receipt-card", paymentReceiptCardEl],
+  ["payment-receipt-close", paymentReceiptCloseEl],
+  ["payment-receipt-save-btn", paymentReceiptSaveBtnEl],
+  ["payment-receipt-dismiss-btn", paymentReceiptDismissBtnEl],
   ["report-item-template", reportItemTemplate],
   ["notification-item-template", notificationItemTemplate]
 ]);
 
 function normalizeHouseNumber(value) {
   return value.trim().toUpperCase();
+}
+
+function supportsResidentPwa() {
+  return typeof window !== "undefined" && "serviceWorker" in navigator;
+}
+
+function supportsResidentPush() {
+  return (
+    supportsResidentPwa() &&
+    "PushManager" in window &&
+    "Notification" in window
+  );
+}
+
+function isStandaloneApp() {
+  return Boolean(
+    window.matchMedia?.("(display-mode: standalone)").matches ||
+      window.navigator.standalone === true
+  );
+}
+
+function urlBase64ToUint8Array(value) {
+  const padded = `${value}${"=".repeat((4 - (value.length % 4 || 4)) % 4)}`
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+  const rawData = window.atob(padded);
+  return Uint8Array.from(rawData, (char) => char.charCodeAt(0));
 }
 
 function formatDateTime(value) {
@@ -479,6 +579,14 @@ function computeRemainingBalance(balance, amount) {
 }
 
 function updatePaymentsSummaryCard() {
+  if (state.residentSession && !canResidentAccessBilling()) {
+    paymentsTotalOutstandingEl.textContent = formatCurrency(0);
+    paymentsRentOutstandingEl.textContent = formatCurrency(0);
+    paymentsUtilityOutstandingEl.textContent = formatCurrency(0);
+    paymentsSummaryActionEl.textContent = getPendingReviewBillingMessage();
+    return;
+  }
+
   const rentOutstanding = getRentOutstandingBalance();
   const utilityOutstanding = getTotalUtilityOutstandingBalance();
   const totalOutstanding = getTotalOutstandingBalance();
@@ -508,6 +616,11 @@ function updatePaymentsSummaryCard() {
 }
 
 function updateRentPaymentGuidance() {
+  if (state.residentSession && !canResidentAccessBilling()) {
+    rentPaymentRemainingEl.textContent = getPendingReviewBillingMessage();
+    return;
+  }
+
   if (!state.rentDue) {
     rentPaymentRemainingEl.textContent =
       "Rent payment will appear here once your room is configured for billing.";
@@ -546,6 +659,11 @@ function updateRentPaymentGuidance() {
 }
 
 function updateUtilityPaymentGuidance() {
+  if (state.residentSession && !canResidentAccessBilling()) {
+    utilityPaymentRemainingEl.textContent = getPendingReviewBillingMessage();
+    return;
+  }
+
   const utilityType = String(utilityPaymentTypeEl.value ?? "water");
   const bill = findOutstandingUtilityBill(
     utilityType,
@@ -595,6 +713,455 @@ function syncPaymentMessaging() {
   updateUtilityPaymentGuidance();
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function getResidentBuildingLabel() {
+  const session = state.residentSession;
+  if (!session) {
+    return "-";
+  }
+
+  const building = state.buildings.find((item) => item.id === session.buildingId);
+  return building ? `${building.name} (${building.id})` : session.buildingId;
+}
+
+function syncModalBodyState() {
+  const hasOpenModal =
+    !mpesaStatusModalEl.classList.contains("hidden") ||
+    !paymentReceiptModalEl.classList.contains("hidden");
+  document.body.classList.toggle("modal-open", hasOpenModal);
+}
+
+function setModalOpen(modalEl, isOpen) {
+  modalEl.classList.toggle("hidden", !isOpen);
+  syncModalBodyState();
+}
+
+function isFinalMpesaFlowStage(stage) {
+  return ["success", "failed", "error", "unknown"].includes(String(stage ?? ""));
+}
+
+function pauseActiveMpesaFlow(flow) {
+  if (!flow) {
+    return;
+  }
+
+  if (flow.scope === "utility") {
+    stopUtilityPaymentPolling();
+    state.utilityPaymentPollAttempts = 0;
+    utilityPaymentBtnEl.disabled = false;
+    syncUtilityPaymentProviderUi();
+    return;
+  }
+
+  stopRentPaymentPolling();
+  state.rentPaymentPollAttempts = 0;
+  rentPaymentBtnEl.disabled = false;
+  syncRentPaymentButtonUi();
+}
+
+function closeMpesaStatusModal({ clearFlow = false } = {}) {
+  const flow = state.activeMpesaFlow;
+  const shouldClearFlow = clearFlow || isFinalMpesaFlowStage(flow?.stage);
+  setModalOpen(mpesaStatusModalEl, false);
+
+  if (shouldClearFlow) {
+    state.activeMpesaFlow = null;
+    state.mpesaStatusModalDismissed = false;
+  } else if (flow) {
+    state.mpesaStatusModalDismissed = true;
+    pauseActiveMpesaFlow(flow);
+  }
+
+  syncRentPaymentButtonUi();
+  syncUtilityPaymentProviderUi();
+}
+
+function closePaymentReceiptModal() {
+  state.activeReceipt = null;
+  setModalOpen(paymentReceiptModalEl, false);
+}
+
+function describeMpesaTarget(flow) {
+  if (!flow) {
+    return "payment";
+  }
+
+  if (flow.scope === "utility") {
+    return `${utilityLabel(flow.utilityType)} utility payment`;
+  }
+
+  return "rent payment";
+}
+
+function renderMetaGrid(containerEl, rows) {
+  containerEl.innerHTML = rows
+    .filter((row) => row.value !== undefined && row.value !== null && String(row.value).trim())
+    .map(
+      (row) =>
+        `<div><dt>${escapeHtml(row.label)}</dt><dd>${escapeHtml(String(row.value))}</dd></div>`
+    )
+    .join("");
+}
+
+function renderMpesaStatusModal() {
+  const flow = state.activeMpesaFlow;
+  if (!flow) {
+    return;
+  }
+
+  const badgeStyles = {
+    prompt: ["chip-mpesa", "Waiting for PIN"],
+    checking: ["chip-due_soon", "Checking"],
+    pending: ["chip-warning", "Awaiting approval"],
+    success: ["chip-success", "Paid"],
+    failed: ["chip-overdue", "Failed"],
+    error: ["chip-warning", "Could not verify"],
+    unknown: ["chip-warning", "Review ledger"]
+  };
+  const [badgeClass, badgeText] = badgeStyles[flow.stage] ?? badgeStyles.prompt;
+
+  mpesaStatusTitleEl.textContent = flow.title ?? "Confirm payment on your phone";
+  mpesaStatusBadgeEl.className = `item-chip ${badgeClass}`;
+  mpesaStatusBadgeEl.textContent = flow.badge ?? badgeText;
+  mpesaStatusCopyEl.textContent =
+    flow.copy ??
+    `An M-PESA prompt has been sent. Enter your PIN on your phone to finish this ${describeMpesaTarget(
+      flow
+    )}.`;
+  mpesaStatusNoteEl.textContent = flow.note ?? "";
+
+  renderMetaGrid(mpesaStatusMetaEl, [
+    { label: "Payment", value: flow.scope === "utility" ? utilityLabel(flow.utilityType) : "Rent" },
+    { label: "Amount", value: formatCurrency(flow.amountKsh) },
+    { label: "Bill Month", value: flow.billingMonth ?? "Current ledger" },
+    { label: "Phone", value: flow.phoneMask ?? "Resident phone" },
+    { label: "Checkout ID", value: flow.checkoutRequestId },
+    { label: "Receipt", value: flow.receiptReference ?? "" }
+  ]);
+
+  const canCheckStatus = ["prompt", "checking", "pending", "error"].includes(flow.stage);
+  const canRetry = ["failed", "unknown", "error", "pending"].includes(flow.stage);
+
+  mpesaStatusCheckBtnEl.classList.toggle("hidden", !canCheckStatus);
+  mpesaStatusCheckBtnEl.disabled = flow.stage === "checking";
+  mpesaStatusCheckBtnEl.textContent = flow.stage === "checking" ? "Checking..." : "Check status";
+
+  mpesaStatusRetryBtnEl.classList.toggle("hidden", !canRetry);
+  mpesaStatusRetryBtnEl.textContent =
+    flow.stage === "pending" ? "Start new payment" : "Edit payment";
+
+  setModalOpen(mpesaStatusModalEl, true);
+}
+
+function openMpesaStatusModal(flowUpdate = null, { force = false } = {}) {
+  if (flowUpdate) {
+    state.activeMpesaFlow = {
+      ...(state.activeMpesaFlow ?? {}),
+      ...flowUpdate
+    };
+  }
+
+  const flow = state.activeMpesaFlow;
+  if (!flow) {
+    return;
+  }
+
+  const shouldForceOpen = force || isFinalMpesaFlowStage(flow.stage);
+  if (shouldForceOpen) {
+    state.mpesaStatusModalDismissed = false;
+  }
+
+  if (state.mpesaStatusModalDismissed && !shouldForceOpen) {
+    return;
+  }
+
+  renderMpesaStatusModal();
+}
+
+function buildUtilityReceiptRecord(payment) {
+  return {
+    id: payment.id,
+    kind: "utility",
+    title: `${utilityLabel(payment.utilityType)} utility receipt`,
+    subject: `${utilityLabel(payment.utilityType)} payment`,
+    amountKsh: payment.amountKsh,
+    paidAt: payment.paidAt,
+    provider: String(payment.provider ?? "mpesa").toUpperCase(),
+    providerReference: payment.providerReference ?? "Pending",
+    billingMonth: payment.billingMonth ?? "Current bill",
+    buildingLabel: getResidentBuildingLabel(),
+    houseNumber: state.residentSession?.houseNumber ?? "-",
+    secondaryLabel: utilityLabel(payment.utilityType)
+  };
+}
+
+function buildRentReceiptRecord(payment) {
+  return {
+    id: payment.id,
+    kind: "rent",
+    title: "Rent payment receipt",
+    subject: "Rent payment",
+    amountKsh: payment.amountKsh,
+    paidAt: payment.paidAt,
+    provider: "MPESA",
+    providerReference: payment.providerReference ?? "Pending",
+    billingMonth: payment.billingMonth ?? "Current rent month",
+    buildingLabel: getResidentBuildingLabel(),
+    houseNumber: state.residentSession?.houseNumber ?? "-",
+    secondaryLabel: "Rent"
+  };
+}
+
+function renderReceiptCard(receipt) {
+  paymentReceiptCardEl.innerHTML = `
+    <div class="receipt-card-head">
+      <div class="receipt-card-mark">
+        <img src="/mpesa-icon.svg" alt="" width="42" height="42" />
+        <div class="receipt-card-meta">
+          <p class="receipt-card-status">Paid</p>
+          <h3>${escapeHtml(receipt.title)}</h3>
+          <p>${escapeHtml(receipt.buildingLabel)} • House ${escapeHtml(receipt.houseNumber)}</p>
+        </div>
+      </div>
+      <div class="receipt-card-total">
+        <p>Total paid</p>
+        <strong>${escapeHtml(formatCurrency(receipt.amountKsh))}</strong>
+      </div>
+    </div>
+    <dl class="receipt-grid">
+      <div>
+        <dt>Receipt No.</dt>
+        <dd>${escapeHtml(receipt.providerReference)}</dd>
+      </div>
+      <div>
+        <dt>Channel</dt>
+        <dd>${escapeHtml(receipt.provider)}</dd>
+      </div>
+      <div>
+        <dt>Payment For</dt>
+        <dd>${escapeHtml(receipt.subject)}</dd>
+      </div>
+      <div>
+        <dt>Bill Month</dt>
+        <dd>${escapeHtml(receipt.billingMonth)}</dd>
+      </div>
+      <div>
+        <dt>Posted At</dt>
+        <dd>${escapeHtml(formatDateTime(receipt.paidAt))}</dd>
+      </div>
+      <div>
+        <dt>Account</dt>
+        <dd>${escapeHtml(receipt.secondaryLabel)}</dd>
+      </div>
+    </dl>
+  `;
+}
+
+function openPaymentReceiptModal(receipt) {
+  closeMpesaStatusModal({ clearFlow: true });
+  state.activeReceipt = receipt;
+  renderReceiptCard(receipt);
+  setModalOpen(paymentReceiptModalEl, true);
+}
+
+function buildReceiptDownloadMarkup(receipt) {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${escapeHtml(receipt.title)}</title>
+    <style>
+      body { font-family: Outfit, Arial, sans-serif; margin: 0; padding: 24px; background: #f2f7f4; color: #102028; }
+      .card { max-width: 720px; margin: 0 auto; padding: 24px; border-radius: 20px; background: #fff; border: 1px solid rgba(16, 28, 40, 0.12); }
+      .head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 20px; }
+      .brand { display: flex; gap: 12px; align-items: center; }
+      .brand img { border-radius: 12px; }
+      .status { display: inline-block; padding: 6px 10px; border-radius: 999px; background: rgba(10, 168, 58, 0.12); color: #0f6d44; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+      h1, h2, p { margin: 0; }
+      .total strong { display: block; font-size: 28px; color: #0f6d44; }
+      dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+      dl div { padding: 12px; border-radius: 14px; border: 1px solid rgba(16, 28, 40, 0.08); background: #f8fbf9; }
+      dt { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #51606d; font-weight: 700; }
+      dd { margin: 8px 0 0; font-size: 16px; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <article class="card">
+      <div class="head">
+        <div class="brand">
+          <img src="data:image/svg+xml;utf8,${encodeURIComponent(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#0AA83A"/><path d="M9 39V26.5h4.2l3.4 6.7 3.4-6.7H24V39h-4v-5.6l-2.5 4.9h-1.9l-2.5-4.9V39z" fill="#fff"/><path d="M37.5 39V26.5h5.1c3.6 0 5.3 1.8 5.3 4.6 0 2.8-1.8 4.6-5.3 4.6h-1.2V39zm4-6.8h1.1c1 0 1.5-0.4 1.5-1.1 0-0.7-0.5-1.1-1.5-1.1h-1.1z" fill="#fff"/></svg>'
+          )}" alt="" width="42" height="42" />
+          <div>
+            <p class="status">Paid</p>
+            <h1>${escapeHtml(receipt.title)}</h1>
+            <p>${escapeHtml(receipt.buildingLabel)} • House ${escapeHtml(receipt.houseNumber)}</p>
+          </div>
+        </div>
+        <div class="total">
+          <p>Total paid</p>
+          <strong>${escapeHtml(formatCurrency(receipt.amountKsh))}</strong>
+        </div>
+      </div>
+      <dl>
+        <div><dt>Receipt No.</dt><dd>${escapeHtml(receipt.providerReference)}</dd></div>
+        <div><dt>Channel</dt><dd>${escapeHtml(receipt.provider)}</dd></div>
+        <div><dt>Payment For</dt><dd>${escapeHtml(receipt.subject)}</dd></div>
+        <div><dt>Bill Month</dt><dd>${escapeHtml(receipt.billingMonth)}</dd></div>
+        <div><dt>Posted At</dt><dd>${escapeHtml(formatDateTime(receipt.paidAt))}</dd></div>
+        <div><dt>Account</dt><dd>${escapeHtml(receipt.secondaryLabel)}</dd></div>
+      </dl>
+    </article>
+  </body>
+</html>`;
+}
+
+function downloadActiveReceipt() {
+  if (!state.activeReceipt) {
+    return;
+  }
+
+  const fileSafeReference = String(state.activeReceipt.providerReference ?? "receipt")
+    .replace(/[^A-Za-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+  const blob = new Blob([buildReceiptDownloadMarkup(state.activeReceipt)], {
+    type: "text/html;charset=utf-8"
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `captyn-housing-${state.activeReceipt.kind}-receipt-${fileSafeReference || "payment"}.html`;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function findLatestUtilityPayment(criteria) {
+  const sorted = [...(state.utilityPayments ?? [])].sort(
+    (a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime()
+  );
+  return (
+    sorted.find(
+      (payment) =>
+        criteria.providerReference &&
+        String(payment.providerReference ?? "").trim().toUpperCase() ===
+          String(criteria.providerReference).trim().toUpperCase()
+    ) ??
+    sorted.find(
+      (payment) =>
+        payment.utilityType === criteria.utilityType &&
+        payment.billingMonth === criteria.billingMonth &&
+        Math.round(Number(payment.amountKsh ?? 0)) === Math.round(Number(criteria.amountKsh ?? 0))
+    ) ?? null
+  );
+}
+
+function findLatestRentPayment(criteria) {
+  const sorted = [...(state.rentPayments ?? [])].sort(
+    (a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime()
+  );
+  return (
+    sorted.find(
+      (payment) =>
+        criteria.providerReference &&
+        String(payment.providerReference ?? "").trim().toUpperCase() ===
+          String(criteria.providerReference).trim().toUpperCase()
+    ) ??
+    sorted.find(
+      (payment) =>
+        payment.billingMonth === criteria.billingMonth &&
+        Math.round(Number(payment.amountKsh ?? 0)) === Math.round(Number(criteria.amountKsh ?? 0))
+    ) ?? null
+  );
+}
+
+function openReceiptForPayment(kind, paymentId) {
+  if (!paymentId) {
+    return;
+  }
+
+  if (kind === "utility") {
+    const payment = (state.utilityPayments ?? []).find((item) => item.id === paymentId);
+    if (payment) {
+      openPaymentReceiptModal(buildUtilityReceiptRecord(payment));
+    }
+    return;
+  }
+
+  const payment = (state.rentPayments ?? []).find((item) => item.id === paymentId);
+  if (payment) {
+    openPaymentReceiptModal(buildRentReceiptRecord(payment));
+  }
+}
+
+function clearUtilityMpesaProgress({ keepFlow = false } = {}) {
+  stopUtilityPaymentPolling();
+  state.utilityCheckoutRequestId = null;
+  state.utilityCheckoutType = null;
+  state.utilityPaymentPollAttempts = 0;
+  state.utilityPaymentBaseline = null;
+  utilityPaymentBtnEl.disabled = false;
+  if (!keepFlow && state.activeMpesaFlow?.scope === "utility") {
+    state.activeMpesaFlow = null;
+  }
+  syncUtilityPaymentProviderUi();
+}
+
+function clearRentMpesaProgress({ keepFlow = false } = {}) {
+  stopRentPaymentPolling();
+  state.rentCheckoutRequestId = null;
+  state.rentPaymentPollAttempts = 0;
+  state.rentPaymentBaseline = null;
+  rentPaymentBtnEl.disabled = false;
+  if (!keepFlow && state.activeMpesaFlow?.scope === "rent") {
+    state.activeMpesaFlow = null;
+  }
+  syncRentPaymentButtonUi();
+}
+
+function abandonActiveMpesaFlow() {
+  const flow = state.activeMpesaFlow;
+  if (!flow) {
+    return;
+  }
+
+  if (flow.scope === "utility") {
+    clearUtilityMpesaProgress();
+    utilityPaymentPhoneEl.focus();
+  } else {
+    clearRentMpesaProgress();
+    rentPaymentPhoneEl.focus();
+  }
+
+  closeMpesaStatusModal({ clearFlow: true });
+  showFeedback("Adjust the phone number or amount, then submit the payment again.");
+}
+
+async function checkActiveMpesaFlow() {
+  const flow = state.activeMpesaFlow;
+  if (!flow?.checkoutRequestId) {
+    return;
+  }
+
+  if (flow.scope === "utility") {
+    await pollUtilityMpesaPayment(flow.checkoutRequestId, flow.utilityType, { manual: true });
+    return;
+  }
+
+  await pollRentMpesaPayment(flow.checkoutRequestId, { manual: true });
+}
+
 function updateResidentNavDots() {
   const noticesDot = document.querySelector('[data-dot="notices"]');
   const supportDot = document.querySelector('[data-dot="support"]');
@@ -613,7 +1180,10 @@ function updateResidentNavDots() {
     noticesDot.classList.toggle("hidden", notificationsCount === 0);
   }
   if (supportDot instanceof HTMLElement) {
-    supportDot.classList.toggle("hidden", openReports === 0);
+    supportDot.classList.toggle(
+      "hidden",
+      !canResidentAccessSupport() || openReports === 0
+    );
   }
   if (paymentsDot instanceof HTMLElement) {
     paymentsDot.classList.toggle(
@@ -625,6 +1195,34 @@ function updateResidentNavDots() {
 
 function isPasswordChangeRequired() {
   return Boolean(state.residentSession?.mustChangePassword);
+}
+
+function getResidentVerificationStatus() {
+  return state.residentSession?.verificationStatus ?? "verified";
+}
+
+function isResidentPendingReview() {
+  return getResidentVerificationStatus() === "pending_review";
+}
+
+function canResidentAccessBilling() {
+  return Boolean(state.residentSession) && getResidentVerificationStatus() === "verified";
+}
+
+function canResidentAccessSupport() {
+  return Boolean(state.residentSession) && getResidentVerificationStatus() === "verified";
+}
+
+function getPendingReviewBillingMessage() {
+  return "Payments and balances unlock after landlord verification.";
+}
+
+function getPendingReviewSupportMessage() {
+  return "Support unlocks after landlord verification.";
+}
+
+function formatResidentVerificationLabel(status) {
+  return status === "pending_review" ? "Pending review" : "Verified";
 }
 
 function setSectionInteractive(sectionEl, enabled) {
@@ -652,6 +1250,20 @@ function setSectionInteractive(sectionEl, enabled) {
 }
 
 function applyPaymentAccessUi() {
+  if (state.residentSession && !canResidentAccessBilling()) {
+    if (rentPaymentClusterEl instanceof HTMLElement) {
+      rentPaymentClusterEl.classList.remove("hidden");
+    }
+    setSectionInteractive(rentPaymentSectionEl, false);
+    setSectionInteractive(utilityPaymentSectionEl, false);
+    rentPaymentStateEl.textContent = getPendingReviewBillingMessage();
+    utilityPaymentStateEl.textContent = getPendingReviewBillingMessage();
+    syncRentPaymentButtonUi();
+    syncUtilityPaymentProviderUi();
+    syncPaymentMessaging();
+    return;
+  }
+
   const rentEnabled = isRentPaymentEnabled();
   if (rentPaymentClusterEl instanceof HTMLElement) {
     rentPaymentClusterEl.classList.toggle("hidden", !rentEnabled);
@@ -662,6 +1274,7 @@ function applyPaymentAccessUi() {
     : state.paymentAccess?.rentConfigured === false
       ? "Rent payment will appear once rent is configured for your room."
       : "Rent payment is currently disabled by your landlord.";
+  syncRentPaymentButtonUi();
 
   const waterEnabled = isUtilityPaymentEnabled("water");
   const electricityEnabled = isUtilityPaymentEnabled("electricity");
@@ -721,14 +1334,39 @@ function saveResidentToken(token) {
 
 function showFeedback(message, type = "error") {
   feedbackBoxEl.textContent = message;
-  feedbackBoxEl.classList.remove("hidden", "error", "success");
+  feedbackBoxEl.classList.remove("hidden", "error", "success", "info");
   feedbackBoxEl.classList.add(type);
 }
 
 function clearFeedback() {
   feedbackBoxEl.textContent = "";
   feedbackBoxEl.classList.add("hidden");
-  feedbackBoxEl.classList.remove("error", "success");
+  feedbackBoxEl.classList.remove("error", "success", "info");
+}
+
+function focusInlineFeedback(element) {
+  if (!(element instanceof HTMLElement)) {
+    return;
+  }
+
+  element.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  element.focus({ preventScroll: true });
+}
+
+function showResidentAuthFeedback(message, type = "error", { reveal = false } = {}) {
+  residentAuthFeedbackEl.textContent = message;
+  residentAuthFeedbackEl.classList.remove("hidden", "error", "success", "info");
+  residentAuthFeedbackEl.classList.add(type);
+
+  if (reveal) {
+    focusInlineFeedback(residentAuthFeedbackEl);
+  }
+}
+
+function clearResidentAuthFeedback() {
+  residentAuthFeedbackEl.textContent = "";
+  residentAuthFeedbackEl.classList.add("hidden");
+  residentAuthFeedbackEl.classList.remove("error", "success", "info");
 }
 
 function formatSessionExpirySuffix(expiresAt) {
@@ -761,11 +1399,26 @@ function resetReportForm() {
   reportTitleEl.value = "";
   reportDetailsEl.value = "";
   reportTypeEl.value = "room_issue";
+  if (reportAttachmentsEl instanceof HTMLInputElement) {
+    reportAttachmentsEl.value = "";
+  }
+  renderSelectedImagePreviews(reportAttachmentPreviewEl, [], {
+    emptyText: "No photos selected."
+  });
   syncReportTypeUi();
 }
 
 function setActiveResidentView(nextView, { scroll = false } = {}) {
-  const targetView = VALID_RESIDENT_VIEWS.has(nextView) ? nextView : "overview";
+  const requestedView = VALID_RESIDENT_VIEWS.has(nextView) ? nextView : "overview";
+  const targetView =
+    requestedView === "support" && state.residentSession && !canResidentAccessSupport()
+      ? "overview"
+      : requestedView;
+
+  if (requestedView === "support" && targetView !== "support") {
+    showFeedback(getPendingReviewSupportMessage());
+  }
+
   state.activeResidentView = targetView;
 
   residentNavButtons.forEach((button) => {
@@ -832,7 +1485,9 @@ function renderOverviewSession() {
     ? `${building.name} (${building.id})`
     : session.buildingId;
   overviewHouseNumberEl.textContent = session.houseNumber;
-  overviewSessionExpiryEl.textContent = `Expires ${formatDateTime(session.expiresAt)}.`;
+  overviewSessionExpiryEl.textContent = `${formatResidentVerificationLabel(
+    session.verificationStatus
+  )} account • Expires ${formatDateTime(session.expiresAt)}.`;
 }
 
 function hasRequiredDomBindings() {
@@ -905,6 +1560,340 @@ async function requestJson(url, options = {}, { auth = false } = {}) {
   }
 
   return payload;
+}
+
+async function signResidentSupportUpload() {
+  const payload = await requestJson(
+    "/api/media/sign-upload",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        category: "support_evidence"
+      })
+    },
+    { auth: true }
+  );
+
+  return payload.data ?? {};
+}
+
+function renderPwaControls() {
+  const hasSession = Boolean(state.residentSession) && !isPasswordChangeRequired();
+  const pushSupported = supportsResidentPush();
+  const pushPermission = pushSupported ? Notification.permission : "unsupported";
+  const pushEnabled = Boolean(state.pushConfig?.enabled);
+  const hasSubscription = Boolean(state.pushSubscriptionEndpoint);
+  state.pwaInstalled = isStandaloneApp();
+
+  if (installAppStatusEl instanceof HTMLElement) {
+    installAppStatusEl.textContent = state.pwaInstalled
+      ? "App installed on this device."
+      : deferredInstallPrompt
+        ? "Install this portal for faster access on your phone."
+        : "Use your browser menu to add this portal to your home screen.";
+  }
+
+  if (installAppBtnEl instanceof HTMLButtonElement) {
+    installAppBtnEl.classList.toggle(
+      "hidden",
+      state.pwaInstalled || !deferredInstallPrompt
+    );
+  }
+
+  if (!(pushStatusTextEl instanceof HTMLElement)) {
+    return;
+  }
+
+  if (!hasSession) {
+    pushStatusTextEl.textContent =
+      "Sign in to enable browser alerts for rent, utility, and support updates.";
+  } else if (!pushSupported) {
+    pushStatusTextEl.textContent =
+      "This browser does not support installable alerts for this portal.";
+  } else if (!pushEnabled) {
+    pushStatusTextEl.textContent =
+      "Browser alerts are not configured on this server yet.";
+  } else if (pushPermission === "denied") {
+    pushStatusTextEl.textContent =
+      "Browser alerts are blocked. Re-enable them in your browser site settings.";
+  } else if (hasSubscription) {
+    pushStatusTextEl.textContent =
+      "Browser alerts are active for this resident account on this device.";
+  } else if (pushPermission === "granted") {
+    pushStatusTextEl.textContent =
+      "Browser permission granted. Finalizing device alerts now.";
+  } else {
+    pushStatusTextEl.textContent =
+      "Enable browser alerts for rent due, utility billing, and support updates.";
+  }
+
+  if (pushEnableBtnEl instanceof HTMLButtonElement) {
+    pushEnableBtnEl.disabled = !hasSession || !pushSupported || !pushEnabled;
+    pushEnableBtnEl.classList.toggle(
+      "hidden",
+      hasSubscription || pushPermission === "denied"
+    );
+  }
+
+  if (pushDisableBtnEl instanceof HTMLButtonElement) {
+    pushDisableBtnEl.disabled = !hasSession || !hasSubscription;
+    pushDisableBtnEl.classList.toggle("hidden", !hasSubscription);
+  }
+}
+
+async function ensureResidentServiceWorkerRegistration() {
+  if (!supportsResidentPwa()) {
+    return null;
+  }
+
+  if (!residentSwRegistrationPromise) {
+    residentSwRegistrationPromise = navigator.serviceWorker
+      .register(RESIDENT_SW_URL, { scope: "/" })
+      .catch((error) => {
+        residentSwRegistrationPromise = null;
+        console.error("Failed to register CAPTYN Housing service worker", error);
+        return null;
+      });
+  }
+
+  return residentSwRegistrationPromise;
+}
+
+async function getResidentPushSubscription() {
+  const registration = await ensureResidentServiceWorkerRegistration();
+  if (!registration || !supportsResidentPush()) {
+    return null;
+  }
+
+  return registration.pushManager.getSubscription();
+}
+
+async function loadResidentPushConfig() {
+  if (!state.residentSession || isPasswordChangeRequired()) {
+    state.pushConfig = null;
+    state.pushSubscriptionEndpoint = "";
+    renderPwaControls();
+    return null;
+  }
+
+  try {
+    const payload = await requestJson("/api/user/push/config", {}, { auth: true });
+    state.pushConfig = payload.data ?? null;
+  } catch (error) {
+    console.error("Failed to load resident push config", error);
+    state.pushConfig = { enabled: false, publicKey: null };
+  }
+
+  renderPwaControls();
+  return state.pushConfig;
+}
+
+async function registerResidentPushSubscription(subscription) {
+  await requestJson(
+    "/api/user/push-subscriptions",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(subscription.toJSON())
+    },
+    { auth: true }
+  );
+  state.pushSubscriptionEndpoint = subscription.endpoint;
+  renderPwaControls();
+}
+
+async function syncResidentPushState({ subscribeIfAllowed = false } = {}) {
+  renderPwaControls();
+
+  if (!supportsResidentPush()) {
+    state.pushSubscriptionEndpoint = "";
+    renderPwaControls();
+    return;
+  }
+
+  const subscription = await getResidentPushSubscription();
+  state.pushSubscriptionEndpoint = subscription?.endpoint ?? "";
+
+  if (!state.residentSession || isPasswordChangeRequired()) {
+    renderPwaControls();
+    return;
+  }
+
+  const config = state.pushConfig ?? (await loadResidentPushConfig());
+  if (!config?.enabled || !config.publicKey) {
+    renderPwaControls();
+    return;
+  }
+
+  if (!subscription && subscribeIfAllowed && Notification.permission === "granted") {
+    try {
+      const registration = await ensureResidentServiceWorkerRegistration();
+      if (!registration) {
+        return;
+      }
+
+      const created = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(config.publicKey)
+      });
+      await registerResidentPushSubscription(created);
+      state.pushSubscriptionEndpoint = created.endpoint;
+    } catch (error) {
+      console.error("Failed to create resident push subscription", error);
+    }
+
+    renderPwaControls();
+    return;
+  }
+
+  if (subscription && Notification.permission === "granted") {
+    try {
+      await registerResidentPushSubscription(subscription);
+    } catch (error) {
+      console.error("Failed to sync resident push subscription", error);
+    }
+  }
+
+  renderPwaControls();
+}
+
+async function enableResidentPushNotifications() {
+  clearFeedback();
+
+  if (!state.residentSession || isPasswordChangeRequired()) {
+    showFeedback("Sign in with an active resident session before enabling alerts.");
+    return;
+  }
+
+  if (!supportsResidentPush()) {
+    showFeedback("This browser does not support resident app alerts.");
+    return;
+  }
+
+  const config = state.pushConfig ?? (await loadResidentPushConfig());
+  if (!config?.enabled || !config.publicKey) {
+    showFeedback("Browser alerts are not configured on this server yet.");
+    return;
+  }
+
+  let permission = Notification.permission;
+  if (permission !== "granted") {
+    permission = await Notification.requestPermission();
+  }
+
+  if (permission !== "granted") {
+    renderPwaControls();
+    showFeedback("Browser alerts were not enabled.");
+    return;
+  }
+
+  const registration = await ensureResidentServiceWorkerRegistration();
+  if (!registration) {
+    showFeedback("Unable to prepare this device for browser alerts.");
+    return;
+  }
+
+  try {
+    const existing = await registration.pushManager.getSubscription();
+    const subscription =
+      existing ??
+      (await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(config.publicKey)
+      }));
+
+    await registerResidentPushSubscription(subscription);
+    showFeedback("Browser alerts enabled for this device.", "success");
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unable to enable browser alerts.";
+    showFeedback(message);
+  } finally {
+    renderPwaControls();
+  }
+}
+
+async function disableResidentPushNotifications({ silent = false } = {}) {
+  try {
+    const subscription = await getResidentPushSubscription();
+
+    if (subscription && state.residentSession) {
+      try {
+        await requestJson(
+          "/api/user/push-subscriptions",
+          {
+            method: "DELETE",
+            headers: {
+              "content-type": "application/json"
+            },
+            body: JSON.stringify({ endpoint: subscription.endpoint })
+          },
+          { auth: true }
+        );
+      } catch (error) {
+        console.error("Failed to delete resident push subscription", error);
+      }
+
+      await subscription.unsubscribe().catch(() => false);
+    }
+
+    state.pushSubscriptionEndpoint = "";
+    renderPwaControls();
+
+    if (!silent) {
+      showFeedback("Browser alerts turned off for this device.", "success");
+    }
+  } catch (error) {
+    if (!silent) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to disable browser alerts.";
+      showFeedback(message);
+    }
+  }
+}
+
+async function promptResidentInstall() {
+  if (!deferredInstallPrompt) {
+    renderPwaControls();
+    return;
+  }
+
+  const promptEvent = deferredInstallPrompt;
+  deferredInstallPrompt = null;
+
+  await promptEvent.prompt();
+  await promptEvent.userChoice.catch(() => null);
+  renderPwaControls();
+}
+
+function startResidentPwa() {
+  renderPwaControls();
+
+  if (supportsResidentPwa()) {
+    void ensureResidentServiceWorkerRegistration();
+  }
+
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    renderPwaControls();
+  });
+
+  window.addEventListener("appinstalled", () => {
+    deferredInstallPrompt = null;
+    state.pwaInstalled = true;
+    renderPwaControls();
+    showFeedback("Resident app installed on this device.", "success");
+  });
 }
 
 async function readSessionSnapshot(url) {
@@ -993,6 +1982,9 @@ function renderAuthBuildingLoading() {
   option.textContent = "Loading buildings...";
   authBuildingIdEl.append(option);
   authBuildingIdEl.disabled = true;
+  residentLoginBtnEl.disabled = true;
+  residentSignupBtnEl.disabled = true;
+  residentForgotBtnEl.disabled = true;
 }
 
 async function loadBuildingsWithRetry() {
@@ -1026,10 +2018,16 @@ function renderAuthBuildingOptions(buildings) {
     option.textContent = "No building available";
     authBuildingIdEl.append(option);
     authBuildingIdEl.disabled = true;
+    residentLoginBtnEl.disabled = true;
+    residentSignupBtnEl.disabled = true;
+    residentForgotBtnEl.disabled = true;
     return;
   }
 
   authBuildingIdEl.disabled = false;
+  residentLoginBtnEl.disabled = false;
+  residentSignupBtnEl.disabled = false;
+  residentForgotBtnEl.disabled = false;
 
   buildings.forEach((building) => {
     const option = document.createElement("option");
@@ -1041,6 +2039,16 @@ function renderAuthBuildingOptions(buildings) {
 
 function renderReports(reports) {
   reportsListEl.replaceChildren();
+
+  if (!canResidentAccessSupport() && state.residentSession) {
+    reportsCountEl.textContent = "Support locked";
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = getPendingReviewSupportMessage();
+    reportsListEl.append(empty);
+    return;
+  }
+
   reportsCountEl.textContent = `${reports.length} ticket${reports.length === 1 ? "" : "s"}`;
 
   if (reports.length === 0) {
@@ -1054,6 +2062,8 @@ function renderReports(reports) {
   reports.forEach((report) => {
     const fragment = reportItemTemplate.content.cloneNode(true);
     const chipEl = fragment.querySelector(".item-chip");
+    const detailsEl = fragment.querySelector(".item-details");
+    const guidanceEl = fragment.querySelector(".item-guidance");
 
     fragment.querySelector(".item-title").textContent = report.title;
     chipEl.textContent = report.status.replace("_", " ");
@@ -1066,20 +2076,27 @@ function renderReports(reports) {
     fragment.querySelector(".item-meta").textContent =
       `${report.queue} queue • ${formatDateTime(report.createdAt)} • ${slaLabel}`;
 
-    fragment.querySelector(".item-details").textContent = report.details;
+    detailsEl.textContent = report.details;
 
     const guidance =
       report.status === "resolved"
         ? "Resolved. If anything is still pending, open a new request."
         : "Your request is active and the team will update you as progress is made.";
-    fragment.querySelector(".item-guidance").textContent = guidance;
+    guidanceEl.textContent = guidance;
 
     const adminUpdate = report.resolutionNotes || report.adminNote;
     if (adminUpdate) {
       const update = document.createElement("p");
       update.className = "item-details";
       update.textContent = `Latest update: ${adminUpdate}`;
-      fragment.querySelector(".item-guidance").after(update);
+      guidanceEl.after(update);
+    }
+
+    const gallery = createUploadedImageGallery(report.evidenceAttachments, {
+      linkLabel: "Open support photo"
+    });
+    if (gallery) {
+      guidanceEl.after(gallery);
     }
 
     reportsListEl.append(fragment);
@@ -1171,23 +2188,28 @@ function renderRentDue(rentDue, fallbackMessage) {
   updateRentPaymentGuidance();
 }
 
-function renderUtilityBills(bills, meters = []) {
+function renderUtilityBills(bills, meters = [], fallbackMessage) {
   utilityBillsListEl.replaceChildren();
 
   if (!Array.isArray(bills) || bills.length === 0) {
-    const meterSummary = Array.isArray(meters)
-      ? meters
-          .map((item) => `${utilityLabel(item.utilityType)} meter ${item.meterNumber}`)
-          .join(" • ")
-      : "";
+    if (fallbackMessage) {
+      utilityBillsSummaryEl.textContent = fallbackMessage;
+    } else {
+      const meterSummary = Array.isArray(meters)
+        ? meters
+            .map((item) => `${utilityLabel(item.utilityType)} meter ${item.meterNumber}`)
+            .join(" • ")
+        : "";
 
-    utilityBillsSummaryEl.textContent = meterSummary
-      ? `No utility bills posted yet. ${meterSummary}`
-      : "No utility bills posted yet.";
+      utilityBillsSummaryEl.textContent = meterSummary
+        ? `No utility bills posted yet. ${meterSummary}`
+        : "No utility bills posted yet.";
+    }
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent =
-      "Water and electricity balances plus previous/current readings will appear once monthly bills are posted.";
+    empty.textContent = fallbackMessage
+      ? fallbackMessage
+      : "Water and electricity balances plus previous/current readings will appear once monthly bills are posted.";
     utilityBillsListEl.append(empty);
     updateUtilityPaymentGuidance();
     return;
@@ -1439,14 +2461,18 @@ function syncUtilityPaymentFormFromBalances() {
   updateUtilityPaymentGuidance();
 }
 
-function renderUtilityPayments(payments) {
+function renderUtilityPayments(payments, fallbackMessage) {
   utilityPaymentsListEl.replaceChildren();
 
   if (!Array.isArray(payments) || payments.length === 0) {
     utilityPaymentsCountEl.textContent = "0 payments";
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent = "No utility payments recorded yet.";
+    empty.textContent =
+      fallbackMessage ??
+      (state.residentSession && !canResidentAccessBilling()
+        ? getPendingReviewBillingMessage()
+        : "No utility payments recorded yet.");
     utilityPaymentsListEl.append(empty);
     return;
   }
@@ -1458,6 +2484,8 @@ function renderUtilityPayments(payments) {
   payments.slice(0, 8).forEach((payment) => {
     const card = document.createElement("article");
     card.className = "stack-item";
+    card.dataset.paymentKind = "utility";
+    card.dataset.paymentId = payment.id;
 
     const top = document.createElement("div");
     top.className = "stack-top";
@@ -1483,19 +2511,35 @@ function renderUtilityPayments(payments) {
         payment.paidAt
       )} • Receipt ${receiptRef}`;
 
-    card.append(top, details);
+    const actions = document.createElement("div");
+    actions.className = "action-row payment-history-actions";
+
+    const receiptBtn = document.createElement("button");
+    receiptBtn.type = "button";
+    receiptBtn.className = "receipt-open-btn";
+    receiptBtn.dataset.receiptKind = "utility";
+    receiptBtn.dataset.paymentId = payment.id;
+    receiptBtn.textContent = "View receipt";
+
+    actions.append(receiptBtn);
+
+    card.append(top, details, actions);
     utilityPaymentsListEl.append(card);
   });
 }
 
-function renderRentPayments(payments) {
+function renderRentPayments(payments, fallbackMessage) {
   rentPaymentsListEl.replaceChildren();
 
   if (!Array.isArray(payments) || payments.length === 0) {
     rentPaymentsCountEl.textContent = "0 payments";
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent = "No rent payments recorded yet.";
+    empty.textContent =
+      fallbackMessage ??
+      (state.residentSession && !canResidentAccessBilling()
+        ? getPendingReviewBillingMessage()
+        : "No rent payments recorded yet.");
     rentPaymentsListEl.append(empty);
     return;
   }
@@ -1507,6 +2551,8 @@ function renderRentPayments(payments) {
   payments.slice(0, 8).forEach((payment) => {
     const card = document.createElement("article");
     card.className = "stack-item";
+    card.dataset.paymentKind = "rent";
+    card.dataset.paymentId = payment.id;
 
     const top = document.createElement("div");
     top.className = "stack-top";
@@ -1526,12 +2572,26 @@ function renderRentPayments(payments) {
     const receiptRef = payment.providerReference ?? "pending";
     details.textContent = `${formatDateTime(payment.paidAt)} • Receipt ${receiptRef}`;
 
-    card.append(top, details);
+    const actions = document.createElement("div");
+    actions.className = "action-row payment-history-actions";
+
+    const receiptBtn = document.createElement("button");
+    receiptBtn.type = "button";
+    receiptBtn.className = "receipt-open-btn";
+    receiptBtn.dataset.receiptKind = "rent";
+    receiptBtn.dataset.paymentId = payment.id;
+    receiptBtn.textContent = "View receipt";
+
+    actions.append(receiptBtn);
+
+    card.append(top, details, actions);
     rentPaymentsListEl.append(card);
   });
 }
 
 function showSignedOutState() {
+  closeMpesaStatusModal({ clearFlow: true });
+  closePaymentReceiptModal();
   stopRentPaymentPolling();
   state.rentCheckoutRequestId = null;
   state.rentPaymentPollAttempts = 0;
@@ -1549,6 +2609,7 @@ function showSignedOutState() {
   residentLayoutEl.classList.add("hidden");
   residentPasswordNewEl.value = "";
   residentPasswordConfirmEl.value = "";
+  clearResidentAuthFeedback();
 
   renderReports([]);
   renderNotifications([]);
@@ -1556,11 +2617,14 @@ function showSignedOutState() {
   renderRentPayments([]);
   state.reports = [];
   state.notifications = [];
+  state.pushConfig = null;
+  state.pushSubscriptionEndpoint = "";
   state.rentDue = null;
   state.rentPayments = [];
   state.utilityPayments = [];
   state.rentPaymentBaseline = null;
   state.utilityPaymentBaseline = null;
+  state.activeReceipt = null;
   updateResidentNavDots();
   state.utilityBills = [];
   state.utilityMeters = [];
@@ -1576,6 +2640,7 @@ function showSignedOutState() {
   resetReportForm();
   syncUtilityPaymentFormFromBalances();
   applyPaymentAccessUi();
+  renderPwaControls();
 }
 
 function showSignedInState() {
@@ -1586,7 +2651,12 @@ function showSignedInState() {
   }
 
   const mustChangePassword = isPasswordChangeRequired();
-  authStateEl.textContent = mustChangePassword ? "Action required" : "Signed in";
+  clearResidentAuthFeedback();
+  authStateEl.textContent = mustChangePassword
+    ? "Action required"
+    : isResidentPendingReview()
+      ? "Pending review"
+      : "Signed in";
   residentAuthPanelEl.classList.add("hidden");
   residentSessionPanelEl.classList.remove("hidden");
   residentPasswordChangePanelEl.classList.toggle("hidden", !mustChangePassword);
@@ -1598,15 +2668,18 @@ function showSignedInState() {
     : session.buildingId;
   boundHouseNumberEl.value = session.houseNumber;
 
-  residentSessionSummaryEl.textContent = `House ${session.houseNumber} (${session.phoneMask}) • Expires ${formatDateTime(
-    session.expiresAt
-  )}`;
+  residentSessionSummaryEl.textContent = `House ${session.houseNumber} (${session.phoneMask}) • ${formatResidentVerificationLabel(
+    session.verificationStatus
+  )} • Expires ${formatDateTime(session.expiresAt)}`;
   renderOverviewSession();
   if (mustChangePassword) {
     setActiveResidentView("payments");
+  } else if (isResidentPendingReview()) {
+    setActiveResidentView("overview");
   } else {
     setActiveResidentView(state.activeResidentView);
   }
+  renderPwaControls();
 }
 
 async function loadResidentSession() {
@@ -1614,6 +2687,8 @@ async function loadResidentSession() {
     const payload = await requestJson("/api/auth/resident/session", {}, { auth: true });
     state.residentSession = payload.data;
     showSignedInState();
+    await loadResidentPushConfig();
+    await syncResidentPushState({ subscribeIfAllowed: true });
     return true;
   } catch (_error) {
     saveResidentToken("");
@@ -1666,13 +2741,13 @@ async function loadTenantData() {
     renderNotifications(state.notifications);
     renderRentDue(state.rentDue, rentPayload.message);
     state.rentPayments = rentPaymentsPayload.data ?? [];
-    renderRentPayments(state.rentPayments);
+    renderRentPayments(state.rentPayments, rentPaymentsPayload.message);
     state.utilityBills = utilitiesPayload.data ?? [];
     state.utilityMeters = utilitiesPayload.meters ?? [];
-    renderUtilityBills(state.utilityBills, state.utilityMeters);
+    renderUtilityBills(state.utilityBills, state.utilityMeters, utilitiesPayload.message);
     syncUtilityPaymentFormFromBalances();
     state.utilityPayments = utilityPaymentsPayload.data ?? [];
-    renderUtilityPayments(state.utilityPayments);
+    renderUtilityPayments(state.utilityPayments, utilityPaymentsPayload.message);
     syncPaymentMessaging();
     updateResidentNavDots();
   } catch (error) {
@@ -1699,12 +2774,31 @@ function buildResidentAuthPayload() {
   };
 }
 
+function buildResidentSignupPayload() {
+  const identityNumber = signupIdentityNumberEl.value.trim();
+  const occupationStatus = signupOccupationStatusEl.value.trim();
+  const occupationLabel = signupOccupationLabelEl.value.trim();
+
+  return {
+    ...buildResidentAuthPayload(),
+    identityType: identityNumber ? String(signupIdentityTypeEl.value || "").trim() || undefined : undefined,
+    identityNumber: identityNumber || undefined,
+    occupationStatus: occupationStatus || undefined,
+    occupationLabel: occupationLabel || undefined
+  };
+}
+
 async function requestResidentPasswordRecovery() {
   clearFeedback();
+  clearResidentAuthFeedback();
   const payload = buildResidentAuthPayload();
 
   if (!payload.buildingId || !payload.houseNumber || !payload.phoneNumber) {
-    showFeedback("Provide building, house number, and phone number first.");
+    showResidentAuthFeedback(
+      "Provide building, house number, and phone number first.",
+      "error",
+      { reveal: true }
+    );
     return;
   }
 
@@ -1723,17 +2817,18 @@ async function requestResidentPasswordRecovery() {
       })
     });
 
-    showFeedback(
+    showResidentAuthFeedback(
       response.message ??
         "Recovery request received. Management will share a temporary password after verification.",
-      "success"
+      "success",
+      { reveal: true }
     );
   } catch (error) {
     const message =
       error instanceof Error
         ? error.message
         : "Unable to submit password recovery request.";
-    showFeedback(message);
+    showResidentAuthFeedback(message, "error", { reveal: true });
   } finally {
     residentForgotBtnEl.disabled = false;
   }
@@ -1742,10 +2837,11 @@ async function requestResidentPasswordRecovery() {
 async function loginResident(event) {
   event.preventDefault();
   clearFeedback();
+  clearResidentAuthFeedback();
 
   const payload = buildResidentAuthPayload();
   if (!payload.password) {
-    showFeedback("Enter your password.");
+    showResidentAuthFeedback("Enter your password.", "error", { reveal: true });
     return;
   }
 
@@ -1779,13 +2875,18 @@ async function loginResident(event) {
         "success"
       );
     } else {
-      showFeedback("Signed in successfully.", "success");
+      showFeedback(
+        isResidentPendingReview()
+          ? "Signed in. Landlord verification is still pending. Payments and balances unlock after approval."
+          : "Signed in successfully.",
+        "success"
+      );
       await loadTenantData();
     }
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unable to sign in resident.";
-    showFeedback(message);
+    showResidentAuthFeedback(message, "error", { reveal: true });
   } finally {
     residentLoginBtnEl.disabled = false;
     residentSignupBtnEl.disabled = false;
@@ -1794,15 +2895,24 @@ async function loginResident(event) {
 
 async function signupResident() {
   clearFeedback();
+  clearResidentAuthFeedback();
 
   if (await syncAuthConflictState()) {
-    showFeedback("Another account is signed in. Sign out first, then create resident account.");
+    showResidentAuthFeedback(
+      "Another account is signed in. Sign out first, then create resident account.",
+      "error",
+      { reveal: true }
+    );
     return;
   }
 
-  const payload = buildResidentAuthPayload();
+  const payload = buildResidentSignupPayload();
   if (!payload.password || payload.password.length < 8) {
-    showFeedback("Set a password with at least 8 characters to request access.");
+    showResidentAuthFeedback(
+      "Set a password with at least 8 characters to request access.",
+      "error",
+      { reveal: true }
+    );
     return;
   }
 
@@ -1817,19 +2927,39 @@ async function signupResident() {
       },
       body: JSON.stringify(payload)
     });
+
+    const token = response.data?.token;
+    if (!token) {
+      throw new Error("Resident session token was not returned.");
+    }
+
+    saveResidentToken(token);
     authPasswordEl.value = "";
+    signupIdentityNumberEl.value = "";
+    signupOccupationStatusEl.value = "";
+    signupOccupationLabelEl.value = "";
+
+    const loaded = await loadResidentSession();
+    if (!loaded) {
+      throw new Error("Could not restore resident session.");
+    }
+
     showFeedback(
       response.message ??
-        "Access request submitted. Wait for landlord approval, then sign in with the same phone and password.",
+        "Access request submitted. You are signed in now and pending landlord review.",
       "success"
     );
+
+    if (!isPasswordChangeRequired()) {
+      await loadTenantData();
+    }
   } catch (error) {
     if (isAlreadySignedInError(error)) {
       await syncAuthConflictState();
     }
     const message =
       error instanceof Error ? error.message : "Unable to submit access request.";
-    showFeedback(message);
+    showResidentAuthFeedback(message, "error", { reveal: true });
   } finally {
     residentSignupBtnEl.disabled = false;
     residentLoginBtnEl.disabled = false;
@@ -1899,6 +3029,11 @@ async function submitTicket(event) {
   event.preventDefault();
   clearFeedback();
 
+  if (!canResidentAccessSupport()) {
+    showFeedback(getPendingReviewSupportMessage());
+    return;
+  }
+
   const reportType = String(reportTypeEl.value ?? "room_issue");
   const title = reportTitleEl.value.trim();
   const details = reportDetailsEl.value.trim();
@@ -1918,6 +3053,7 @@ async function submitTicket(event) {
   let incidentWindowStartAt;
   let incidentWindowEndAt;
   let caseReference;
+  let evidenceAttachments = [];
 
   if (reportType === "stolen_item") {
     stolenItem = reportStolenItemEl.value.trim();
@@ -1956,23 +3092,37 @@ async function submitTicket(event) {
     incidentWindowEndAt = endAt;
   }
 
-  const payload = {
-    type: reportType,
-    title,
-    details,
-    evidenceAttachments: []
-  };
-  if (reportType === "stolen_item") {
-    payload.stolenItem = stolenItem;
-    payload.incidentLocation = incidentLocation;
-    payload.incidentWindowStartAt = incidentWindowStartAt;
-    payload.incidentWindowEndAt = incidentWindowEndAt;
-    payload.caseReference = caseReference;
-  }
-
   submitBtnEl.disabled = true;
 
   try {
+    if (reportAttachmentsEl instanceof HTMLInputElement) {
+      const selectedFiles = validateImageFiles(reportAttachmentsEl.files, {
+        maxFiles: REPORT_ATTACHMENT_LIMIT,
+        maxSizeMb: 10
+      });
+
+      if (selectedFiles.length > 0) {
+        showFeedback("Uploading selected photos...", "info");
+        evidenceAttachments = await uploadImageFiles(selectedFiles, {
+          getSignature: signResidentSupportUpload
+        });
+      }
+    }
+
+    const payload = {
+      type: reportType,
+      title,
+      details,
+      evidenceAttachments
+    };
+    if (reportType === "stolen_item") {
+      payload.stolenItem = stolenItem;
+      payload.incidentLocation = incidentLocation;
+      payload.incidentWindowStartAt = incidentWindowStartAt;
+      payload.incidentWindowEndAt = incidentWindowEndAt;
+      payload.caseReference = caseReference;
+    }
+
     const response = await requestJson(
       "/api/user/reports",
       {
@@ -2013,13 +3163,25 @@ function syncUtilityPaymentProviderUi() {
     ? "Reference auto-filled from M-PESA receipt"
     : "QWE123";
   utilityPaymentBtnEl.textContent = isMpesa
-    ? "Pay Utility via M-PESA"
+    ? state.utilityCheckoutRequestId
+      ? "Resume M-PESA Check"
+      : "Pay Utility via M-PESA"
     : "Submit Utility Payment";
 
   if (utilityPaymentSectionEl.classList.contains("is-disabled")) {
     utilityPaymentPhoneEl.disabled = true;
     utilityPaymentReferenceEl.disabled = true;
     utilityPaymentBtnEl.disabled = true;
+  }
+}
+
+function syncRentPaymentButtonUi() {
+  rentPaymentBtnEl.textContent = state.rentCheckoutRequestId
+    ? "Resume M-PESA Check"
+    : "Pay with M-PESA";
+
+  if (rentPaymentSectionEl.classList.contains("is-disabled")) {
+    rentPaymentBtnEl.disabled = true;
   }
 }
 
@@ -2052,6 +3214,28 @@ async function submitUtilityMpesaPayment({ utilityType, billingMonth, amountKsh 
   state.utilityCheckoutRequestId = checkoutRequestId;
   state.utilityCheckoutType = utilityType;
   state.utilityPaymentPollAttempts = 0;
+  state.activeMpesaFlow = {
+    scope: "utility",
+    stage: "prompt",
+    utilityType,
+    billingMonth: response.data?.billingMonth ?? billingMonth ?? "Current bill",
+    amountKsh: response.data?.amountKsh ?? amountKsh,
+    phoneMask: response.data?.phoneMask ?? utilityPaymentPhoneEl.value.trim(),
+    checkoutRequestId,
+    title: "Confirm utility payment on your phone",
+    badge: "Waiting for PIN",
+    copy: `A Safaricom STK prompt has been sent to ${
+      response.data?.phoneMask ?? "your phone"
+    }. Enter your M-PESA PIN on your phone to complete this ${utilityLabel(
+      utilityType
+    ).toLowerCase()} payment.`,
+    note:
+      response.data?.customerMessage ??
+      "If the prompt delays, keep your phone unlocked and tap Check status below."
+  };
+  syncUtilityPaymentProviderUi();
+  state.mpesaStatusModalDismissed = false;
+  openMpesaStatusModal(null, { force: true });
 
   showFeedback(
     "M-PESA prompt sent for utility payment. Complete it on your phone.",
@@ -2073,7 +3257,22 @@ function scheduleUtilityPaymentPolling(checkoutRequestId, utilityType) {
   }, RENT_PAYMENT_POLL_INTERVAL_MS);
 }
 
-async function pollUtilityMpesaPayment(checkoutRequestId, utilityType) {
+async function pollUtilityMpesaPayment(checkoutRequestId, utilityType, { manual = false } = {}) {
+  openMpesaStatusModal(
+    {
+      stage: "checking",
+      title: "Checking utility payment",
+      badge: "Checking",
+      copy: `Checking whether your ${utilityLabel(
+        utilityType
+      ).toLowerCase()} payment has been approved in M-PESA.`,
+      note: manual
+        ? "This is a live status check. Keep your phone nearby if the prompt is still waiting for your PIN."
+        : "We are checking automatically while you approve the prompt on your phone."
+    },
+    { force: manual }
+  );
+
   try {
     const response = await requestJson(
       `/api/user/utilities/${encodeURIComponent(utilityType)}/payments/mpesa/verify`,
@@ -2089,60 +3288,136 @@ async function pollUtilityMpesaPayment(checkoutRequestId, utilityType) {
 
     const status = response.data?.status;
     if (status === "paid") {
-      stopUtilityPaymentPolling();
-      state.utilityCheckoutRequestId = null;
-      state.utilityCheckoutType = null;
-      state.utilityPaymentPollAttempts = 0;
+      clearUtilityMpesaProgress({ keepFlow: true });
       utilityPaymentAmountEl.value = "";
       utilityPaymentReferenceEl.value = "";
       utilityPaymentPhoneEl.value = "";
       const synced = await pollForUtilityReceipt();
+      const payment = synced
+        ? findLatestUtilityPayment({
+            utilityType,
+            billingMonth: response.data?.billingMonth,
+            amountKsh: response.data?.amountKsh,
+            providerReference: response.data?.receiptReference
+          })
+        : null;
+      openMpesaStatusModal({
+        stage: "success",
+        receiptReference: response.data?.receiptReference,
+        title: "Utility payment confirmed",
+        badge: "Paid",
+        copy: synced
+          ? "Your M-PESA utility payment has been confirmed and posted to your account."
+          : "Your M-PESA utility payment is confirmed. The receipt is still syncing."
+      });
       showFeedback(
         synced
           ? "M-PESA utility payment confirmed. Receipt posted to your account."
           : "M-PESA utility payment confirmed. Receipt will appear shortly.",
         "success"
       );
-      utilityPaymentBtnEl.disabled = false;
+      if (payment) {
+        openPaymentReceiptModal(buildUtilityReceiptRecord(payment));
+      }
       return;
     }
 
     if (status === "failed") {
-      stopUtilityPaymentPolling();
-      state.utilityCheckoutRequestId = null;
-      state.utilityCheckoutType = null;
-      state.utilityPaymentPollAttempts = 0;
-      state.utilityPaymentBaseline = null;
-      utilityPaymentBtnEl.disabled = false;
+      clearUtilityMpesaProgress({ keepFlow: true });
       const reason = response.data?.resultDesc ?? "The payment was not completed.";
+      openMpesaStatusModal({
+        stage: "failed",
+        title: "Utility payment was not completed",
+        badge: "Failed",
+        copy: reason,
+        note: "You do not need to refresh this page. Edit the amount or phone number and try again."
+      });
       showFeedback(`M-PESA utility payment failed: ${reason}`);
+      return;
+    }
+
+    if (status === "unknown") {
+      clearUtilityMpesaProgress({ keepFlow: true });
+      const synced = await pollForUtilityReceipt();
+      const payment = synced
+        ? findLatestUtilityPayment({
+            utilityType,
+            billingMonth: state.activeMpesaFlow?.billingMonth,
+            amountKsh: state.activeMpesaFlow?.amountKsh,
+            providerReference: state.activeMpesaFlow?.receiptReference
+          })
+        : null;
+      if (payment) {
+        openMpesaStatusModal({
+          stage: "success",
+          title: "Utility payment found in your ledger",
+          badge: "Paid",
+          copy: "This payment has already moved out of the active queue and into your history."
+        });
+        openPaymentReceiptModal(buildUtilityReceiptRecord(payment));
+        showFeedback("Utility payment found in your ledger.", "success");
+        return;
+      }
+      openMpesaStatusModal({
+        stage: "unknown",
+        title: "Review your utility ledger",
+        badge: "Review ledger",
+        copy:
+          response.message ??
+          "This payment request is no longer in the active queue. Review your payment history below or start again.",
+        note: "No page refresh is required."
+      });
+      showFeedback(
+        response.message ??
+          "Payment request is no longer in the queue. Review your utility history below."
+      );
       return;
     }
 
     state.utilityPaymentPollAttempts += 1;
     if (state.utilityPaymentPollAttempts >= RENT_PAYMENT_POLL_MAX_ATTEMPTS) {
       stopUtilityPaymentPolling();
-      state.utilityCheckoutRequestId = null;
-      state.utilityCheckoutType = null;
       state.utilityPaymentPollAttempts = 0;
-      state.utilityPaymentBaseline = null;
       utilityPaymentBtnEl.disabled = false;
+      syncUtilityPaymentProviderUi();
+      openMpesaStatusModal({
+        stage: "pending",
+        title: "Still waiting for utility approval",
+        badge: "Awaiting approval",
+        copy:
+          response.data?.resultDesc ??
+          "M-PESA has not confirmed this utility payment yet. Finish the PIN prompt on your phone, then tap Check status.",
+        note: "You can reopen this status box without refreshing the page."
+      });
       showFeedback(
-        "Still waiting for M-PESA utility confirmation. Refresh later to sync payment status."
+        "Still waiting for M-PESA utility confirmation. Reopen the status box or tap Check status again."
       );
       return;
     }
 
+    openMpesaStatusModal({
+      stage: "pending",
+      title: "Awaiting utility payment approval",
+      badge: "Awaiting approval",
+      copy:
+        response.data?.resultDesc ??
+        "Finish the M-PESA PIN prompt on your phone. We will keep checking automatically."
+    });
     scheduleUtilityPaymentPolling(checkoutRequestId, utilityType);
   } catch (error) {
     stopUtilityPaymentPolling();
-    state.utilityCheckoutRequestId = null;
-    state.utilityCheckoutType = null;
-    state.utilityPaymentPollAttempts = 0;
-    state.utilityPaymentBaseline = null;
-    utilityPaymentBtnEl.disabled = false;
     const message =
       error instanceof Error ? error.message : "Unable to verify M-PESA utility payment.";
+    state.utilityPaymentPollAttempts = 0;
+    utilityPaymentBtnEl.disabled = false;
+    syncUtilityPaymentProviderUi();
+    openMpesaStatusModal({
+      stage: "error",
+      title: "Could not confirm utility payment",
+      badge: "Could not verify",
+      copy: message,
+      note: "Tap Check status again. You do not need to refresh the page."
+    });
     showFeedback(message);
   }
 }
@@ -2160,6 +3435,16 @@ async function submitUtilityPayment(event) {
   const billingMonth = getSelectedUtilityBillMonth(utilityType);
   const amountKsh = Number(utilityPaymentAmountEl.value);
   const provider = String(utilityPaymentProviderEl.value ?? "mpesa");
+
+  if (
+    provider === "mpesa" &&
+    state.utilityCheckoutRequestId &&
+    state.utilityCheckoutType === utilityType
+  ) {
+    state.mpesaStatusModalDismissed = false;
+    openMpesaStatusModal(null, { force: true });
+    return;
+  }
 
   if (!Number.isFinite(amountKsh) || amountKsh <= 0) {
     showFeedback("Provide a valid utility payment amount.");
@@ -2226,7 +3511,20 @@ function scheduleRentPaymentPolling(checkoutRequestId) {
   }, RENT_PAYMENT_POLL_INTERVAL_MS);
 }
 
-async function pollRentMpesaPayment(checkoutRequestId) {
+async function pollRentMpesaPayment(checkoutRequestId, { manual = false } = {}) {
+  openMpesaStatusModal(
+    {
+      stage: "checking",
+      title: "Checking rent payment",
+      badge: "Checking",
+      copy: "Checking whether your rent payment has been approved in M-PESA.",
+      note: manual
+        ? "This is a live status check. Keep your phone nearby if the prompt still needs your PIN."
+        : "We are checking automatically while you approve the prompt on your phone."
+    },
+    { force: manual }
+  );
+
   try {
     const response = await requestJson(
       "/api/user/rent/payments/mpesa/verify",
@@ -2242,70 +3540,134 @@ async function pollRentMpesaPayment(checkoutRequestId) {
 
     const status = response.data?.status;
     if (status === "paid") {
-      stopRentPaymentPolling();
-      state.rentCheckoutRequestId = null;
-      state.rentPaymentPollAttempts = 0;
+      clearRentMpesaProgress({ keepFlow: true });
       rentPaymentAmountEl.value = "";
       rentPaymentPhoneEl.value = "";
       const synced = await pollForRentReceipt();
+      const payment = synced
+        ? findLatestRentPayment({
+            billingMonth: response.data?.billingMonth,
+            amountKsh: response.data?.amountKsh,
+            providerReference: state.activeMpesaFlow?.receiptReference
+          })
+        : null;
+      openMpesaStatusModal({
+        stage: "success",
+        title: "Rent payment confirmed",
+        badge: "Paid",
+        copy: synced
+          ? "Your M-PESA rent payment has been confirmed and posted to your ledger."
+          : "Your M-PESA rent payment is confirmed. The receipt is still syncing."
+      });
       showFeedback(
         synced
           ? "M-PESA payment confirmed. Receipt posted to your account."
           : "M-PESA payment confirmed. Receipt will appear shortly.",
         "success"
       );
-      rentPaymentBtnEl.disabled = false;
+      if (payment) {
+        openPaymentReceiptModal(buildRentReceiptRecord(payment));
+      }
       return;
     }
 
     if (status === "failed") {
-      stopRentPaymentPolling();
-      state.rentCheckoutRequestId = null;
-      state.rentPaymentPollAttempts = 0;
-      state.rentPaymentBaseline = null;
+      clearRentMpesaProgress({ keepFlow: true });
       const reason = response.data?.resultDesc ?? "Payment was not completed.";
+      openMpesaStatusModal({
+        stage: "failed",
+        title: "Rent payment was not completed",
+        badge: "Failed",
+        copy: reason,
+        note: "You do not need to refresh this page. Edit the amount or phone number and try again."
+      });
       showFeedback(`M-PESA payment failed: ${reason}`);
-      rentPaymentBtnEl.disabled = false;
       return;
     }
 
     if (status === "unknown") {
-      stopRentPaymentPolling();
-      state.rentCheckoutRequestId = null;
-      state.rentPaymentPollAttempts = 0;
-      state.rentPaymentBaseline = null;
+      clearRentMpesaProgress({ keepFlow: true });
+      const synced = await pollForRentReceipt();
+      const payment = synced
+        ? findLatestRentPayment({
+            billingMonth: state.activeMpesaFlow?.billingMonth,
+            amountKsh: state.activeMpesaFlow?.amountKsh,
+            providerReference: state.activeMpesaFlow?.receiptReference
+          })
+        : null;
+      if (payment) {
+        openMpesaStatusModal({
+          stage: "success",
+          title: "Rent payment found in your ledger",
+          badge: "Paid",
+          copy: "This payment has already moved out of the active queue and into your history."
+        });
+        openPaymentReceiptModal(buildRentReceiptRecord(payment));
+        showFeedback("Rent payment found in your ledger.", "success");
+        return;
+      }
+      openMpesaStatusModal({
+        stage: "unknown",
+        title: "Review your rent ledger",
+        badge: "Review ledger",
+        copy:
+          response.message ??
+          "This payment request is no longer in the active queue. Review your payment history below or start again.",
+        note: "No page refresh is required."
+      });
       showFeedback(
         response.message ??
-          "Payment update is no longer in queue. Refreshing rent ledger.",
-        "success"
+          "Payment request is no longer in the queue. Review your rent history below."
       );
-      await loadTenantData();
-      rentPaymentBtnEl.disabled = false;
       return;
     }
 
     state.rentPaymentPollAttempts += 1;
     if (state.rentPaymentPollAttempts >= RENT_PAYMENT_POLL_MAX_ATTEMPTS) {
       stopRentPaymentPolling();
-      state.rentPaymentBaseline = null;
+      state.rentPaymentPollAttempts = 0;
+      rentPaymentBtnEl.disabled = false;
+      syncRentPaymentButtonUi();
+      openMpesaStatusModal({
+        stage: "pending",
+        title: "Still waiting for rent approval",
+        badge: "Awaiting approval",
+        copy:
+          response.data?.resultDesc ??
+          "M-PESA has not confirmed this rent payment yet. Finish the PIN prompt on your phone, then tap Check status.",
+        note: "You can reopen this status box without refreshing the page."
+      });
       const note =
         response.data?.resultDesc ??
         "Still waiting for confirmation. Check your M-PESA prompt and retry status.";
       showFeedback(note);
-      rentPaymentBtnEl.disabled = false;
       return;
     }
 
+    openMpesaStatusModal({
+      stage: "pending",
+      title: "Awaiting rent payment approval",
+      badge: "Awaiting approval",
+      copy:
+        response.data?.resultDesc ??
+        "Finish the M-PESA PIN prompt on your phone. We will keep checking automatically."
+    });
     scheduleRentPaymentPolling(checkoutRequestId);
   } catch (error) {
     stopRentPaymentPolling();
-    state.rentCheckoutRequestId = null;
-    state.rentPaymentPollAttempts = 0;
-    state.rentPaymentBaseline = null;
     const message =
       error instanceof Error ? error.message : "Unable to verify M-PESA payment.";
-    showFeedback(message);
+    state.rentPaymentPollAttempts = 0;
     rentPaymentBtnEl.disabled = false;
+    syncRentPaymentButtonUi();
+    openMpesaStatusModal({
+      stage: "error",
+      title: "Could not confirm rent payment",
+      badge: "Could not verify",
+      copy: message,
+      note: "Tap Check status again. You do not need to refresh the page."
+    });
+    showFeedback(message);
   }
 }
 
@@ -2315,6 +3677,12 @@ async function submitRentPayment(event) {
 
   if (!isRentPaymentEnabled()) {
     showFeedback("Rent payments are disabled by your landlord for this building.");
+    return;
+  }
+
+  if (state.rentCheckoutRequestId) {
+    state.mpesaStatusModalDismissed = false;
+    openMpesaStatusModal(null, { force: true });
     return;
   }
 
@@ -2355,6 +3723,25 @@ async function submitRentPayment(event) {
     stopRentPaymentPolling();
     state.rentCheckoutRequestId = checkoutRequestId;
     state.rentPaymentPollAttempts = 0;
+    state.activeMpesaFlow = {
+      scope: "rent",
+      stage: "prompt",
+      billingMonth: response.data?.billingMonth ?? "Current rent month",
+      amountKsh: response.data?.amountKsh ?? Math.round(amountKsh),
+      phoneMask: response.data?.phoneMask ?? phoneNumber,
+      checkoutRequestId,
+      title: "Confirm rent payment on your phone",
+      badge: "Waiting for PIN",
+      copy: `A Safaricom STK prompt has been sent to ${
+        response.data?.phoneMask ?? "your phone"
+      }. Enter your M-PESA PIN on your phone to complete this rent payment.`,
+      note:
+        response.data?.customerMessage ??
+        "If the prompt delays, keep your phone unlocked and tap Check status below."
+    };
+    syncRentPaymentButtonUi();
+    state.mpesaStatusModalDismissed = false;
+    openMpesaStatusModal(null, { force: true });
 
     showFeedback(
       "M-PESA prompt sent. Complete it on your phone to post rent payment.",
@@ -2373,6 +3760,8 @@ async function submitRentPayment(event) {
 
 async function signOutResident() {
   clearFeedback();
+
+  await disableResidentPushNotifications({ silent: true });
 
   try {
     await requestJson(
@@ -2402,6 +3791,7 @@ async function signOutResident() {
 
 async function boot() {
   clearFeedback();
+  document.body.classList.add("app-loading");
   apiStatusEl.textContent = "Checking...";
   renderAuthBuildingLoading();
 
@@ -2449,10 +3839,17 @@ async function boot() {
     const message =
       error instanceof Error ? error.message : "Failed to initialize session.";
     showFeedback(message);
+  } finally {
+    document.body.classList.remove("app-loading");
+    if (!Array.isArray(state.buildings) || state.buildings.length === 0) {
+      residentForgotBtnEl.disabled = false;
+    }
   }
 }
 
 function startResidentPortal() {
+  startResidentPwa();
+
   residentNavButtons.forEach((button) => {
     button.addEventListener("click", () => {
       const target = button.dataset.residentView;
@@ -2475,6 +3872,24 @@ function startResidentPortal() {
   if (openNoticesViewBtnEl) {
     openNoticesViewBtnEl.addEventListener("click", () => {
       setActiveResidentView("notices", { scroll: true });
+    });
+  }
+
+  if (installAppBtnEl instanceof HTMLButtonElement) {
+    installAppBtnEl.addEventListener("click", () => {
+      void promptResidentInstall();
+    });
+  }
+
+  if (pushEnableBtnEl instanceof HTMLButtonElement) {
+    pushEnableBtnEl.addEventListener("click", () => {
+      void enableResidentPushNotifications();
+    });
+  }
+
+  if (pushDisableBtnEl instanceof HTMLButtonElement) {
+    pushDisableBtnEl.addEventListener("click", () => {
+      void disableResidentPushNotifications();
     });
   }
 
@@ -2504,6 +3919,8 @@ function startResidentPortal() {
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         setUserMenuOpen(false);
+        closeMpesaStatusModal();
+        closePaymentReceiptModal();
       }
     });
   }
@@ -2530,6 +3947,28 @@ function startResidentPortal() {
 
   reportTypeEl.addEventListener("change", () => {
     syncReportTypeUi();
+  });
+
+  reportAttachmentsEl?.addEventListener("change", () => {
+    try {
+      const selectedFiles = validateImageFiles(reportAttachmentsEl.files, {
+        maxFiles: REPORT_ATTACHMENT_LIMIT,
+        maxSizeMb: 10
+      });
+      renderSelectedImagePreviews(reportAttachmentPreviewEl, selectedFiles, {
+        emptyText: "No photos selected."
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to preview selected photos.";
+      showFeedback(message);
+      if (reportAttachmentsEl instanceof HTMLInputElement) {
+        reportAttachmentsEl.value = "";
+      }
+      renderSelectedImagePreviews(reportAttachmentPreviewEl, [], {
+        emptyText: "No photos selected."
+      });
+    }
   });
 
   rentPaymentFormEl.addEventListener("submit", (event) => {
@@ -2665,6 +4104,74 @@ function startResidentPortal() {
     syncUtilityPaymentProviderUi();
   });
 
+  utilityPaymentsListEl.addEventListener("click", (event) => {
+    const trigger = event.target;
+    if (!(trigger instanceof HTMLElement)) {
+      return;
+    }
+
+    const receiptBtn = trigger.closest("button[data-receipt-kind][data-payment-id]");
+    if (!(receiptBtn instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    openReceiptForPayment(receiptBtn.dataset.receiptKind, receiptBtn.dataset.paymentId);
+  });
+
+  rentPaymentsListEl.addEventListener("click", (event) => {
+    const trigger = event.target;
+    if (!(trigger instanceof HTMLElement)) {
+      return;
+    }
+
+    const receiptBtn = trigger.closest("button[data-receipt-kind][data-payment-id]");
+    if (!(receiptBtn instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    openReceiptForPayment(receiptBtn.dataset.receiptKind, receiptBtn.dataset.paymentId);
+  });
+
+  mpesaStatusBackdropEl.addEventListener("click", () => {
+    closeMpesaStatusModal();
+  });
+
+  mpesaStatusCloseEl.addEventListener("click", () => {
+    closeMpesaStatusModal({
+      clearFlow: ["failed", "success", "unknown"].includes(state.activeMpesaFlow?.stage ?? "")
+    });
+  });
+
+  mpesaStatusCloseBtnEl.addEventListener("click", () => {
+    closeMpesaStatusModal({
+      clearFlow: ["failed", "success", "unknown"].includes(state.activeMpesaFlow?.stage ?? "")
+    });
+  });
+
+  mpesaStatusCheckBtnEl.addEventListener("click", () => {
+    void checkActiveMpesaFlow();
+  });
+
+  mpesaStatusRetryBtnEl.addEventListener("click", () => {
+    abandonActiveMpesaFlow();
+  });
+
+  paymentReceiptBackdropEl.addEventListener("click", () => {
+    closePaymentReceiptModal();
+  });
+
+  paymentReceiptCloseEl.addEventListener("click", () => {
+    closePaymentReceiptModal();
+  });
+
+  paymentReceiptDismissBtnEl.addEventListener("click", () => {
+    closePaymentReceiptModal();
+  });
+
+  paymentReceiptSaveBtnEl.addEventListener("click", () => {
+    downloadActiveReceipt();
+  });
+
   refreshAllBtnEl.addEventListener("click", () => {
     void loadTenantData();
   });
@@ -2674,6 +4181,7 @@ function startResidentPortal() {
   });
 
   syncReportTypeUi();
+  syncRentPaymentButtonUi();
   syncUtilityPaymentProviderUi();
   syncPaymentMessaging();
   syncUtilityPaymentFormFromBalances();

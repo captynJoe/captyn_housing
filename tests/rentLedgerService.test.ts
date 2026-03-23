@@ -90,6 +90,92 @@ test("keeps unmatched callback as pending until building-scoped rent profile exi
   assert.equal(snapshot.payments[0].buildingId, BUILDING_A);
 });
 
+test("records admin rent payments with provider metadata against an existing profile", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.upsertRentDue(BUILDING_A, "M-2", {
+    monthlyRentKsh: 12000,
+    balanceKsh: 6000,
+    dueDate
+  });
+
+  const outcome = service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "m-2",
+    amountKsh: 1500,
+    provider: "cash",
+    providerReference: "cash-001",
+    paidAt: dueDate
+  });
+
+  assert.equal(outcome.applied, true);
+  assert.ok(outcome.snapshot);
+  assert.equal(outcome.snapshot.balanceKsh, 4500);
+  assert.equal(outcome.event.provider, "cash");
+  assert.equal(outcome.event.providerReference, "CASH-001");
+  assert.equal(service.listPayments({ buildingId: BUILDING_A, houseNumber: "M-2" })[0].provider, "cash");
+});
+
+test("keeps unmatched admin payment pending until rent profile exists", () => {
+  const service = new RentLedgerService();
+
+  const pending = service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "P-7",
+    amountKsh: 2000,
+    provider: "bank",
+    providerReference: "bank-777"
+  });
+
+  assert.equal(pending.applied, false);
+  assert.equal(pending.event.provider, "bank");
+
+  const dueDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+  const snapshot = service.upsertRentDue(BUILDING_A, "P-7", {
+    monthlyRentKsh: 9000,
+    balanceKsh: 9000,
+    dueDate
+  });
+
+  assert.equal(snapshot.balanceKsh, 7000);
+  assert.equal(snapshot.payments.length, 1);
+  assert.equal(snapshot.payments[0].provider, "bank");
+  assert.equal(snapshot.payments[0].providerReference, "BANK-777");
+});
+
+test("does not add next month rent before the rollover window opens", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.upsertRentDue(BUILDING_A, "R-1", {
+    monthlyRentKsh: 350,
+    balanceKsh: 350,
+    dueDate
+  });
+
+  const snapshot = service.getRentDue(BUILDING_A, "R-1");
+  assert.ok(snapshot);
+  assert.equal(snapshot.balanceKsh, 350);
+  assert.equal(snapshot.dueDate, dueDate);
+});
+
+test("rolls a cleared room into the next month with one month rent, not two", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.upsertRentDue(BUILDING_A, "R-2", {
+    monthlyRentKsh: 350,
+    balanceKsh: 0,
+    dueDate
+  });
+
+  const snapshot = service.getRentDue(BUILDING_A, "R-2");
+  assert.ok(snapshot);
+  assert.equal(snapshot.balanceKsh, 350);
+  assert.notEqual(snapshot.dueDate, dueDate);
+});
+
 test("generates D-3 reminder once per due cycle per building and house", () => {
   const service = new RentLedgerService();
 

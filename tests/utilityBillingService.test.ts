@@ -227,3 +227,189 @@ test("keeps legacy house-only utility records visible after building scoping", (
   assert.equal(bills.length, 1);
   assert.equal(bills[0].amountKsh, 300);
 });
+
+test("only exposes utility balances during the 7-day visibility window and after overdue", () => {
+  const service = new UtilityBillingService();
+  const overdueDueDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  const visibleSoonDueDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+  const hiddenFutureDueDate = new Date(Date.now() + 12 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.createBill("water", BUILDING_B, "44", {
+    billingMonth: "2026-02",
+    fixedChargeKsh: 350,
+    dueDate: overdueDueDate
+  });
+
+  service.createBill("water", BUILDING_B, "44", {
+    billingMonth: "2026-03",
+    fixedChargeKsh: 350,
+    dueDate: visibleSoonDueDate
+  });
+
+  service.createBill("water", BUILDING_B, "44", {
+    billingMonth: "2026-04",
+    fixedChargeKsh: 350,
+    dueDate: hiddenFutureDueDate
+  });
+
+  const summary = service.listVisibleRoomBalances(BUILDING_B);
+  assert.equal(summary.length, 1);
+  assert.equal(summary[0].houseNumber, "44");
+  assert.equal(summary[0].arrearsKsh, 350);
+  assert.equal(summary[0].currentDueKsh, 350);
+  assert.equal(summary[0].totalOpenKsh, 700);
+  assert.equal(summary[0].nextDueDate, overdueDueDate);
+});
+
+test("preserves a posted room-level combined charge below the building monthly default", () => {
+  const service = new UtilityBillingService();
+  const createdAt = new Date().toISOString();
+  const dueDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.setCombinedChargeBuildingIds([BUILDING_B]);
+  service.setCombinedChargeMonthlyAmounts([
+    {
+      buildingId: BUILDING_B,
+      billingMonth: "2026-03",
+      amountKsh: 350
+    }
+  ]);
+
+  service.importState({
+    meters: [],
+    bills: [
+      {
+        id: "combined-water-26",
+        utilityType: "water",
+        buildingId: BUILDING_B,
+        houseNumber: "26",
+        billingMonth: "2026-03",
+        meterNumber: "NO-METER",
+        previousReading: 0,
+        currentReading: 0,
+        unitsConsumed: 0,
+        ratePerUnitKsh: 0,
+        fixedChargeKsh: 300,
+        amountKsh: 300,
+        balanceKsh: 300,
+        dueDate,
+        note: "Combined utility fee (water+electricity) for 2026-03.",
+        createdAt,
+        updatedAt: createdAt,
+        payments: [
+          {
+            id: "pay-26",
+            utilityType: "water",
+            buildingId: BUILDING_B,
+            houseNumber: "26",
+            billingMonth: "2026-03",
+            provider: "cash",
+            providerReference: "H26-CASH-100",
+            amountKsh: 100,
+            paidAt: createdAt,
+            createdAt
+          }
+        ],
+        status: "due_soon",
+        daysToDue: 2
+      },
+      {
+        id: "combined-electricity-26",
+        utilityType: "electricity",
+        buildingId: BUILDING_B,
+        houseNumber: "26",
+        billingMonth: "2026-03",
+        meterNumber: "NO-METER",
+        previousReading: 0,
+        currentReading: 0,
+        unitsConsumed: 0,
+        ratePerUnitKsh: 0,
+        fixedChargeKsh: 300,
+        amountKsh: 300,
+        balanceKsh: 300,
+        dueDate,
+        note: "Combined utility fee (water+electricity) for 2026-03.",
+        createdAt,
+        updatedAt: createdAt,
+        payments: [],
+        status: "due_soon",
+        daysToDue: 2
+      }
+    ]
+  } as any);
+
+  const waterBills = service.listBillsForHouse(BUILDING_B, "26", "water", 12);
+  assert.equal(waterBills.length, 1);
+  assert.equal(waterBills[0].amountKsh, 300);
+  assert.equal(waterBills[0].balanceKsh, 200);
+});
+
+test("uses the configured building-month combined charge for empty baseline rows", () => {
+  const service = new UtilityBillingService();
+  const createdAt = new Date().toISOString();
+  const dueDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.setCombinedChargeBuildingIds([BUILDING_B]);
+  service.setCombinedChargeMonthlyAmounts([
+    {
+      buildingId: BUILDING_B,
+      billingMonth: "2026-03",
+      amountKsh: 350
+    }
+  ]);
+
+  service.importState({
+    meters: [],
+    bills: [
+      {
+        id: "baseline-water-27",
+        utilityType: "water",
+        buildingId: BUILDING_B,
+        houseNumber: "27",
+        billingMonth: "2026-03",
+        meterNumber: "NO-METER",
+        previousReading: 0,
+        currentReading: 0,
+        unitsConsumed: 0,
+        ratePerUnitKsh: 0,
+        fixedChargeKsh: 0,
+        amountKsh: 0,
+        balanceKsh: 0,
+        dueDate,
+        note: "Baseline reading imported during cutoff.",
+        createdAt,
+        updatedAt: createdAt,
+        payments: [],
+        status: "clear",
+        daysToDue: 2
+      },
+      {
+        id: "baseline-electricity-27",
+        utilityType: "electricity",
+        buildingId: BUILDING_B,
+        houseNumber: "27",
+        billingMonth: "2026-03",
+        meterNumber: "NO-METER",
+        previousReading: 0,
+        currentReading: 0,
+        unitsConsumed: 0,
+        ratePerUnitKsh: 0,
+        fixedChargeKsh: 0,
+        amountKsh: 0,
+        balanceKsh: 0,
+        dueDate,
+        note: "Baseline reading imported during cutoff.",
+        createdAt,
+        updatedAt: createdAt,
+        payments: [],
+        status: "clear",
+        daysToDue: 2
+      }
+    ]
+  } as any);
+
+  const waterBills = service.listBillsForHouse(BUILDING_B, "27", "water", 12);
+  assert.equal(waterBills.length, 1);
+  assert.equal(waterBills[0].amountKsh, 350);
+  assert.equal(waterBills[0].balanceKsh, 350);
+});

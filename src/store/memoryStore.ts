@@ -3,6 +3,7 @@ import type { Building } from "../domain/types.js";
 import type { BuildingRepository } from "../repositories/buildingRepository.js";
 import type {
   CreateBuildingInput,
+  BuildingMediaUpdateInput,
   LandlordAddBuildingHousesInput,
   CreateIncidentInput,
   CreateVacancySnapshotInput,
@@ -55,6 +56,23 @@ export class MemoryStore implements BuildingRepository {
     };
 
     this.buildings.set(id, building);
+    return building;
+  }
+
+  async updateBuildingMedia(
+    buildingId: string,
+    input: BuildingMediaUpdateInput
+  ): Promise<Building | undefined> {
+    const building = this.buildings.get(buildingId);
+    if (!building) {
+      return undefined;
+    }
+
+    building.media = {
+      ...building.media,
+      imageUrls: [...input.imageUrls]
+    };
+    building.updatedAt = new Date().toISOString();
     return building;
   }
 

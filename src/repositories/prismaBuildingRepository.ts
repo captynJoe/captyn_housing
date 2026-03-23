@@ -9,6 +9,7 @@ import type {
 import type { BuildingRepository } from "./buildingRepository.js";
 import type {
   CreateBuildingInput,
+  BuildingMediaUpdateInput,
   LandlordAddBuildingHousesInput,
   CreateIncidentInput,
   CreateVacancySnapshotInput,
@@ -177,6 +178,40 @@ export class PrismaBuildingRepository implements BuildingRepository {
         houseUnits: { orderBy: { houseNumber: "asc" } }
       }
     });
+
+    return mapBuilding(building);
+  }
+
+  async updateBuildingMedia(
+    buildingId: string,
+    input: BuildingMediaUpdateInput
+  ): Promise<Building | undefined> {
+    const building = await this.prisma.building.update({
+      where: { id: buildingId },
+      data: {
+        mediaImageUrls: input.imageUrls
+      },
+      include: {
+        incidents: { orderBy: { createdAt: "desc" } },
+        maintenanceRecords: { orderBy: { createdAt: "desc" } },
+        vacancySnapshots: { orderBy: { movedOutAt: "desc" } },
+        houseUnits: { orderBy: { houseNumber: "asc" } }
+      }
+    }).catch((error: unknown) => {
+      if (
+        typeof error === "object" &&
+        error &&
+        "code" in error &&
+        error.code === "P2025"
+      ) {
+        return undefined;
+      }
+      throw error;
+    });
+
+    if (!building) {
+      return undefined;
+    }
 
     return mapBuilding(building);
   }

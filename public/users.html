@@ -10,9 +10,14 @@
       href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Outfit:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/users.css?v=20260315a" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0f7b76" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="CAPTYN Housing" />
+    <link rel="icon" href="/icons/housing-app.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/users.css?v=20260323b" />
   </head>
-  <body>
+  <body class="app-loading">
     <div class="ambient" aria-hidden="true"></div>
     <main class="shell">
       <header class="topbar">
@@ -42,7 +47,7 @@
               </div>
               <p id="resident-session-summary" class="item-details"></p>
             </section>
-            <a class="user-panel-link" href="/user">Open user page</a>
+            <a class="user-panel-link" href="/user/">Open user page</a>
           </div>
         </div>
       </header>
@@ -79,7 +84,9 @@
       <section id="resident-auth-panel" class="panel-card auth-stack">
         <section class="section-head">
           <h2>Resident access</h2>
-          <p>Sign in with house number, phone number, and password.</p>
+          <p>
+            Sign in with house number, phone number, and password, or request resident access.
+          </p>
         </section>
 
         <form id="resident-auth-form" class="report-form">
@@ -123,13 +130,78 @@
             />
           </label>
 
-          <div class="action-row">
-            <button id="resident-signup-btn" type="button" class="ghost-btn">
-              Request Access
-            </button>
+          <section
+            id="resident-auth-feedback"
+            class="feedback hidden"
+            role="alert"
+            aria-live="polite"
+            tabindex="-1"
+          ></section>
+
+          <div class="action-row auth-primary-actions">
             <button id="resident-login-btn" type="submit">Sign In</button>
             <button id="resident-forgot-btn" type="button" class="ghost-btn">
               Forgot Password
+            </button>
+          </div>
+
+          <section class="section-head">
+            <h2>Access request details</h2>
+            <p>Optional details. You can add them now or skip them and continue with access request.</p>
+          </section>
+
+          <div class="field-grid">
+            <label>
+              ID Type
+              <select id="signup-identity-type">
+                <option value="">Select ID type</option>
+                <option value="national_id">National ID</option>
+                <option value="passport">Passport</option>
+                <option value="alien_id">Alien ID</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label>
+              ID Number
+              <input
+                id="signup-identity-number"
+                type="text"
+                maxlength="80"
+                placeholder="Enter ID or passport number"
+              />
+            </label>
+          </div>
+
+          <div class="field-grid">
+            <label>
+              Occupation Status
+              <select id="signup-occupation-status">
+                <option value="">Select occupation status</option>
+                <option value="employed">Employed</option>
+                <option value="self_employed">Self-employed</option>
+                <option value="student">Student</option>
+                <option value="sponsored">Sponsored</option>
+                <option value="unemployed">Unemployed</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label>
+              Occupation
+              <input
+                id="signup-occupation-label"
+                type="text"
+                maxlength="120"
+                placeholder="Teacher, electrician, student, trader"
+              />
+            </label>
+          </div>
+          <p class="item-guidance">
+            These details help management complete your resident profile, but they are not required to sign in or request access.
+          </p>
+
+          <div class="action-row auth-request-actions">
+            <button id="resident-signup-btn" type="button" class="ghost-btn">
+              Request Access
             </button>
           </div>
         </form>
@@ -251,6 +323,26 @@
                   ></textarea>
                 </label>
 
+                <label>
+                  Attach Photos (optional)
+                  <input
+                    id="report-attachments"
+                    type="file"
+                    accept="image/*"
+                    multiple
+                  />
+                  <p class="item-details">
+                    Upload up to 4 photos of the issue or damaged item before submitting.
+                  </p>
+                </label>
+                <div
+                  id="report-attachment-preview"
+                  class="upload-preview-grid"
+                  aria-live="polite"
+                >
+                  <p class="upload-preview-empty">No photos selected.</p>
+                </div>
+
                 <section id="theft-workflow-fields" class="theft-workflow hidden">
                   <p class="item-details">
                     Theft reports route directly to security and require incident timeline details.
@@ -361,10 +453,50 @@
                     </div>
                     <section id="utility-bills-list" class="stack-list"></section>
 
-                    <section id="utility-payment-section" class="payment-section">
-                      <p class="subheading">Pay utility</p>
+                    <section id="utility-payment-section" class="payment-section mpesa-section">
+                      <div class="payment-priority-bar">
+                        <div class="payment-priority-brand">
+                          <img
+                            src="/mpesa-icon.svg"
+                            alt=""
+                            class="payment-priority-icon"
+                            width="44"
+                            height="44"
+                          />
+                          <div class="payment-priority-copy">
+                            <p class="subheading">Pay utility via M-PESA</p>
+                            <p class="item-details">
+                              Confirm the phone number first, then approve the STK prompt on your
+                              phone.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
                       <p id="utility-payment-state" class="item-details payment-state">Active.</p>
                       <form id="utility-payment-form" class="report-form">
+                        <div class="field-grid payment-channel-grid">
+                          <label class="payment-phone-field">
+                            M-PESA Phone Number
+                            <input
+                              id="utility-payment-phone"
+                              type="tel"
+                              inputmode="tel"
+                              placeholder="07XXXXXXXX"
+                            />
+                          </label>
+                          <label class="payment-provider-field">
+                            Payment Method
+                            <select id="utility-payment-provider" required>
+                              <option value="mpesa">M-PESA</option>
+                              <option value="bank">Bank</option>
+                              <option value="card">Card</option>
+                              <option value="cash">Cash</option>
+                            </select>
+                          </label>
+                        </div>
+                        <p class="item-details payment-inline-note">
+                          The M-PESA prompt will be sent to this phone number.
+                        </p>
                         <div class="field-grid">
                           <label>
                             Utility
@@ -409,27 +541,6 @@
                           Use a shortcut or type your own amount. Every payment reduces your balance
                           immediately.
                         </p>
-
-                        <div class="field-grid">
-                          <label>
-                            Payment Method
-                            <select id="utility-payment-provider" required>
-                              <option value="mpesa">M-PESA</option>
-                              <option value="bank">Bank</option>
-                              <option value="card">Card</option>
-                              <option value="cash">Cash</option>
-                            </select>
-                          </label>
-                          <label>
-                            M-PESA Phone (optional)
-                            <input
-                              id="utility-payment-phone"
-                              type="tel"
-                              inputmode="tel"
-                              placeholder="07XXXXXXXX"
-                            />
-                          </label>
-                        </div>
 
                         <label>
                           Reference (optional)
@@ -536,6 +647,28 @@
                 <h2>Building notices</h2>
                 <p id="notification-count">0 alerts</p>
               </section>
+              <section class="notification-control-card">
+                <div class="notification-control-copy">
+                  <p class="subheading">App & alerts</p>
+                  <p id="install-app-status" class="item-details">
+                    Install this portal for faster access on your phone.
+                  </p>
+                  <p id="push-status-text" class="item-details">
+                    Sign in to enable browser alerts for rent, utility, and support updates.
+                  </p>
+                </div>
+                <div class="action-row notification-control-actions">
+                  <button id="install-app-btn" type="button" class="ghost-btn hidden">
+                    Install App
+                  </button>
+                  <button id="push-enable-btn" type="button" class="ghost-btn">
+                    Enable Alerts
+                  </button>
+                  <button id="push-disable-btn" type="button" class="ghost-btn hidden">
+                    Turn Off Alerts
+                  </button>
+                </div>
+              </section>
               <section id="notification-list" class="stack-list"></section>
             </article>
           </section>
@@ -566,6 +699,81 @@
       </article>
     </template>
 
-    <script type="module" src="/users.js?v=20260315a"></script>
+    <section
+      id="mpesa-status-modal"
+      class="modal-shell hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="mpesa-status-title"
+    >
+      <button id="mpesa-status-backdrop" class="modal-backdrop" type="button" aria-label="Close"></button>
+      <article class="modal-card payment-modal-card">
+        <div class="modal-head">
+          <div class="payment-modal-brand">
+            <img
+              src="/mpesa-icon.svg"
+              alt=""
+              class="payment-priority-icon"
+              width="40"
+              height="40"
+            />
+            <div>
+              <p class="subheading">M-PESA checkout</p>
+              <h2 id="mpesa-status-title">Confirm payment on your phone</h2>
+            </div>
+          </div>
+          <button id="mpesa-status-close" type="button" class="ghost-btn">Close</button>
+        </div>
+
+        <div class="payment-modal-status">
+          <span id="mpesa-status-badge" class="item-chip chip-mpesa">Waiting for PIN</span>
+          <p id="mpesa-status-copy" class="item-details">
+            An M-PESA prompt has been sent. Enter your PIN on your phone to continue.
+          </p>
+        </div>
+
+        <dl id="mpesa-status-meta" class="receipt-grid"></dl>
+        <p id="mpesa-status-note" class="item-details payment-modal-note"></p>
+
+        <div class="action-row modal-actions">
+          <button id="mpesa-status-check-btn" type="button">Check status</button>
+          <button id="mpesa-status-retry-btn" type="button" class="ghost-btn">Try again</button>
+          <button id="mpesa-status-close-btn" type="button" class="ghost-btn">Close</button>
+        </div>
+      </article>
+    </section>
+
+    <section
+      id="payment-receipt-modal"
+      class="modal-shell hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="payment-receipt-title"
+    >
+      <button
+        id="payment-receipt-backdrop"
+        class="modal-backdrop"
+        type="button"
+        aria-label="Close receipt"
+      ></button>
+      <article class="modal-card receipt-modal-card">
+        <div class="modal-head">
+          <div>
+            <p class="subheading">Payment receipt</p>
+            <h2 id="payment-receipt-title">Receipt ready</h2>
+          </div>
+          <button id="payment-receipt-close" type="button" class="ghost-btn">Close</button>
+        </div>
+
+        <section id="payment-receipt-card" class="receipt-card"></section>
+
+        <div class="action-row modal-actions">
+          <button id="payment-receipt-save-btn" type="button">Save receipt</button>
+          <button id="payment-receipt-dismiss-btn" type="button" class="ghost-btn">Done</button>
+        </div>
+      </article>
+    </section>
+
+    <script type="module" src="/users.js?v=20260323b"></script>
   </body>
 </html>

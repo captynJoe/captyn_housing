@@ -27,6 +27,7 @@ const PAYMENT_POLL_MAX_ATTEMPTS = 24;
 const validModules = new Set(["overview", "wifi", "cctv"]);
 
 const state = {
+  selectedBuildingId: null,
   selectedPackageId: null,
   packages: [],
   buildings: [],
@@ -195,6 +196,14 @@ function renderBuildingOptions(buildings) {
     option.textContent = `${building.name} (${building.id})`;
     wifiBuildingEl.append(option);
   });
+
+  const selectedBuildingId =
+    state.selectedBuildingId && buildings.some((item) => item.id === state.selectedBuildingId)
+      ? state.selectedBuildingId
+      : buildings[0]?.id ?? "";
+
+  state.selectedBuildingId = selectedBuildingId || null;
+  wifiBuildingEl.value = selectedBuildingId;
 }
 
 function renderWifiPackages(packages) {
@@ -293,16 +302,50 @@ async function pollPaymentStatus(checkoutReference, attempt = 0) {
   }
 }
 
+async function loadWifiPackagesForBuilding(buildingId) {
+  if (!buildingId) {
+    state.packages = [];
+    state.selectedPackageId = null;
+    renderWifiPackages([]);
+    return;
+  }
+
+  const response = await fetch(
+    `/api/wifi/packages?buildingId=${encodeURIComponent(buildingId)}`
+  );
+
+  if (!response.ok) {
+    throw new Error(`Wi-Fi package list failed with status ${response.status}`);
+  }
+
+  const payload = await response.json();
+  state.packages = payload.data ?? [];
+
+  if (!state.packages.some((item) => item.id === state.selectedPackageId)) {
+    state.selectedPackageId = state.packages[0]?.id ?? null;
+  }
+
+  if (state.selectedPackageId) {
+    const selected = state.packages.find((item) => item.id === state.selectedPackageId);
+    if (selected) {
+      wifiStatusEl.textContent = `Selected ${selected.name} (${selected.hours}h).`;
+    }
+  } else {
+    wifiStatusEl.textContent = "Select a building to view available Wi-Fi packages.";
+  }
+
+  renderWifiPackages(state.packages);
+}
+
 async function loadPageData() {
   clearError();
   clearWifiError();
   refreshBtn.disabled = true;
 
   try {
-    const [healthRes, buildingsRes, wifiPackagesRes] = await Promise.all([
+    const [healthRes, buildingsRes] = await Promise.all([
       fetch("/health"),
-      fetch("/api/buildings"),
-      fetch("/api/wifi/packages")
+      fetch("/api/buildings")
     ]);
 
     if (!healthRes.ok) {
@@ -313,30 +356,17 @@ async function loadPageData() {
       throw new Error(`Building list failed with status ${buildingsRes.status}`);
     }
 
-    if (!wifiPackagesRes.ok) {
-      throw new Error(
-        `Wi-Fi package list failed with status ${wifiPackagesRes.status}`
-      );
-    }
-
     const health = await healthRes.json();
     const buildingsPayload = await buildingsRes.json();
-    const wifiPackagesPayload = await wifiPackagesRes.json();
 
     state.buildings = buildingsPayload.data ?? [];
-    state.packages = wifiPackagesPayload.data ?? [];
-
-    if (!state.selectedPackageId && state.packages.length > 0) {
-      state.selectedPackageId = state.packages[0].id;
-      wifiStatusEl.textContent = `Selected ${state.packages[0].name} (${state.packages[0].hours}h).`;
-    }
 
     apiStatusEl.textContent = health.status ?? "unknown";
     storageModeEl.textContent = health.storage ?? "unknown";
     renderBuildings(state.buildings);
     renderCctv(state.buildings);
     renderBuildingOptions(state.buildings);
-    renderWifiPackages(state.packages);
+    await loadWifiPackagesForBuilding(state.selectedBuildingId);
   } catch (error) {
     apiStatusEl.textContent = "error";
     storageModeEl.textContent = "unknown";
@@ -434,6 +464,17 @@ window.addEventListener("hashchange", () => {
 
 refreshBtn.addEventListener("click", () => {
   void loadPageData();
+});
+
+wifiBuildingEl.addEventListener("change", () => {
+  state.selectedBuildingId = wifiBuildingEl.value || null;
+  state.selectedPackageId = null;
+  clearWifiError();
+  void loadWifiPackagesForBuilding(state.selectedBuildingId).catch((error) => {
+    const message =
+      error instanceof Error ? error.message : "Unable to load Wi-Fi packages.";
+    showWifiError(message);
+  });
 });
 
 wifiFormEl.addEventListener("submit", (event) => {

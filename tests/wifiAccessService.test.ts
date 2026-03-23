@@ -89,6 +89,37 @@ test("updates package hours and pricing", () => {
   assert.equal(payment.amountKsh, 40);
 });
 
+test("uses building-scoped package snapshot when provided", () => {
+  const service = new WifiAccessService({
+    callbackToken: "secret",
+    packages: [...wifiPackages]
+  });
+
+  const payment = service.createPayment(
+    {
+      buildingId: "CAPTYN-BLDG-00002",
+      packageId: "hour_3",
+      phoneNumber: "0712345678"
+    },
+    {
+      id: "CAPTYN-BLDG-00002",
+      name: "Bahari Court"
+    },
+    {
+      id: "hour_3",
+      name: "Bahari Evening Pack",
+      hours: 5,
+      priceKsh: 55,
+      profile: "Per-building override",
+      enabled: true
+    }
+  );
+
+  assert.equal(payment.package.name, "Bahari Evening Pack");
+  assert.equal(payment.package.hours, 5);
+  assert.equal(payment.amountKsh, 55);
+});
+
 test("confirms payment and provisions voucher in mock mode", async () => {
   const service = new WifiAccessService({
     callbackToken: "secret",

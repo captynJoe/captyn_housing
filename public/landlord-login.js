@@ -8,17 +8,16 @@ const passwordEl = document.getElementById("landlord-password");
 const caretakerNewPasswordEl = document.getElementById(
   "landlord-caretaker-new-password"
 );
-const caretakerConfirmPasswordEl = document.getElementById(
-  "landlord-caretaker-confirm-password"
-);
 const loginBtnEl = document.getElementById("landlord-login-btn");
 const loginStatusEl = document.getElementById("login-status");
 const loginErrorEl = document.getElementById("login-error");
+const landlordSecondaryErrorEl = document.getElementById("landlord-secondary-error");
 
 const landlordRequestPanelEl = document.getElementById("landlord-request-panel");
 const landlordRequestFormEl = document.getElementById("landlord-request-form");
 const landlordRequestReasonEl = document.getElementById("landlord-request-reason");
 const landlordRequestBtnEl = document.getElementById("landlord-request-btn");
+const landlordRequestErrorEl = document.getElementById("landlord-request-error");
 const landlordRegisterFormEl = document.getElementById("landlord-register-form");
 const landlordRegisterNameEl = document.getElementById("landlord-register-name");
 const landlordRegisterEmailEl = document.getElementById("landlord-register-email");
@@ -44,14 +43,56 @@ function setStatus(message) {
   loginStatusEl.textContent = formatHouseManagerText(message);
 }
 
-function showError(message) {
-  loginErrorEl.textContent = formatHouseManagerText(message);
-  loginErrorEl.classList.remove("hidden");
+function focusInlineFeedback(element) {
+  if (!(element instanceof HTMLElement)) {
+    return;
+  }
+
+  element.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  element.focus({ preventScroll: true });
 }
 
-function clearError() {
-  loginErrorEl.textContent = "";
-  loginErrorEl.classList.add("hidden");
+function showPanelError(element, message, { reveal = false } = {}) {
+  element.textContent = formatHouseManagerText(message);
+  element.classList.remove("hidden");
+  if (reveal) {
+    focusInlineFeedback(element);
+  }
+}
+
+function clearPanelError(element) {
+  element.textContent = "";
+  element.classList.add("hidden");
+}
+
+function clearAllErrors() {
+  clearPanelError(loginErrorEl);
+  clearPanelError(landlordSecondaryErrorEl);
+  clearPanelError(landlordRequestErrorEl);
+}
+
+function normalizeLandlordSignInError(error, { caretakerMode = false } = {}) {
+  if (!(error instanceof Error)) {
+    return caretakerMode
+      ? "House manager sign-in failed. Check your phone number, house number, and password."
+      : "Landlord sign-in failed. Check your email or phone number and password.";
+  }
+
+  const message = error.message || "";
+
+  if (/incorrect password/i.test(message)) {
+    return caretakerMode
+      ? "Incorrect password for this house manager account. Try again or request help."
+      : "Incorrect password for this landlord account. Try again or request reset.";
+  }
+
+  if (error.status === 401) {
+    return caretakerMode
+      ? "House manager sign-in failed. Check your phone number, house number, and password."
+      : "Landlord sign-in failed. Check your email or phone number and password.";
+  }
+
+  return message;
 }
 
 function formatHouseManagerText(message) {
@@ -114,11 +155,7 @@ function normalizeHouseNumber(value) {
 }
 
 function setCaretakerMode(enabled) {
-  const controls = [
-    houseNumberEl,
-    caretakerNewPasswordEl,
-    caretakerConfirmPasswordEl
-  ];
+  const controls = [houseNumberEl, caretakerNewPasswordEl];
 
   controls.forEach((control) => {
     if (control instanceof HTMLInputElement) {
@@ -250,27 +287,30 @@ async function hasAnyActiveSession() {
 
 async function signIn(event) {
   event.preventDefault();
-  clearError();
+  clearAllErrors();
 
   const identifier = identifierEl.value.trim();
   const houseNumber = normalizeHouseNumber(houseNumberEl?.value);
   const password = passwordEl.value.trim();
   const newPassword = String(caretakerNewPasswordEl?.value || "").trim();
-  const confirmPassword = String(caretakerConfirmPasswordEl?.value || "").trim();
   const caretakerPhoneLogin = Boolean(caretakerModeEl?.checked);
 
   if (!identifier) {
-    showError("Provide email or phone number.");
+    showPanelError(loginErrorEl, "Provide email or phone number.", { reveal: true });
     return;
   }
 
   if (caretakerPhoneLogin && !looksLikeKenyaPhone(identifier)) {
-    showError("House manager sign-in requires a phone number.");
+    showPanelError(loginErrorEl, "House manager sign-in requires a phone number.", {
+      reveal: true
+    });
     return;
   }
 
   if (caretakerPhoneLogin && !houseNumber) {
-    showError("House manager sign-in requires house number.");
+    showPanelError(loginErrorEl, "House manager sign-in requires house number.", {
+      reveal: true
+    });
     return;
   }
 
@@ -294,21 +334,23 @@ async function signIn(event) {
 
           if (probe.data?.requiresPasswordSetup) {
             setStatus(
-              `House manager verified for ${probe.data?.buildingName ?? probe.data?.buildingId}. Enter new password and confirm, then sign in again.`
+              `House manager verified for ${probe.data?.buildingName ?? probe.data?.buildingId}. Enter a new password below to finish first-time setup.`
             );
             return;
           }
 
-          showError("House manager password already set. Enter password to sign in.");
+          showPanelError(
+            loginErrorEl,
+            "House manager password already set. Enter password to sign in.",
+            { reveal: true }
+          );
           return;
         }
 
         if (newPassword.length < 8) {
-          showError("New password must be at least 8 characters.");
-          return;
-        }
-        if (newPassword !== confirmPassword) {
-          showError("Confirmation password must match the new password.");
+          showPanelError(loginErrorEl, "New password must be at least 8 characters.", {
+            reveal: true
+          });
           return;
         }
 
@@ -320,8 +362,7 @@ async function signIn(event) {
           body: JSON.stringify({
             phoneNumber: identifier,
             houseNumber,
-            newPassword,
-            confirmPassword
+            newPassword
           })
         });
 
@@ -360,7 +401,7 @@ async function signIn(event) {
     }
 
     if (!password) {
-      showError("Provide password.");
+      showPanelError(loginErrorEl, "Provide password.", { reveal: true });
       return;
     }
 
@@ -378,9 +419,11 @@ async function signIn(event) {
       throw new Error("This account is not eligible for landlord portal access.");
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to sign in.";
-    showError(message);
-    setStatus("Sign-in failed.");
+    const message = normalizeLandlordSignInError(error, {
+      caretakerMode: caretakerPhoneLogin
+    });
+    showPanelError(loginErrorEl, message, { reveal: true });
+    setStatus(caretakerPhoneLogin ? "House manager sign-in failed." : "Landlord sign-in failed.");
     toggleLandlordRequestPanel(false);
   } finally {
     loginBtnEl.disabled = false;
@@ -389,12 +432,16 @@ async function signIn(event) {
 
 async function createAccount(event) {
   event.preventDefault();
-  clearError();
+  clearAllErrors();
 
   if (await hasAnyActiveSession()) {
     setRegisterFormEnabled(false);
     setStatus("Already signed in. Sign out before creating another account.");
-    showError("Create account is disabled while your session is active.");
+    showPanelError(
+      landlordSecondaryErrorEl,
+      "Create account is disabled while your session is active.",
+      { reveal: true }
+    );
     return;
   }
 
@@ -404,7 +451,11 @@ async function createAccount(event) {
   const password = landlordRegisterPasswordEl.value.trim();
 
   if (!fullName || !email || !phoneNumber || !password) {
-    showError("Provide full name, email, phone number, and password.");
+    showPanelError(
+      landlordSecondaryErrorEl,
+      "Provide full name, email, phone number, and password.",
+      { reveal: true }
+    );
     return;
   }
 
@@ -441,7 +492,7 @@ async function createAccount(event) {
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to create account.";
-    showError(message);
+    showPanelError(landlordSecondaryErrorEl, message, { reveal: true });
     setStatus("Account creation failed.");
   } finally {
     landlordRegisterBtnEl.disabled = false;
@@ -450,11 +501,13 @@ async function createAccount(event) {
 
 async function requestPasswordReset(event) {
   event.preventDefault();
-  clearError();
+  clearAllErrors();
 
   const identifier = landlordForgotIdentifierEl.value.trim();
   if (!identifier) {
-    showError("Provide email or phone number.");
+    showPanelError(landlordSecondaryErrorEl, "Provide email or phone number.", {
+      reveal: true
+    });
     return;
   }
 
@@ -479,7 +532,7 @@ async function requestPasswordReset(event) {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unable to submit recovery request.";
-    showError(message);
+    showPanelError(landlordSecondaryErrorEl, message, { reveal: true });
   } finally {
     landlordForgotBtnEl.disabled = false;
   }
@@ -487,7 +540,7 @@ async function requestPasswordReset(event) {
 
 async function submitLandlordRequest(event) {
   event.preventDefault();
-  clearError();
+  clearAllErrors();
 
   landlordRequestBtnEl.disabled = true;
 
@@ -516,7 +569,7 @@ async function submitLandlordRequest(event) {
       error instanceof Error
         ? error.message
         : "Failed to submit landlord access request.";
-    showError(message);
+    showPanelError(landlordRequestErrorEl, message, { reveal: true });
     landlordRequestBtnEl.disabled = false;
   }
 }

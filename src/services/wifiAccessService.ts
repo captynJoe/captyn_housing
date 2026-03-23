@@ -11,6 +11,7 @@ export interface WifiPackage {
   hours: number;
   priceKsh: number;
   profile: string;
+  enabled?: boolean;
 }
 
 export interface WifiCheckoutBuilding {
@@ -162,7 +163,9 @@ export class WifiAccessService {
           name: String(item.name ?? ""),
           hours: Number(item.hours ?? 0),
           priceKsh: Number(item.priceKsh ?? 0),
-          profile: String(item.profile ?? "")
+          profile: String(item.profile ?? ""),
+          enabled:
+            typeof item.enabled === "boolean" ? item.enabled : undefined
         });
       }
     }
@@ -184,7 +187,11 @@ export class WifiAccessService {
             name: String(item.package.name ?? ""),
             hours: Number(item.package.hours ?? 0),
             priceKsh: Number(item.package.priceKsh ?? 0),
-            profile: String(item.package.profile ?? "")
+            profile: String(item.package.profile ?? ""),
+            enabled:
+              typeof item.package.enabled === "boolean"
+                ? item.package.enabled
+                : undefined
           },
           amountKsh: Number(item.amountKsh ?? 0),
           phoneNumber: normalizeKenyaPhone(String(item.phoneNumber ?? "")),
@@ -235,9 +242,10 @@ export class WifiAccessService {
 
   createPayment(
     input: CreateWifiPaymentInput,
-    building: WifiCheckoutBuilding
+    building: WifiCheckoutBuilding,
+    packageOverride?: WifiPackage
   ): WifiPaymentRecord {
-    const selectedPackage = this.packageMap.get(input.packageId);
+    const selectedPackage = packageOverride ?? this.packageMap.get(input.packageId);
     if (!selectedPackage) {
       throw new Error("Invalid Wi-Fi package");
     }

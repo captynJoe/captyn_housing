@@ -1,4 +1,6 @@
 import { initPasswordVisibilityToggles } from "./password-visibility.js";
+import { initResponsiveTables } from "./mobile-table.js";
+import { createUploadedImageGallery } from "./cloudinary-upload.js";
 
 const authStatusEl = document.getElementById("auth-status");
 const adminRoleEl = document.getElementById("admin-role");
@@ -95,6 +97,7 @@ const rentPaymentsHouseEl = document.getElementById("rent-payments-house");
 const rentPaymentsBodyEl = document.getElementById("rent-payments-body");
 const refreshRentPaymentsBtn = document.getElementById("refresh-rent-payments");
 
+const wifiPackagesBuildingEl = document.getElementById("wifi-packages-building");
 const packageListEl = document.getElementById("package-list");
 const packageTemplate = document.getElementById("package-card-template");
 const paymentsBodyEl = document.getElementById("payments-body");
@@ -104,8 +107,12 @@ const refreshPaymentsBtn = document.getElementById("refresh-payments");
 const adminErrorEl = document.getElementById("admin-error");
 
 const state = {
-  role: "-"
+  role: "-",
+  buildings: [],
+  selectedWifiPackagesBuildingId: null
 };
+
+initResponsiveTables();
 
 function showError(message) {
   adminErrorEl.textContent = message;
@@ -713,6 +720,17 @@ function renderTickets(tickets) {
       </td>
     `;
 
+    const ticketCell = row.children[0];
+    if (ticketCell instanceof HTMLTableCellElement) {
+      const gallery = createUploadedImageGallery(ticket.evidenceAttachments, {
+        linkLabel: "Open issue photo"
+      });
+      if (gallery) {
+        gallery.classList.add("ticket-attachment-gallery");
+        ticketCell.append(gallery);
+      }
+    }
+
     const statusSelect = row.querySelector('select[data-action="status"]');
     const noteInput = row.querySelector('input[data-action="note"]');
     const saveButton = row.querySelector('button[data-action="save"]');
@@ -800,6 +818,38 @@ function renderBuildings(rows) {
   });
 }
 
+function renderWifiPackageBuildingOptions(rows) {
+  wifiPackagesBuildingEl.replaceChildren();
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No building available";
+    wifiPackagesBuildingEl.append(option);
+    wifiPackagesBuildingEl.disabled = true;
+    state.selectedWifiPackagesBuildingId = null;
+    return;
+  }
+
+  wifiPackagesBuildingEl.disabled = false;
+
+  rows.forEach((building) => {
+    const option = document.createElement("option");
+    option.value = building.id;
+    option.textContent = `${building.name} (${building.id})`;
+    wifiPackagesBuildingEl.append(option);
+  });
+
+  const selectedBuildingId =
+    state.selectedWifiPackagesBuildingId &&
+    rows.some((item) => item.id === state.selectedWifiPackagesBuildingId)
+      ? state.selectedWifiPackagesBuildingId
+      : rows[0]?.id ?? "";
+
+  state.selectedWifiPackagesBuildingId = selectedBuildingId || null;
+  wifiPackagesBuildingEl.value = selectedBuildingId;
+}
+
 function renderUtilityBills(rows) {
   utilityBillsBodyEl.replaceChildren();
 
@@ -882,7 +932,7 @@ function renderRentPayments(rows) {
 
   if (!Array.isArray(rows) || rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = `<td colspan="6">No rent payments found.</td>`;
+    row.innerHTML = `<td colspan="7">No rent payments found.</td>`;
     rentPaymentsBodyEl.append(row);
     return;
   }
@@ -891,6 +941,7 @@ function renderRentPayments(rows) {
     const row = document.createElement("tr");
     row.innerHTML = `
       <td>${item.providerReference}</td>
+      <td>${item.provider ?? "-"}</td>
       <td>${item.buildingId ?? "-"}</td>
       <td>${item.houseNumber}</td>
       <td>${formatCurrency(item.amountKsh)}</td>
@@ -909,7 +960,8 @@ function createPackagePayload(form) {
     name: String(formData.get("name") ?? "").trim(),
     profile: String(formData.get("profile") ?? "").trim(),
     hours: Number(formData.get("hours")),
-    priceKsh: Number(formData.get("priceKsh"))
+    priceKsh: Number(formData.get("priceKsh")),
+    enabled: formData.get("enabled") === "on"
   };
 }
 
@@ -988,25 +1040,34 @@ function renderPackages(packages) {
     form.elements.profile.value = pkg.profile;
     form.elements.hours.value = String(pkg.hours);
     form.elements.priceKsh.value = String(pkg.priceKsh);
+    form.elements.enabled.checked = Boolean(pkg.enabled);
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       clearError();
 
       const payload = createPackagePayload(form);
+      const buildingId = state.selectedWifiPackagesBuildingId;
       const submitButton = form.querySelector("button");
       submitButton.disabled = true;
 
       try {
-        await requestJson(`/api/admin/wifi/packages/${pkg.id}`, {
+        if (!buildingId) {
+          throw new Error("Select a building before editing Wi-Fi packages.");
+        }
+
+        await requestJson(
+          `/api/admin/wifi/packages/${pkg.id}?buildingId=${encodeURIComponent(buildingId)}`,
+          {
           method: "PATCH",
           headers: {
             "content-type": "application/json"
           },
           body: JSON.stringify(payload)
-        });
+          }
+        );
 
-        setStatus(`Updated ${pkg.id} successfully.`);
+        setStatus(`Updated ${pkg.id} for ${buildingId} successfully.`);
         await Promise.all([loadOverview(), loadPackages()]);
       } catch (error) {
         handleAdminError(error, "Package update failed.");
@@ -1087,7 +1148,9 @@ async function loadTickets() {
 
 async function loadBuildings() {
   const payload = await requestJson("/api/admin/buildings");
-  renderBuildings(payload.data ?? []);
+  state.buildings = payload.data ?? [];
+  renderBuildings(state.buildings);
+  renderWifiPackageBuildingOptions(state.buildings);
 }
 
 async function loadUtilityBills() {
@@ -1124,7 +1187,15 @@ async function loadRentPayments() {
 }
 
 async function loadPackages() {
-  const payload = await requestJson("/api/admin/wifi/packages");
+  const buildingId = state.selectedWifiPackagesBuildingId;
+  if (!buildingId) {
+    renderPackages([]);
+    return;
+  }
+
+  const payload = await requestJson(
+    `/api/admin/wifi/packages?buildingId=${encodeURIComponent(buildingId)}`
+  );
   renderPackages(payload.data ?? []);
 }
 
@@ -1137,13 +1208,13 @@ async function loadAdminData() {
   clearError();
 
   try {
+    await loadBuildings();
     await Promise.all([
       loadOverview(),
       loadLandlordAccessRequests(),
       loadPasswordRecoveryRequests(),
       loadAccountPasswordRecoveryRequests(),
       loadTickets(),
-      loadBuildings(),
       loadUtilityBills(),
       loadUtilityPayments(),
       loadRentLedger(),
@@ -1535,6 +1606,13 @@ refreshRentPaymentsBtn.addEventListener("click", () => {
 });
 
 refreshPackagesBtn.addEventListener("click", () => {
+  void loadPackages().catch((error) => {
+    handleAdminError(error, "Unable to refresh packages.");
+  });
+});
+
+wifiPackagesBuildingEl.addEventListener("change", () => {
+  state.selectedWifiPackagesBuildingId = wifiPackagesBuildingEl.value || null;
   void loadPackages().catch((error) => {
     handleAdminError(error, "Unable to refresh packages.");
   });

@@ -64,6 +64,18 @@ enum TenantOccupationStatus {
   other
 }
 
+enum UtilityBillingMode {
+  metered
+  fixed_charge
+  combined_charge
+  disabled
+}
+
+enum WifiAccessMode {
+  disabled
+  voucher_packages
+}
+
 model Building {
   id                       String              @id
   name                     String
@@ -80,10 +92,12 @@ model Building {
   maintenanceRecords       MaintenanceRecord[]
   vacancySnapshots         VacancySnapshot[]
   landlordUser             HousingUser?        @relation("BuildingLandlord", fields: [landlordUserId], references: [id], onDelete: SetNull)
+  configuration            BuildingConfiguration?
   houseUnits               HouseUnit[]
   tenantApplications       TenantApplication[]
   tenantAgreements         TenantAgreement[]
   tenancies                Tenancy[]
+  wifiPackages             BuildingWifiPackage[]
   householdMemberRegistries HouseholdMemberRegistry[]
   createdAt                DateTime            @default(now())
   updatedAt                DateTime            @updatedAt
@@ -207,6 +221,10 @@ model TenantApplication {
   buildingId       String
   unitId           String?
   houseNumber      String
+  identityType     TenantIdentityType?
+  identityNumber   String?
+  occupationStatus TenantOccupationStatus?
+  occupationLabel  String?
   status           TenantApplicationStatus @default(pending)
   note             String?
   createdAt        DateTime                @default(now())
@@ -284,6 +302,57 @@ model HouseholdMemberRegistry {
 
   @@unique([buildingId, houseNumber])
   @@index([buildingId, updatedAt])
+}
+
+model BuildingConfiguration {
+  id                         String             @id @default(uuid())
+  buildingId                 String             @unique
+  rentEnabled                Boolean            @default(true)
+  waterEnabled               Boolean            @default(true)
+  electricityEnabled         Boolean            @default(true)
+  wifiEnabled                Boolean            @default(false)
+  tenantApplicationsEnabled  Boolean            @default(true)
+  tenantAgreementsEnabled    Boolean            @default(true)
+  incidentsEnabled           Boolean            @default(true)
+  maintenanceEnabled         Boolean            @default(true)
+  caretakerEnabled           Boolean            @default(false)
+  expenditureTrackingEnabled Boolean            @default(false)
+  utilityBillingMode         UtilityBillingMode @default(metered)
+  utilityBalanceVisibleDays  Int                @default(7)
+  rentGraceDays              Int                @default(0)
+  allowManualRentPosting     Boolean            @default(true)
+  allowManualUtilityPosting  Boolean            @default(true)
+  wifiAccessMode             WifiAccessMode     @default(disabled)
+  reminderPolicy             Json?
+  onboardingPolicy           Json?
+  agreementPolicy            Json?
+  metadata                   Json?
+  updatedByRole              String?
+  updatedByUserId            String?
+  note                       String?
+  createdAt                  DateTime           @default(now())
+  updatedAt                  DateTime           @updatedAt
+  building                   Building           @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+
+  @@index([utilityBillingMode])
+  @@index([updatedAt])
+}
+
+model BuildingWifiPackage {
+  id          String   @id @default(uuid())
+  buildingId  String
+  packageCode String
+  name        String
+  hours       Int
+  priceKsh    Int
+  profile     String
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  building    Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+
+  @@unique([buildingId, packageCode])
+  @@index([buildingId, enabled])
 }
 
 model AppState {

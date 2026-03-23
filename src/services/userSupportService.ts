@@ -99,6 +99,10 @@ type UserSupportStateChangeHandler = (
   state: UserSupportPersistedState
 ) => void | Promise<void>;
 
+type UserNotificationInsertHandler = (
+  notifications: UserNotification[]
+) => void | Promise<void>;
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -227,9 +231,14 @@ export class UserSupportService {
   private readonly notificationsByScope = new Map<string, UserNotification[]>();
   private readonly notificationKeysByScope = new Map<string, Set<string>>();
   private stateChangeHandler?: UserSupportStateChangeHandler;
+  private notificationInsertHandler?: UserNotificationInsertHandler;
 
   setStateChangeHandler(handler?: UserSupportStateChangeHandler): void {
     this.stateChangeHandler = handler;
+  }
+
+  setNotificationInsertHandler(handler?: UserNotificationInsertHandler): void {
+    this.notificationInsertHandler = handler;
   }
 
   exportState(): UserSupportPersistedState {
@@ -395,7 +404,12 @@ export class UserSupportService {
       }
     ];
 
-    this.insertNotifications(buildingId, houseNumber, generatedNotifications);
+    const inserted = this.insertNotifications(
+      buildingId,
+      houseNumber,
+      generatedNotifications
+    );
+    this.emitNotificationsInserted(inserted);
     this.emitStateChange();
 
     return {
@@ -524,11 +538,12 @@ export class UserSupportService {
       dedupeKey: `ticket-status-${report.id}-${report.status}-${updatedAt.slice(0, 16)}`
     };
 
-    this.insertNotifications(
+    const inserted = this.insertNotifications(
       reportScope.buildingId,
       reportScope.houseNumber,
       [notification]
     );
+    this.emitNotificationsInserted(inserted);
     this.emitStateChange();
 
     return { report, notification };
@@ -603,6 +618,17 @@ export class UserSupportService {
     const snapshot = this.exportState();
     void Promise.resolve(this.stateChangeHandler(snapshot)).catch((error) => {
       console.error("Failed to persist user support state", error);
+    });
+  }
+
+  private emitNotificationsInserted(notifications: UserNotification[]): void {
+    if (!this.notificationInsertHandler || notifications.length === 0) {
+      return;
+    }
+
+    const snapshot = notifications.map((item) => ({ ...item }));
+    void Promise.resolve(this.notificationInsertHandler(snapshot)).catch((error) => {
+      console.error("Failed to handle inserted user notifications", error);
     });
   }
 

@@ -8,6 +8,8 @@ import type {
 
 export type UtilityType = UtilityTypeInput;
 export const UTILITY_LEGACY_BUILDING_ID = "__LEGACY__";
+const DEFAULT_COMBINED_UTILITY_CHARGE_KSH = 350;
+const UTILITY_BALANCE_VISIBILITY_WINDOW_DAYS = 7;
 
 export interface UtilityMeterRecord {
   utilityType: UtilityType;
@@ -99,6 +101,21 @@ export interface UtilityBillingPersistedState {
   bills: UtilityBillSnapshot[];
 }
 
+export interface UtilityRoomBalanceSummary {
+  buildingId: string;
+  houseNumber: string;
+  currentDueKsh: number;
+  arrearsKsh: number;
+  totalOpenKsh: number;
+  nextDueDate?: string;
+}
+
+export interface CombinedUtilityChargeMonthlyAmount {
+  buildingId: string;
+  billingMonth: string;
+  amountKsh: number;
+}
+
 type UtilityBillingStateChangeHandler = (
   state: UtilityBillingPersistedState
 ) => void | Promise<void>;
@@ -176,6 +193,36 @@ function monthSortDesc(a: string, b: string): number {
   return b.localeCompare(a);
 }
 
+function subtractUtcDays(value: string, days: number): string | null {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  const copy = new Date(parsed);
+  copy.setUTCDate(copy.getUTCDate() - days);
+  return copy.toISOString();
+}
+
+function isBaselineCutoverBill(record: UtilityBillRecord): boolean {
+  return (
+    record.amountKsh <= 0 &&
+    record.balanceKsh <= 0 &&
+    String(record.note ?? "").trim().startsWith("Baseline reading")
+  );
+}
+
+function isCombinedUtilityFeeRecord(record: UtilityBillRecord): boolean {
+  return String(record.note ?? "").trim().startsWith("Combined utility fee");
+}
+
+function hasUsableMeterNumber(value: string | undefined): boolean {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  return Boolean(
+    normalized && normalized !== "NO-METER" && normalized !== "METER-UNSET"
+  );
+}
+
 export class UtilityBillingService {
   private readonly meters = new Map<string, UtilityMeterRecord>();
   private readonly billsByLedger = new Map<string, UtilityBillRecord[]>();
@@ -184,6 +231,41 @@ export class UtilityBillingService {
     UtilityPaymentReferenceIndexEntry
   >();
   private stateChangeHandler?: UtilityBillingStateChangeHandler;
+  private combinedChargeBuildingIds = new Set<string>();
+  private readonly combinedChargeAmountsByMonth = new Map<string, number>();
+
+  setCombinedChargeBuildingIds(buildingIds: string[]): void {
+    this.combinedChargeBuildingIds = new Set(
+      buildingIds
+        .map((item) => normalizeBuildingId(item))
+        .filter((item) => item && item !== UTILITY_LEGACY_BUILDING_ID)
+    );
+    this.normalizeCombinedChargeState();
+  }
+
+  setCombinedChargeMonthlyAmounts(
+    records: CombinedUtilityChargeMonthlyAmount[]
+  ): void {
+    this.combinedChargeAmountsByMonth.clear();
+
+    for (const record of records) {
+      if (!record?.buildingId || !record?.billingMonth) {
+        continue;
+      }
+
+      const amountKsh = Number(record.amountKsh);
+      if (!Number.isFinite(amountKsh) || amountKsh <= 0) {
+        continue;
+      }
+
+      this.combinedChargeAmountsByMonth.set(
+        `${normalizeBuildingId(record.buildingId)}::${record.billingMonth}`,
+        Math.max(0, Math.round(amountKsh))
+      );
+    }
+
+    this.normalizeCombinedChargeState();
+  }
 
   setStateChangeHandler(handler?: UtilityBillingStateChangeHandler): void {
     this.stateChangeHandler = handler;
@@ -293,19 +375,9 @@ export class UtilityBillingService {
 
     for (const records of this.billsByLedger.values()) {
       records.sort((a, b) => monthSortDesc(a.billingMonth, b.billingMonth));
-      for (const record of records) {
-        for (const payment of record.payments) {
-          if (!payment.providerReference) {
-            continue;
-          }
-
-          this.paymentReferenceIndex.set(payment.providerReference, {
-            event: { ...payment },
-            billId: record.id
-          });
-        }
-      }
     }
+
+    this.normalizeCombinedChargeState();
   }
 
   upsertMeter(
@@ -538,6 +610,101 @@ export class UtilityBillingService {
     });
   }
 
+  listResidentVisibleBillsForHouse(
+    buildingId: string,
+    houseNumber: string,
+    utilityType?: UtilityType,
+    limit = 24
+  ): UtilityBillSnapshot[] {
+    return this.listBillsForHouse(buildingId, houseNumber, utilityType, limit).filter(
+      (item) => Number(item.balanceKsh ?? 0) <= 0 || this.isBillBalanceVisible(item)
+    );
+  }
+
+  hasHiddenUpcomingBalancesForHouse(
+    buildingId: string,
+    houseNumber: string,
+    utilityType?: UtilityType
+  ): boolean {
+    return this.listBillsForHouse(buildingId, houseNumber, utilityType, 120).some(
+      (item) => Number(item.balanceKsh ?? 0) > 0 && !this.isBillBalanceVisible(item)
+    );
+  }
+
+  listVisibleRoomBalances(buildingId?: string): UtilityRoomBalanceSummary[] {
+    const roomMonths = new Map<string, UtilityBillSnapshot>();
+
+    this.listBills({
+      buildingId,
+      limit: 2_000
+    })
+      .filter((item) => item.balanceKsh > 0 && this.isBillBalanceVisible(item))
+      .forEach((item) => {
+        const monthKey = `${item.buildingId}::${item.houseNumber}::${item.billingMonth}`;
+        const current = roomMonths.get(monthKey);
+        if (!current) {
+          roomMonths.set(monthKey, item);
+          return;
+        }
+
+        const currentScore = [
+          Number(current.amountKsh ?? 0),
+          Number(current.balanceKsh ?? 0),
+          current.updatedAt
+        ];
+        const candidateScore = [
+          Number(item.amountKsh ?? 0),
+          Number(item.balanceKsh ?? 0),
+          item.updatedAt
+        ];
+
+        for (let index = 0; index < candidateScore.length; index += 1) {
+          if (candidateScore[index] > currentScore[index]) {
+            roomMonths.set(monthKey, item);
+            break;
+          }
+          if (candidateScore[index] < currentScore[index]) {
+            break;
+          }
+        }
+      });
+
+    const grouped = new Map<string, UtilityRoomBalanceSummary>();
+    roomMonths.forEach((item) => {
+      const key = `${item.buildingId}::${item.houseNumber}`;
+      const current =
+        grouped.get(key) ??
+        {
+          buildingId: item.buildingId,
+          houseNumber: item.houseNumber,
+          currentDueKsh: 0,
+          arrearsKsh: 0,
+          totalOpenKsh: 0,
+          nextDueDate: undefined
+        };
+
+      current.totalOpenKsh += Math.max(0, Number(item.balanceKsh ?? 0));
+      if (Number(item.daysToDue ?? 0) < 0) {
+        current.arrearsKsh += Math.max(0, Number(item.balanceKsh ?? 0));
+      } else {
+        current.currentDueKsh += Math.max(0, Number(item.balanceKsh ?? 0));
+      }
+
+      if (
+        item.dueDate &&
+        (!current.nextDueDate || item.dueDate.localeCompare(current.nextDueDate) < 0)
+      ) {
+        current.nextDueDate = item.dueDate;
+      }
+
+      grouped.set(key, current);
+    });
+
+    return [...grouped.values()].sort((a, b) =>
+      `${a.buildingId}:${a.houseNumber}`.localeCompare(`${b.buildingId}:${b.houseNumber}`)
+    );
+  }
+
   recordPayment(
     utilityType: UtilityType,
     buildingId: string,
@@ -766,6 +933,15 @@ export class UtilityBillingService {
     };
   }
 
+  private isBillBalanceVisible(record: Pick<UtilityBillRecord, "dueDate">): boolean {
+    const visibleAt = subtractUtcDays(record.dueDate, UTILITY_BALANCE_VISIBILITY_WINDOW_DAYS);
+    if (!visibleAt) {
+      return true;
+    }
+
+    return Date.parse(visibleAt) <= Date.now();
+  }
+
   private findBillById(billId: string): UtilityBillRecord | null {
     for (const records of this.billsByLedger.values()) {
       const match = records.find((item) => item.id === billId);
@@ -775,5 +951,238 @@ export class UtilityBillingService {
     }
 
     return null;
+  }
+
+  private normalizeCombinedChargeState(): void {
+    this.normalizeBaselineCombinedCharges();
+    this.normalizeCombinedMonthlyCharges();
+    this.rebuildPaymentReferenceIndex();
+  }
+
+  private rebuildPaymentReferenceIndex(): void {
+    this.paymentReferenceIndex.clear();
+
+    for (const records of this.billsByLedger.values()) {
+      for (const record of records) {
+        for (const payment of record.payments) {
+          if (!payment.providerReference) {
+            continue;
+          }
+
+          this.paymentReferenceIndex.set(payment.providerReference, {
+            event: { ...payment },
+            billId: record.id
+          });
+        }
+      }
+    }
+  }
+
+  private normalizeBaselineCombinedCharges(): void {
+    const fallbackByRoom = new Map<string, number>();
+    const configuredMetersByRoom = new Map<string, Set<UtilityType>>();
+
+    for (const meter of this.meters.values()) {
+      if (!hasUsableMeterNumber(meter.meterNumber)) {
+        continue;
+      }
+
+      const roomKey = `${meter.buildingId}::${meter.houseNumber}`;
+      const bucket = configuredMetersByRoom.get(roomKey) ?? new Set<UtilityType>();
+      bucket.add(meter.utilityType);
+      configuredMetersByRoom.set(roomKey, bucket);
+    }
+
+    for (const records of this.billsByLedger.values()) {
+      for (const record of records) {
+        if (record.amountKsh <= 0) {
+          continue;
+        }
+
+        const roomKey = `${record.buildingId}::${record.houseNumber}`;
+        if (!fallbackByRoom.has(roomKey)) {
+          fallbackByRoom.set(roomKey, record.amountKsh);
+        }
+      }
+    }
+
+    const baselineGroups = new Map<string, UtilityBillRecord[]>();
+    for (const records of this.billsByLedger.values()) {
+      for (const record of records) {
+        if (!isBaselineCutoverBill(record)) {
+          continue;
+        }
+
+        const key = `${record.buildingId}::${record.houseNumber}::${record.billingMonth}`;
+        const bucket = baselineGroups.get(key) ?? [];
+        bucket.push(record);
+        baselineGroups.set(key, bucket);
+      }
+    }
+
+    for (const records of baselineGroups.values()) {
+      if (records.some((item) => item.amountKsh > 0 || item.balanceKsh > 0)) {
+        continue;
+      }
+
+      const reference = records[0];
+      if (!reference) {
+        continue;
+      }
+
+      const roomKey = `${reference.buildingId}::${reference.houseNumber}`;
+      if (!this.combinedChargeBuildingIds.has(reference.buildingId)) {
+        continue;
+      }
+
+      const configuredMeters = configuredMetersByRoom.get(roomKey);
+      if (configuredMeters && configuredMeters.has("water") && configuredMeters.has("electricity")) {
+        continue;
+      }
+
+      const fallbackAmount =
+        fallbackByRoom.get(roomKey) ??
+        this.getCombinedChargeAmount(reference.buildingId, reference.billingMonth) ??
+        DEFAULT_COMBINED_UTILITY_CHARGE_KSH;
+      if (!Number.isFinite(fallbackAmount) || fallbackAmount <= 0) {
+        continue;
+      }
+
+      const target =
+        records.find((item) => item.utilityType === "water") ?? reference;
+      target.amountKsh = fallbackAmount;
+      target.balanceKsh = fallbackAmount;
+      target.fixedChargeKsh = fallbackAmount;
+      target.previousReading = 0;
+      target.currentReading = 0;
+      target.unitsConsumed = 0;
+      target.ratePerUnitKsh = 0;
+      target.meterNumber = "NO-METER";
+      target.note = `Combined utility fee (water+electricity) for ${target.billingMonth}.`;
+      target.updatedAt = nowIso();
+      fallbackByRoom.set(roomKey, fallbackAmount);
+    }
+  }
+
+  private normalizeCombinedMonthlyCharges(): void {
+    const configuredMetersByRoom = new Map<string, Set<UtilityType>>();
+
+    for (const meter of this.meters.values()) {
+      if (!hasUsableMeterNumber(meter.meterNumber)) {
+        continue;
+      }
+
+      const roomKey = `${meter.buildingId}::${meter.houseNumber}`;
+      const bucket = configuredMetersByRoom.get(roomKey) ?? new Set<UtilityType>();
+      bucket.add(meter.utilityType);
+      configuredMetersByRoom.set(roomKey, bucket);
+    }
+
+    const combinedGroups = new Map<string, UtilityBillRecord[]>();
+    for (const records of this.billsByLedger.values()) {
+      for (const record of records) {
+        if (!isCombinedUtilityFeeRecord(record)) {
+          continue;
+        }
+
+        if (!this.combinedChargeBuildingIds.has(record.buildingId)) {
+          continue;
+        }
+
+        const roomKey = `${record.buildingId}::${record.houseNumber}`;
+        const configuredMeters = configuredMetersByRoom.get(roomKey);
+        if (configuredMeters && configuredMeters.has("water") && configuredMeters.has("electricity")) {
+          continue;
+        }
+
+        const key = `${roomKey}::${record.billingMonth}`;
+        const bucket = combinedGroups.get(key) ?? [];
+        bucket.push(record);
+        combinedGroups.set(key, bucket);
+      }
+    }
+
+    for (const records of combinedGroups.values()) {
+      if (records.length <= 1) {
+        continue;
+      }
+
+      const positiveRows = records.filter((item) => item.amountKsh > 0 || item.balanceKsh > 0);
+      if (positiveRows.length <= 1) {
+        continue;
+      }
+
+      const target =
+        records.find((item) => item.utilityType === "water") ?? records[0];
+      if (!target) {
+        continue;
+      }
+
+      const postedAmounts = records
+        .map((item) => Number(item.amountKsh ?? 0))
+        .filter((amount) => Number.isFinite(amount) && amount > 0);
+      const configuredAmount = this.getCombinedChargeAmount(
+        target.buildingId,
+        target.billingMonth
+      );
+      const combinedAmount =
+        postedAmounts.length > 0
+          ? Math.max(...postedAmounts)
+          : configuredAmount ?? DEFAULT_COMBINED_UTILITY_CHARGE_KSH;
+      const mergedPayments = records
+        .flatMap((item) => item.payments ?? [])
+        .sort((a, b) => b.paidAt.localeCompare(a.paidAt))
+        .map((payment) => ({
+          ...payment,
+          utilityType: target.utilityType,
+          buildingId: target.buildingId,
+          houseNumber: target.houseNumber,
+          billingMonth: target.billingMonth
+        }));
+      const totalPaid = mergedPayments.reduce(
+        (sum, payment) => sum + Number(payment.amountKsh ?? 0),
+        0
+      );
+
+      target.amountKsh = combinedAmount;
+      target.balanceKsh = Math.max(0, combinedAmount - totalPaid);
+      target.fixedChargeKsh = combinedAmount;
+      target.previousReading = 0;
+      target.currentReading = 0;
+      target.unitsConsumed = 0;
+      target.ratePerUnitKsh = 0;
+      target.meterNumber = "NO-METER";
+      target.note = `Combined utility fee (water+electricity) for ${target.billingMonth}.`;
+      target.payments = mergedPayments;
+      target.updatedAt = nowIso();
+
+      records.forEach((record) => {
+        if (record.id === target.id) {
+          return;
+        }
+
+        record.amountKsh = 0;
+        record.balanceKsh = 0;
+        record.fixedChargeKsh = 0;
+        record.previousReading = 0;
+        record.currentReading = 0;
+        record.unitsConsumed = 0;
+        record.ratePerUnitKsh = 0;
+        record.meterNumber = "NO-METER";
+        record.note = `Combined utility fee tracked on ${target.utilityType} for ${record.billingMonth}.`;
+        record.payments = [];
+        record.updatedAt = target.updatedAt;
+      });
+    }
+  }
+
+  private getCombinedChargeAmount(
+    buildingId: string,
+    billingMonth: string
+  ): number | undefined {
+    const value = this.combinedChargeAmountsByMonth.get(
+      `${normalizeBuildingId(buildingId)}::${billingMonth}`
+    );
+    return Number.isFinite(value) ? value : undefined;
   }
 }

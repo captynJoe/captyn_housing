@@ -4,7 +4,23 @@ import type {
   UpsertRentDueInput
 } from "../validation/schemas.js";
 
+type RentPaymentProvider = "mpesa" | "cash" | "bank" | "card";
+
+interface RecordRentPaymentInput {
+  buildingId: string;
+  houseNumber: string;
+  amountKsh: number;
+  provider: RentPaymentProvider;
+  providerReference: string;
+  phoneNumber?: string;
+  paidAt?: string;
+  billingMonth?: string;
+  tenantUserId?: string;
+  tenantName?: string;
+}
+
 export const RENT_LEGACY_BUILDING_ID = "__LEGACY__";
+const RENT_ROLLOVER_WINDOW_DAYS = 7;
 
 export interface RentPaymentEvent {
   id: string;
@@ -13,7 +29,7 @@ export interface RentPaymentEvent {
   billingMonth: string;
   tenantUserId?: string;
   tenantName?: string;
-  provider: "mpesa";
+  provider: RentPaymentProvider;
   providerReference: string;
   amountKsh: number;
   phoneNumber?: string;
@@ -155,6 +171,61 @@ function normalizeProviderReference(value: string): string {
   return value.trim().toUpperCase();
 }
 
+function addMonthsPreservingUtcDay(value: string, months: number): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth();
+  const day = date.getUTCDate();
+  const hours = date.getUTCHours();
+  const minutes = date.getUTCMinutes();
+  const seconds = date.getUTCSeconds();
+  const milliseconds = date.getUTCMilliseconds();
+
+  const targetMonthIndex = month + months;
+  const targetYear = year + Math.floor(targetMonthIndex / 12);
+  const targetMonth = ((targetMonthIndex % 12) + 12) % 12;
+  const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  const targetDay = Math.min(day, lastDay);
+
+  return new Date(
+    Date.UTC(
+      targetYear,
+      targetMonth,
+      targetDay,
+      hours,
+      minutes,
+      seconds,
+      milliseconds
+    )
+  ).toISOString();
+}
+
+function subtractUtcDays(value: string, days: number): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString();
+}
+
+function normalizeRentPaymentProvider(value: string | undefined): RentPaymentProvider {
+  switch (value) {
+    case "cash":
+    case "bank":
+    case "card":
+    case "mpesa":
+      return value;
+    default:
+      return "mpesa";
+  }
+}
+
 function paymentStatusForRecord(record: RentDueRecord): RentDueSnapshot["paymentStatus"] {
   if (record.balanceKsh <= 0) return "paid";
   if (record.balanceKsh >= record.monthlyRentKsh) return "not_paid";
@@ -218,6 +289,7 @@ export class RentLedgerService {
                 ...payment,
                 buildingId: normalizeBuildingId(payment.buildingId ?? buildingId),
                 houseNumber,
+                provider: normalizeRentPaymentProvider(payment.provider),
                 providerReference: normalizeProviderReference(payment.providerReference)
               }))
             : [],
@@ -246,6 +318,7 @@ export class RentLedgerService {
           ...payment,
           buildingId,
           houseNumber,
+          provider: normalizeRentPaymentProvider(payment.provider),
           providerReference: normalizeProviderReference(payment.providerReference)
         });
         this.pendingPayments.set(key, current);
@@ -347,10 +420,14 @@ export class RentLedgerService {
       return null;
     }
 
+    if (this.advanceRecordCyclesIfNeeded(record)) {
+      this.emitStateChange();
+    }
     return this.toSnapshot(record);
   }
 
   listRentDueRecords(limit = 500, buildingId?: string): RentDueSnapshot[] {
+    this.advanceVisibleRecordCycles(buildingId);
     return [...this.records.values()]
       .filter((record) => buildingMatchesScope(record.buildingId, buildingId))
       .map((record) => this.toSnapshot(record))
@@ -359,6 +436,7 @@ export class RentLedgerService {
   }
 
   listPayments(options: ListRentPaymentsOptions = {}): RentPaymentEvent[] {
+    this.advanceVisibleRecordCycles(options.buildingId);
     const normalizedBuildingId = options.buildingId
       ? normalizeBuildingId(options.buildingId)
       : undefined;
@@ -415,6 +493,21 @@ export class RentLedgerService {
   }
 
   recordMpesaPayment(input: RentMpesaCallbackInput): RecordMpesaPaymentResult {
+    return this.recordPayment({
+      buildingId: input.buildingId ?? "",
+      houseNumber: input.houseNumber,
+      amountKsh: input.amountKsh,
+      provider: "mpesa",
+      providerReference: input.providerReference,
+      phoneNumber: input.phoneNumber,
+      paidAt: input.paidAt,
+      billingMonth: input.billingMonth,
+      tenantUserId: input.tenantUserId,
+      tenantName: input.tenantName
+    });
+  }
+
+  recordPayment(input: RecordRentPaymentInput): RecordMpesaPaymentResult {
     const normalizedBuildingId = normalizeBuildingId(input.buildingId);
     const normalizedHouse = normalizeHouseNumber(input.houseNumber);
     const normalizedReference = normalizeProviderReference(input.providerReference);
@@ -440,7 +533,7 @@ export class RentLedgerService {
       billingMonth,
       tenantUserId: input.tenantUserId,
       tenantName: input.tenantName,
-      provider: "mpesa",
+      provider: normalizeRentPaymentProvider(input.provider),
       providerReference: normalizedReference,
       amountKsh: Math.round(input.amountKsh),
       phoneNumber: input.phoneNumber,
@@ -465,6 +558,8 @@ export class RentLedgerService {
         snapshot: null
       };
     }
+
+    this.advanceRecordCyclesIfNeeded(record);
 
     if (record.buildingId !== normalizedBuildingId) {
       const migratedRecord: RentDueRecord = {
@@ -516,7 +611,15 @@ export class RentLedgerService {
 
   collectAutoReminders(buildingId: string, houseNumber: string): RentReminderNotification[] {
     const record = this.resolveRecord(buildingId, houseNumber);
-    if (!record || record.balanceKsh <= 0) {
+    if (!record) {
+      return [];
+    }
+
+    const advanced = this.advanceRecordCyclesIfNeeded(record);
+    if (record.balanceKsh <= 0) {
+      if (advanced) {
+        this.emitStateChange();
+      }
       return [];
     }
 
@@ -569,7 +672,7 @@ export class RentLedgerService {
       }
     }
 
-    if (reminders.length > 0) {
+    if (advanced || reminders.length > 0) {
       this.emitStateChange();
     }
 
@@ -577,6 +680,7 @@ export class RentLedgerService {
   }
 
   listCollectionStatus(limit = 500, buildingId?: string) {
+    this.advanceVisibleRecordCycles(buildingId);
     return [...this.records.values()]
       .filter((record) => buildingMatchesScope(record.buildingId, buildingId))
       .map((record) => {
@@ -610,6 +714,46 @@ export class RentLedgerService {
         ? this.records.get(ledgerKey(RENT_LEGACY_BUILDING_ID, normalizedHouse))
         : undefined)
     );
+  }
+
+  private advanceVisibleRecordCycles(buildingId?: string) {
+    let changed = false;
+
+    for (const record of this.records.values()) {
+      if (!buildingMatchesScope(record.buildingId, buildingId)) {
+        continue;
+      }
+
+      changed = this.advanceRecordCyclesIfNeeded(record) || changed;
+    }
+
+    if (changed) {
+      this.emitStateChange();
+    }
+  }
+
+  private advanceRecordCyclesIfNeeded(record: RentDueRecord): boolean {
+    if (!Number.isFinite(record.monthlyRentKsh) || record.monthlyRentKsh <= 0) {
+      return false;
+    }
+
+    let changed = false;
+    let nextDueDate = addMonthsPreservingUtcDay(record.dueDate, 1);
+    let nextWindowStart = subtractUtcDays(nextDueDate, RENT_ROLLOVER_WINDOW_DAYS);
+    const now = new Date();
+
+    while (Date.parse(nextWindowStart) <= now.getTime()) {
+      record.balanceKsh = Math.max(0, Number(record.balanceKsh ?? 0)) + record.monthlyRentKsh;
+      record.dueDate = nextDueDate;
+      record.updatedAt = nowIso();
+      record.reminderState = {};
+      changed = true;
+
+      nextDueDate = addMonthsPreservingUtcDay(record.dueDate, 1);
+      nextWindowStart = subtractUtcDays(nextDueDate, RENT_ROLLOVER_WINDOW_DAYS);
+    }
+
+    return changed;
   }
 
   private applyPendingPayments(buildingId: string, houseNumber: string) {
@@ -663,8 +807,8 @@ export class RentLedgerService {
     record.balanceKsh = Math.max(0, record.balanceKsh - event.amountKsh);
     record.updatedAt = nowIso();
 
-    if (record.balanceKsh === 0) {
-      record.note = "Rent cleared by M-PESA payment events.";
+    if (record.balanceKsh === 0 && !record.note?.trim()) {
+      record.note = `Rent cleared by ${event.provider.toUpperCase()} payment event.`;
     }
   }
 

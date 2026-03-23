@@ -1,1 +1,10 @@
-{}
+{
+  "CAPTYN-BLDG-00002": {
+    "rentEnabled": false,
+    "waterEnabled": true,
+    "electricityEnabled": true,
+    "updatedAt": "2026-03-23T09:37:47.887Z",
+    "updatedByRole": "admin",
+    "note": "Village Inn is utility-only as of 2026-03-22."
+  }
+}

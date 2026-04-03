@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CAPTYN Housing - Resident Profile</title>
+    <title>Resident Profile</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -13,7 +13,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#0f7b76" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="CAPTYN Housing" />
+    <meta name="apple-mobile-web-app-title" content="Resident Profile" />
     <link rel="icon" href="/icons/housing-app.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/users.css?v=20260315g" />
     <link rel="stylesheet" href="/user.css?v=20260315g" />
@@ -22,7 +22,7 @@
     <div class="ambient" aria-hidden="true"></div>
     <main class="shell">
       <header class="topbar">
-        <a class="brand" href="/resident">CAPTYN Housing</a>
+        <a id="profile-brand" class="brand" href="/resident">Resident Profile</a>
         <div class="user-menu">
           <button
             id="user-menu-toggle"
@@ -55,7 +55,7 @@
 
       <header class="hero portal-header">
         <div class="portal-copy">
-          <h1>Resident profile</h1>
+          <h1 id="profile-hero-title">Resident Profile</h1>
           <p>
             Review your tenancy details, fill in your identification information,
             and confirm the agreement details tied to your active room.
@@ -296,6 +296,6 @@
       </section>
     </main>
 
-    <script type="module" src="/user.js?v=20260317a"></script>
+    <script type="module" src="/user.js?v=20260325a"></script>
   </body>
 </html>

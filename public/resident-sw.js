@@ -1,13 +1,13 @@
-const CACHE_NAME = "captyn-housing-resident-v20260315g";
+const CACHE_NAME = "resident-portal-v20260325b";
 const RESIDENT_SHELL_URL = "/resident";
 const USER_SHELL_URL = "/user/";
 const APP_ASSETS = [
   RESIDENT_SHELL_URL,
   USER_SHELL_URL,
-  "/users.css?v=20260315g",
-  "/users.js?v=20260315g",
+  "/users.css?v=20260325a",
+  "/users.js?v=20260325b",
   "/user.css?v=20260315g",
-  "/user.js?v=20260315g",
+  "/user.js?v=20260325a",
   "/password-visibility.js",
   "/manifest.webmanifest",
   "/icons/housing-app.svg",
@@ -15,7 +15,7 @@ const APP_ASSETS = [
 ];
 
 function getShellCacheKey(pathname) {
-  if (pathname === "/user" || pathname === "/user/" || pathname === "/users" || pathname === "/users/") {
+  if (pathname === "/user" || pathname === "/user/") {
     return USER_SHELL_URL;
   }
 
@@ -117,7 +117,7 @@ self.addEventListener("push", (event) => {
     };
   }
 
-  const title = data.title || "CAPTYN Housing";
+  const title = data.title || "Resident Portal";
   const options = {
     body: data.body || "New resident update available.",
     icon: "/icons/housing-app.svg",

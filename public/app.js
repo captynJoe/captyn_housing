@@ -378,7 +378,7 @@ async function loadPageData() {
     const message =
       error instanceof Error
         ? error.message
-        : "Unable to load CAPTYN Housing data.";
+        : "Unable to load resident portal data.";
     showError(message);
   } finally {
     refreshBtn.disabled = false;

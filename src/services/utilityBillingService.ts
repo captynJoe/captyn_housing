@@ -60,6 +60,18 @@ export interface UtilityBillSnapshot extends Omit<UtilityBillRecord, "payments">
   daysToDue: number;
 }
 
+export interface UtilityReadingSnapshot {
+  utilityType: UtilityType;
+  buildingId: string;
+  houseNumber: string;
+  billingMonth: string;
+  meterNumber: string;
+  previousReading: number;
+  currentReading: number;
+  unitsConsumed: number;
+  recordedAt: string;
+}
+
 export interface RecordUtilityPaymentResult {
   event: UtilityPaymentEvent;
   bill: UtilityBillSnapshot;
@@ -113,6 +125,12 @@ export interface UtilityRoomBalanceSummary {
 export interface CombinedUtilityChargeMonthlyAmount {
   buildingId: string;
   billingMonth: string;
+  amountKsh: number;
+}
+
+export interface CombinedUtilityChargeRoomAmount {
+  buildingId: string;
+  houseNumber: string;
   amountKsh: number;
 }
 
@@ -233,6 +251,7 @@ export class UtilityBillingService {
   private stateChangeHandler?: UtilityBillingStateChangeHandler;
   private combinedChargeBuildingIds = new Set<string>();
   private readonly combinedChargeAmountsByMonth = new Map<string, number>();
+  private readonly combinedChargeAmountsByRoom = new Map<string, number>();
 
   setCombinedChargeBuildingIds(buildingIds: string[]): void {
     this.combinedChargeBuildingIds = new Set(
@@ -260,6 +279,30 @@ export class UtilityBillingService {
 
       this.combinedChargeAmountsByMonth.set(
         `${normalizeBuildingId(record.buildingId)}::${record.billingMonth}`,
+        Math.max(0, Math.round(amountKsh))
+      );
+    }
+
+    this.normalizeCombinedChargeState();
+  }
+
+  setCombinedChargeRoomAmounts(records: CombinedUtilityChargeRoomAmount[]): void {
+    this.combinedChargeAmountsByRoom.clear();
+
+    for (const record of records) {
+      if (!record?.buildingId || !record?.houseNumber) {
+        continue;
+      }
+
+      const amountKsh = Number(record.amountKsh);
+      if (!Number.isFinite(amountKsh) || amountKsh <= 0) {
+        continue;
+      }
+
+      this.combinedChargeAmountsByRoom.set(
+        `${normalizeBuildingId(record.buildingId)}::${normalizeHouseNumber(
+          record.houseNumber
+        )}`,
         Math.max(0, Math.round(amountKsh))
       );
     }
@@ -458,6 +501,53 @@ export class UtilityBillingService {
       .map((item) => ({ ...item }));
   }
 
+  purgeHouse(buildingId: string, houseNumber: string): boolean {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const normalizedHouse = normalizeHouseNumber(houseNumber);
+    let changed = false;
+
+    for (const [key, meter] of this.meters.entries()) {
+      if (
+        meter.buildingId === normalizedBuildingId &&
+        meter.houseNumber === normalizedHouse
+      ) {
+        this.meters.delete(key);
+        changed = true;
+      }
+    }
+
+    for (const [key, records] of this.billsByLedger.entries()) {
+      const sample = records[0];
+      if (!sample) {
+        continue;
+      }
+
+      if (
+        sample.buildingId === normalizedBuildingId &&
+        sample.houseNumber === normalizedHouse
+      ) {
+        this.billsByLedger.delete(key);
+        changed = true;
+      }
+    }
+
+    if (
+      this.combinedChargeAmountsByRoom.delete(
+        `${normalizedBuildingId}::${normalizedHouse}`
+      )
+    ) {
+      changed = true;
+    }
+
+    if (!changed) {
+      return false;
+    }
+
+    this.rebuildPaymentReferenceIndex();
+    this.emitStateChange();
+    return true;
+  }
+
   createBill(
     utilityType: UtilityType,
     buildingId: string,
@@ -619,6 +709,40 @@ export class UtilityBillingService {
     return this.listBillsForHouse(buildingId, houseNumber, utilityType, limit).filter(
       (item) => Number(item.balanceKsh ?? 0) <= 0 || this.isBillBalanceVisible(item)
     );
+  }
+
+  listLatestReadingsForHouse(
+    buildingId: string,
+    houseNumber: string,
+    limit = 120
+  ): UtilityReadingSnapshot[] {
+    const latestByType = new Map<UtilityType, UtilityReadingSnapshot>();
+
+    this.listBillsForHouse(buildingId, houseNumber, undefined, limit).forEach((item) => {
+      if (String(item.meterNumber ?? "").trim() === "NO-METER") {
+        return;
+      }
+
+      if (latestByType.has(item.utilityType)) {
+        return;
+      }
+
+      latestByType.set(item.utilityType, {
+        utilityType: item.utilityType,
+        buildingId: item.buildingId,
+        houseNumber: item.houseNumber,
+        billingMonth: item.billingMonth,
+        meterNumber: item.meterNumber,
+        previousReading: item.previousReading,
+        currentReading: item.currentReading,
+        unitsConsumed: item.unitsConsumed,
+        recordedAt: item.updatedAt
+      });
+    });
+
+    return (["water", "electricity"] as UtilityType[])
+      .map((utilityType) => latestByType.get(utilityType))
+      .filter((item): item is UtilityReadingSnapshot => Boolean(item));
   }
 
   hasHiddenUpcomingBalancesForHouse(
@@ -1041,6 +1165,7 @@ export class UtilityBillingService {
       }
 
       const fallbackAmount =
+        this.getCombinedChargeAmountForRoom(reference.buildingId, reference.houseNumber) ??
         fallbackByRoom.get(roomKey) ??
         this.getCombinedChargeAmount(reference.buildingId, reference.billingMonth) ??
         DEFAULT_COMBINED_UTILITY_CHARGE_KSH;
@@ -1108,13 +1233,17 @@ export class UtilityBillingService {
       }
 
       const positiveRows = records.filter((item) => item.amountKsh > 0 || item.balanceKsh > 0);
-      if (positiveRows.length <= 1) {
-        continue;
-      }
-
       const target =
         records.find((item) => item.utilityType === "water") ?? records[0];
       if (!target) {
+        continue;
+      }
+
+      const roomAmount = this.getCombinedChargeAmountForRoom(
+        target.buildingId,
+        target.houseNumber
+      );
+      if (positiveRows.length <= 1 && roomAmount == null) {
         continue;
       }
 
@@ -1126,9 +1255,10 @@ export class UtilityBillingService {
         target.billingMonth
       );
       const combinedAmount =
-        postedAmounts.length > 0
+        roomAmount ??
+        (postedAmounts.length > 0
           ? Math.max(...postedAmounts)
-          : configuredAmount ?? DEFAULT_COMBINED_UTILITY_CHARGE_KSH;
+          : configuredAmount ?? DEFAULT_COMBINED_UTILITY_CHARGE_KSH);
       const mergedPayments = records
         .flatMap((item) => item.payments ?? [])
         .sort((a, b) => b.paidAt.localeCompare(a.paidAt))
@@ -1182,6 +1312,16 @@ export class UtilityBillingService {
   ): number | undefined {
     const value = this.combinedChargeAmountsByMonth.get(
       `${normalizeBuildingId(buildingId)}::${billingMonth}`
+    );
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  private getCombinedChargeAmountForRoom(
+    buildingId: string,
+    houseNumber: string
+  ): number | undefined {
+    const value = this.combinedChargeAmountsByRoom.get(
+      `${normalizeBuildingId(buildingId)}::${normalizeHouseNumber(houseNumber)}`
     );
     return Number.isFinite(value) ? value : undefined;
   }

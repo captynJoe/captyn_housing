@@ -599,6 +599,24 @@ small {
   width: 90px;
 }
 
+.registry-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.registry-status-warn {
+  color: #8a4c00;
+  background: #fff2d9;
+  border: 1px solid #f2d19c;
+}
+
 @media (max-width: 1200px) {
   .metrics-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));

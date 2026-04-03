@@ -5,9 +5,16 @@ import {
   uploadImageFiles,
   validateImageFiles
 } from "./cloudinary-upload.js";
+import {
+  applyDocumentBranding,
+  getResidentPortalTitle,
+  getResidentShellBrand
+} from "./portal-branding.js";
 
 const RESIDENT_TOKEN_KEY = "captyn_resident_session_token";
-const RESIDENT_SW_URL = "/resident-sw.js?v=20260315g";
+const RESIDENT_SESSION_TOKEN_KEY = "captyn_resident_session_token_session";
+const RESIDENT_REMEMBER_DEVICE_KEY = "captyn_resident_remember_device";
+const RESIDENT_SW_URL = "/resident-sw.js?v=20260325b";
 
 let deferredInstallPrompt = null;
 let residentSwRegistrationPromise = null;
@@ -17,6 +24,8 @@ const authStateEl = document.getElementById("auth-state");
 const feedbackBoxEl = document.getElementById("feedback-box");
 const userMenuToggleEl = document.getElementById("user-menu-toggle");
 const userMenuPanelEl = document.getElementById("user-menu-panel");
+const residentBrandEl = document.getElementById("resident-brand");
+const residentHeroTitleEl = document.getElementById("resident-hero-title");
 
 const residentAuthPanelEl = document.getElementById("resident-auth-panel");
 const residentSessionPanelEl = document.getElementById("resident-session-panel");
@@ -48,6 +57,7 @@ const authBuildingIdEl = document.getElementById("auth-building-id");
 const authHouseNumberEl = document.getElementById("auth-house-number");
 const authPhoneNumberEl = document.getElementById("auth-phone-number");
 const authPasswordEl = document.getElementById("auth-password");
+const residentRememberDeviceEl = document.getElementById("resident-remember-device");
 const signupIdentityTypeEl = document.getElementById("signup-identity-type");
 const signupIdentityNumberEl = document.getElementById("signup-identity-number");
 const signupOccupationStatusEl = document.getElementById("signup-occupation-status");
@@ -145,6 +155,28 @@ const DEFAULT_PAYMENT_ACCESS = Object.freeze({
 const VALID_RESIDENT_VIEWS = new Set(["overview", "support", "payments", "notices"]);
 const REPORT_ATTACHMENT_LIMIT = 4;
 
+function readStoredResidentToken() {
+  const rememberedToken = localStorage.getItem(RESIDENT_TOKEN_KEY) ?? "";
+  if (rememberedToken) {
+    return {
+      token: rememberedToken,
+      rememberDevice: true
+    };
+  }
+
+  const sessionToken = sessionStorage.getItem(RESIDENT_SESSION_TOKEN_KEY) ?? "";
+  return {
+    token: sessionToken,
+    rememberDevice: false
+  };
+}
+
+function readStoredRememberDevicePreference() {
+  return localStorage.getItem(RESIDENT_REMEMBER_DEVICE_KEY) === "true";
+}
+
+const INITIAL_RESIDENT_STORAGE = readStoredResidentToken();
+
 const state = {
   buildings: [],
   residentSession: null,
@@ -155,10 +187,15 @@ const state = {
   pushSubscriptionEndpoint: "",
   utilityBills: [],
   utilityMeters: [],
+  utilityLatestReadings: [],
   rentPayments: [],
   utilityPayments: [],
   paymentAccess: { ...DEFAULT_PAYMENT_ACCESS },
-  residentToken: localStorage.getItem(RESIDENT_TOKEN_KEY) ?? "",
+  residentToken: INITIAL_RESIDENT_STORAGE.token,
+  rememberResidentDevice:
+    INITIAL_RESIDENT_STORAGE.token !== ""
+      ? INITIAL_RESIDENT_STORAGE.rememberDevice
+      : readStoredRememberDevicePreference(),
   rentPaymentPollTimer: null,
   rentPaymentPollAttempts: 0,
   rentCheckoutRequestId: null,
@@ -356,6 +393,125 @@ function toIsoFromDateTimeLocal(value) {
 
 function utilityLabel(utilityType) {
   return utilityType === "water" ? "Water" : "Electricity";
+}
+
+function formatReadingValue(value) {
+  return Number(value ?? 0).toLocaleString("en-US");
+}
+
+function normalizeUtilityMeterDisplay(value) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized || normalized === "NO-METER" || normalized === "METER-UNSET") {
+    return "";
+  }
+
+  return normalized;
+}
+
+function appendLatestUtilityReadingCards(container, latestReadings = [], meters = []) {
+  if (!(container instanceof HTMLElement)) {
+    return 0;
+  }
+
+  const latestReadingByType = new Map();
+  if (Array.isArray(latestReadings)) {
+    latestReadings.forEach((item) => {
+      if (!item?.utilityType || latestReadingByType.has(item.utilityType)) {
+        return;
+      }
+
+      latestReadingByType.set(item.utilityType, item);
+    });
+  }
+
+  const latestMeterByType = new Map();
+  if (Array.isArray(meters)) {
+    meters.forEach((item) => {
+      if (!item?.utilityType || latestMeterByType.has(item.utilityType)) {
+        return;
+      }
+
+      latestMeterByType.set(item.utilityType, item);
+    });
+  }
+
+  let appendedCount = 0;
+
+  ["water", "electricity"].forEach((utilityType) => {
+    const reading = latestReadingByType.get(utilityType) ?? null;
+    const meter = latestMeterByType.get(utilityType) ?? null;
+    if (!reading && !meter) {
+      return;
+    }
+
+    appendedCount += 1;
+    const meterNumber =
+      normalizeUtilityMeterDisplay(reading?.meterNumber) ||
+      normalizeUtilityMeterDisplay(meter?.meterNumber);
+
+    const card = document.createElement("article");
+    card.className = "stack-item utility-bill-card utility-reading-card";
+
+    const top = document.createElement("div");
+    top.className = "stack-top";
+
+    const title = document.createElement("strong");
+    title.className = "item-title";
+    title.textContent = utilityLabel(utilityType);
+
+    const chip = document.createElement("span");
+    chip.className = "item-chip chip-clear";
+    chip.textContent = reading ? "Last recording" : "Meter on file";
+
+    top.append(title, chip);
+
+    const details = document.createElement("p");
+    details.className = "item-details";
+    details.textContent = reading
+      ? `${meterNumber ? `Meter ${meterNumber} • ` : ""}Reading ${formatReadingValue(
+          reading.previousReading
+        )} -> ${formatReadingValue(reading.currentReading)} for ${reading.billingMonth}.`
+      : `${
+          meterNumber ? `Meter ${meterNumber} is on file. ` : ""
+        }Waiting for the first recorded reading.`;
+
+    const meta = document.createElement("dl");
+    meta.className = "utility-bill-meta";
+    meta.innerHTML = reading
+      ? `
+        <div>
+          <dt>Recorded</dt>
+          <dd>${formatDateTime(reading.recordedAt)}</dd>
+        </div>
+        <div>
+          <dt>Usage</dt>
+          <dd>${formatReadingValue(reading.unitsConsumed)} units</dd>
+        </div>
+        <div>
+          <dt>Meter</dt>
+          <dd>${escapeHtml(meterNumber || "Pending")}</dd>
+        </div>
+      `
+      : `
+        <div>
+          <dt>Status</dt>
+          <dd>No reading posted yet</dd>
+        </div>
+        <div>
+          <dt>Meter</dt>
+          <dd>${escapeHtml(meterNumber || "Pending")}</dd>
+        </div>
+        <div>
+          <dt>Last update</dt>
+          <dd>${formatDateTime(meter?.updatedAt)}</dd>
+        </div>
+      `;
+
+    card.append(top, details, meta);
+    container.append(card);
+  });
+
+  return appendedCount;
 }
 
 function normalizeBillingMonthInput(value) {
@@ -730,6 +886,50 @@ function getResidentBuildingLabel() {
 
   const building = state.buildings.find((item) => item.id === session.buildingId);
   return building ? `${building.name} (${building.id})` : session.buildingId;
+}
+
+function getSelectedResidentBuildingName() {
+  const selectedBuildingId =
+    authBuildingIdEl instanceof HTMLSelectElement
+      ? String(authBuildingIdEl.value || "").trim()
+      : "";
+  return (
+    state.buildings.find((item) => item.id === selectedBuildingId)?.name ?? ""
+  );
+}
+
+function updateResidentBranding() {
+  const sessionBuildingName = state.residentSession
+    ? state.buildings.find((item) => item.id === state.residentSession.buildingId)?.name ?? ""
+    : "";
+  const buildingName = sessionBuildingName || getSelectedResidentBuildingName();
+  const shellBrand = getResidentShellBrand(buildingName);
+  const pageTitle = getResidentPortalTitle(buildingName);
+
+  if (residentBrandEl instanceof HTMLElement) {
+    residentBrandEl.textContent = shellBrand;
+  }
+  if (residentHeroTitleEl instanceof HTMLElement) {
+    residentHeroTitleEl.textContent = pageTitle;
+  }
+
+  applyDocumentBranding(pageTitle, shellBrand);
+}
+
+function syncRememberDeviceToggle() {
+  if (!(residentRememberDeviceEl instanceof HTMLInputElement)) {
+    return;
+  }
+
+  residentRememberDeviceEl.checked = Boolean(state.rememberResidentDevice);
+}
+
+function getRememberDeviceSelection() {
+  if (residentRememberDeviceEl instanceof HTMLInputElement) {
+    return residentRememberDeviceEl.checked;
+  }
+
+  return Boolean(state.rememberResidentDevice);
 }
 
 function syncModalBodyState() {
@@ -1323,12 +1523,32 @@ function getResidentToken() {
   return state.residentToken || "";
 }
 
-function saveResidentToken(token) {
+function saveResidentToken(token, options = {}) {
+  const rememberDevice =
+    typeof options.rememberDevice === "boolean"
+      ? options.rememberDevice
+      : state.rememberResidentDevice;
   state.residentToken = token;
+  state.rememberResidentDevice = rememberDevice;
+
   if (token) {
-    localStorage.setItem(RESIDENT_TOKEN_KEY, token);
+    if (rememberDevice) {
+      localStorage.setItem(RESIDENT_TOKEN_KEY, token);
+      sessionStorage.removeItem(RESIDENT_SESSION_TOKEN_KEY);
+      localStorage.setItem(RESIDENT_REMEMBER_DEVICE_KEY, "true");
+    } else {
+      sessionStorage.setItem(RESIDENT_SESSION_TOKEN_KEY, token);
+      localStorage.removeItem(RESIDENT_TOKEN_KEY);
+      localStorage.removeItem(RESIDENT_REMEMBER_DEVICE_KEY);
+    }
   } else {
     localStorage.removeItem(RESIDENT_TOKEN_KEY);
+    sessionStorage.removeItem(RESIDENT_SESSION_TOKEN_KEY);
+    localStorage.removeItem(RESIDENT_REMEMBER_DEVICE_KEY);
+  }
+
+  if (residentRememberDeviceEl instanceof HTMLInputElement) {
+    residentRememberDeviceEl.checked = rememberDevice && Boolean(token);
   }
 }
 
@@ -1654,7 +1874,7 @@ async function ensureResidentServiceWorkerRegistration() {
       .register(RESIDENT_SW_URL, { scope: "/" })
       .catch((error) => {
         residentSwRegistrationPromise = null;
-        console.error("Failed to register CAPTYN Housing service worker", error);
+        console.error("Failed to register resident portal service worker", error);
         return null;
       });
   }
@@ -2021,6 +2241,7 @@ function renderAuthBuildingOptions(buildings) {
     residentLoginBtnEl.disabled = true;
     residentSignupBtnEl.disabled = true;
     residentForgotBtnEl.disabled = true;
+    updateResidentBranding();
     return;
   }
 
@@ -2035,6 +2256,8 @@ function renderAuthBuildingOptions(buildings) {
     option.textContent = `${building.name} (${building.id})`;
     authBuildingIdEl.append(option);
   });
+
+  updateResidentBranding();
 }
 
 function renderReports(reports) {
@@ -2188,8 +2411,13 @@ function renderRentDue(rentDue, fallbackMessage) {
   updateRentPaymentGuidance();
 }
 
-function renderUtilityBills(bills, meters = [], fallbackMessage) {
+function renderUtilityBills(bills, meters = [], fallbackMessage, latestReadings = []) {
   utilityBillsListEl.replaceChildren();
+  const latestReadingCount = appendLatestUtilityReadingCards(
+    utilityBillsListEl,
+    latestReadings,
+    meters
+  );
 
   if (!Array.isArray(bills) || bills.length === 0) {
     if (fallbackMessage) {
@@ -2208,8 +2436,12 @@ function renderUtilityBills(bills, meters = [], fallbackMessage) {
     const empty = document.createElement("p");
     empty.className = "empty";
     empty.textContent = fallbackMessage
-      ? fallbackMessage
-      : "Water and electricity balances plus previous/current readings will appear once monthly bills are posted.";
+      ? latestReadingCount > 0
+        ? `${fallbackMessage} The last recorded meter readings are shown above.`
+        : fallbackMessage
+      : latestReadingCount > 0
+        ? "The last recorded meter readings are shown above. Water and electricity balances will appear once monthly bills are posted."
+        : "Water and electricity balances plus previous/current readings will appear once monthly bills are posted.";
     utilityBillsListEl.append(empty);
     updateUtilityPaymentGuidance();
     return;
@@ -2431,7 +2663,12 @@ function syncUtilityPaymentFormFromBalances() {
     utilityPaymentMonthEl.value = bill.billingMonth;
   }
 
-  renderUtilityBills(state.utilityBills, state.utilityMeters);
+  renderUtilityBills(
+    state.utilityBills,
+    state.utilityMeters,
+    undefined,
+    state.utilityLatestReadings
+  );
   syncUtilityBillCardSelection();
 
   if (!bill) {
@@ -2628,12 +2865,13 @@ function showSignedOutState() {
   updateResidentNavDots();
   state.utilityBills = [];
   state.utilityMeters = [];
+  state.utilityLatestReadings = [];
   state.utilitySelectedBillMonthByType = {
     water: null,
     electricity: null
   };
   state.paymentAccess = { ...DEFAULT_PAYMENT_ACCESS };
-  renderUtilityBills([], []);
+  renderUtilityBills([], [], undefined, []);
   renderUtilityPayments([]);
   renderOverviewSession();
   setActiveResidentView("payments");
@@ -2641,6 +2879,8 @@ function showSignedOutState() {
   syncUtilityPaymentFormFromBalances();
   applyPaymentAccessUi();
   renderPwaControls();
+  syncRememberDeviceToggle();
+  updateResidentBranding();
 }
 
 function showSignedInState() {
@@ -2680,6 +2920,8 @@ function showSignedInState() {
     setActiveResidentView(state.activeResidentView);
   }
   renderPwaControls();
+  syncRememberDeviceToggle();
+  updateResidentBranding();
 }
 
 async function loadResidentSession() {
@@ -2744,7 +2986,13 @@ async function loadTenantData() {
     renderRentPayments(state.rentPayments, rentPaymentsPayload.message);
     state.utilityBills = utilitiesPayload.data ?? [];
     state.utilityMeters = utilitiesPayload.meters ?? [];
-    renderUtilityBills(state.utilityBills, state.utilityMeters, utilitiesPayload.message);
+    state.utilityLatestReadings = utilitiesPayload.latestReadings ?? [];
+    renderUtilityBills(
+      state.utilityBills,
+      state.utilityMeters,
+      utilitiesPayload.message,
+      state.utilityLatestReadings
+    );
     syncUtilityPaymentFormFromBalances();
     state.utilityPayments = utilityPaymentsPayload.data ?? [];
     renderUtilityPayments(state.utilityPayments, utilityPaymentsPayload.message);
@@ -2862,7 +3110,9 @@ async function loginResident(event) {
       throw new Error("Resident session token was not returned.");
     }
 
-    saveResidentToken(token);
+    saveResidentToken(token, {
+      rememberDevice: getRememberDeviceSelection()
+    });
 
     const loaded = await loadResidentSession();
     if (!loaded) {
@@ -2933,7 +3183,9 @@ async function signupResident() {
       throw new Error("Resident session token was not returned.");
     }
 
-    saveResidentToken(token);
+    saveResidentToken(token, {
+      rememberDevice: getRememberDeviceSelection()
+    });
     authPasswordEl.value = "";
     signupIdentityNumberEl.value = "";
     signupOccupationStatusEl.value = "";
@@ -3003,7 +3255,9 @@ async function submitResidentPasswordChange(event) {
 
     const token = response.data?.token;
     if (token) {
-      saveResidentToken(token);
+      saveResidentToken(token, {
+        rememberDevice: state.rememberResidentDevice
+      });
     }
 
     residentPasswordNewEl.value = "";
@@ -3783,7 +4037,7 @@ async function signOutResident() {
     // local sign-out still proceeds
   }
 
-  saveResidentToken("");
+  saveResidentToken("", { rememberDevice: false });
   state.residentSession = null;
   showSignedOutState();
   showFeedback("Signed out.", "success");
@@ -3872,6 +4126,16 @@ function startResidentPortal() {
   if (openNoticesViewBtnEl) {
     openNoticesViewBtnEl.addEventListener("click", () => {
       setActiveResidentView("notices", { scroll: true });
+    });
+  }
+
+  authBuildingIdEl?.addEventListener("change", () => {
+    updateResidentBranding();
+  });
+
+  if (residentRememberDeviceEl instanceof HTMLInputElement) {
+    residentRememberDeviceEl.addEventListener("change", () => {
+      state.rememberResidentDevice = residentRememberDeviceEl.checked;
     });
   }
 

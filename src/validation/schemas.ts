@@ -698,7 +698,8 @@ export const landlordUtilityRegistryUpsertSchema = z.object({
         electricityMeterNumber: optionalMeterNumberSchema,
         householdMembers: householdMembersSchema.optional(),
         waterFixedChargeKsh: optionalFixedChargeSchema,
-        electricityFixedChargeKsh: optionalFixedChargeSchema
+        electricityFixedChargeKsh: optionalFixedChargeSchema,
+        combinedUtilityChargeKsh: optionalFixedChargeSchema
       })
     )
     .min(1)
@@ -822,7 +823,7 @@ export const createRentPaymentSchema = z.object({
 export const recordAdminRentPaymentSchema = z.object({
   amountKsh: z.number().positive().max(500_000),
   provider: utilityPaymentProviderSchema.default("cash"),
-  providerReference: nonEmptyString.max(120),
+  providerReference: nonEmptyString.max(120).optional(),
   billingMonth: billingMonthSchema.optional(),
   paidAt: z.string().datetime().optional(),
   phoneNumber: kenyaPhoneSchema.optional()

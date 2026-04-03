@@ -687,6 +687,23 @@ button,
   justify-content: flex-end;
 }
 
+#resident-auth-form .remember-device-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--ink-800);
+}
+
+#resident-auth-form .remember-device-toggle input {
+  width: auto;
+  margin: 0;
+}
+
 #resident-auth-form .action-row button {
   width: 100%;
   min-width: 0;

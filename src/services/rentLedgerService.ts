@@ -492,6 +492,51 @@ export class RentLedgerService {
     return [...resolved, ...pending].sort((a, b) => b.paidAt.localeCompare(a.paidAt));
   }
 
+  purgeHouse(buildingId: string, houseNumber: string): boolean {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const normalizedHouse = normalizeHouseNumber(houseNumber);
+    const keys = [
+      ledgerKey(normalizedBuildingId, normalizedHouse),
+      ledgerKey(RENT_LEGACY_BUILDING_ID, normalizedHouse)
+    ];
+    const referencesToDelete = new Set<string>();
+    let changed = false;
+
+    for (const key of keys) {
+      const record = this.records.get(key);
+      if (record) {
+        record.payments.forEach((payment) => {
+          if (payment.providerReference) {
+            referencesToDelete.add(payment.providerReference);
+          }
+        });
+        this.records.delete(key);
+        changed = true;
+      }
+
+      const pending = this.pendingPayments.get(key);
+      if (pending && pending.length > 0) {
+        pending.forEach((payment) => {
+          if (payment.providerReference) {
+            referencesToDelete.add(payment.providerReference);
+          }
+        });
+        this.pendingPayments.delete(key);
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      return false;
+    }
+
+    referencesToDelete.forEach((reference) => {
+      this.paymentReferenceIndex.delete(reference);
+    });
+    this.emitStateChange();
+    return true;
+  }
+
   recordMpesaPayment(input: RentMpesaCallbackInput): RecordMpesaPaymentResult {
     return this.recordPayment({
       buildingId: input.buildingId ?? "",
@@ -686,6 +731,10 @@ export class RentLedgerService {
       .map((record) => {
         const snapshot = this.toSnapshot(record);
         const latestPayment = record.payments[0];
+        const totalPaidKsh = record.payments.reduce(
+          (sum, payment) => sum + Math.max(0, Number(payment.amountKsh ?? 0)),
+          0
+        );
         return {
           buildingId: snapshot.buildingId,
           houseNumber: snapshot.houseNumber,
@@ -694,6 +743,7 @@ export class RentLedgerService {
           dueDate: snapshot.dueDate,
           paymentStatus: snapshot.paymentStatus,
           paidAmountKsh: snapshot.paidAmountKsh,
+          totalPaidKsh,
           latestPaymentReference: latestPayment?.providerReference,
           latestPaymentAt: latestPayment?.paidAt,
           latestPaymentAmountKsh: latestPayment?.amountKsh

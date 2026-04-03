@@ -115,6 +115,7 @@ test("records admin rent payments with provider metadata against an existing pro
   assert.equal(outcome.event.provider, "cash");
   assert.equal(outcome.event.providerReference, "CASH-001");
   assert.equal(service.listPayments({ buildingId: BUILDING_A, houseNumber: "M-2" })[0].provider, "cash");
+  assert.equal(service.listCollectionStatus(10, BUILDING_A)[0]?.totalPaidKsh, 1500);
 });
 
 test("keeps unmatched admin payment pending until rent profile exists", () => {
@@ -142,6 +143,28 @@ test("keeps unmatched admin payment pending until rent profile exists", () => {
   assert.equal(snapshot.payments.length, 1);
   assert.equal(snapshot.payments[0].provider, "bank");
   assert.equal(snapshot.payments[0].providerReference, "BANK-777");
+});
+
+test("purges room-scoped rent state when a room is removed", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.upsertRentDue(BUILDING_A, "Z-9", {
+    monthlyRentKsh: 9000,
+    balanceKsh: 9000,
+    dueDate
+  });
+  service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "Z-9",
+    amountKsh: 1200,
+    provider: "cash",
+    providerReference: "z9-cash-001"
+  });
+
+  assert.equal(service.purgeHouse(BUILDING_A, "z-9"), true);
+  assert.equal(service.getRentDue(BUILDING_A, "Z-9"), null);
+  assert.equal(service.listPayments({ buildingId: BUILDING_A, houseNumber: "Z-9" }).length, 0);
 });
 
 test("does not add next month rent before the rollover window opens", () => {

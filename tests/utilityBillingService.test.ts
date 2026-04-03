@@ -67,6 +67,319 @@ test("creates monthly bill and computes units from previous reading", () => {
   assert.equal(next.balanceKsh, 1300);
 });
 
+test("lists the latest recorded reading for each utility in a house", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.upsertMeter("water", BUILDING_A, "A-12", {
+    meterNumber: "WTR-001"
+  });
+  service.upsertMeter("electricity", BUILDING_A, "A-12", {
+    meterNumber: "ELEC-0001"
+  });
+
+  service.createBill("water", BUILDING_A, "A-12", {
+    billingMonth: "2026-02",
+    currentReading: 90,
+    ratePerUnitKsh: 10,
+    fixedChargeKsh: 0,
+    dueDate
+  });
+  service.createBill("water", BUILDING_A, "A-12", {
+    billingMonth: "2026-03",
+    currentReading: 120,
+    ratePerUnitKsh: 10,
+    fixedChargeKsh: 0,
+    dueDate
+  });
+  service.createBill("electricity", BUILDING_A, "A-12", {
+    billingMonth: "2026-03",
+    currentReading: 45,
+    ratePerUnitKsh: 12,
+    fixedChargeKsh: 50,
+    dueDate
+  });
+
+  const readings = service.listLatestReadingsForHouse(BUILDING_A, "A-12");
+  assert.equal(readings.length, 2);
+
+  const water = readings.find((item) => item.utilityType === "water");
+  const electricity = readings.find((item) => item.utilityType === "electricity");
+
+  assert.ok(water);
+  assert.equal(water.billingMonth, "2026-03");
+  assert.equal(water.previousReading, 90);
+  assert.equal(water.currentReading, 120);
+
+  assert.ok(electricity);
+  assert.equal(electricity.billingMonth, "2026-03");
+  assert.equal(electricity.currentReading, 45);
+});
+
+test("ignores newer fixed-charge bills when selecting the latest meter reading", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
+  const createdAt = new Date().toISOString();
+
+  service.importState({
+    meters: [
+      {
+        utilityType: "water",
+        buildingId: BUILDING_B,
+        houseNumber: "12",
+        meterNumber: "WTR-0012",
+        updatedAt: createdAt
+      }
+    ],
+    bills: [
+      {
+        id: "metered-water-12-2026-01",
+        utilityType: "water",
+        buildingId: BUILDING_B,
+        houseNumber: "12",
+        billingMonth: "2026-01",
+        meterNumber: "WTR-0012",
+        previousReading: 50,
+        currentReading: 82,
+        unitsConsumed: 32,
+        ratePerUnitKsh: 10,
+        fixedChargeKsh: 0,
+        amountKsh: 320,
+        balanceKsh: 0,
+        dueDate,
+        createdAt,
+        updatedAt: "2026-03-01T12:00:00.000Z",
+        payments: [],
+        status: "clear",
+        daysToDue: 0
+      },
+      {
+        id: "fixed-water-12-2026-02",
+        utilityType: "water",
+        buildingId: BUILDING_B,
+        houseNumber: "12",
+        billingMonth: "2026-02",
+        meterNumber: "NO-METER",
+        previousReading: 0,
+        currentReading: 0,
+        unitsConsumed: 0,
+        ratePerUnitKsh: 0,
+        fixedChargeKsh: 350,
+        amountKsh: 350,
+        balanceKsh: 350,
+        dueDate,
+        createdAt,
+        updatedAt: "2026-03-15T12:00:00.000Z",
+        payments: [],
+        status: "due_soon",
+        daysToDue: 3
+      }
+    ]
+  } as any);
+
+  const readings = service.listLatestReadingsForHouse(BUILDING_B, "12");
+  assert.equal(readings.length, 1);
+  assert.equal(readings[0].utilityType, "water");
+  assert.equal(readings[0].billingMonth, "2026-01");
+  assert.equal(readings[0].currentReading, 82);
+});
+
+test("room-level combined utility override recalculates existing combined-charge overdue", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
+  const createdAt = new Date().toISOString();
+
+  service.importState({
+    meters: [],
+    bills: [
+      {
+        id: "combined-water-4-2026-03",
+        utilityType: "water",
+        buildingId: BUILDING_B,
+        houseNumber: "4",
+        billingMonth: "2026-03",
+        meterNumber: "NO-METER",
+        previousReading: 0,
+        currentReading: 0,
+        unitsConsumed: 0,
+        ratePerUnitKsh: 0,
+        fixedChargeKsh: 350,
+        amountKsh: 350,
+        balanceKsh: 350,
+        dueDate,
+        createdAt,
+        updatedAt: "2026-03-20T12:00:00.000Z",
+        payments: [],
+        note: "Combined utility fee (water+electricity) for 2026-03.",
+        status: "overdue",
+        daysToDue: -5
+      },
+      {
+        id: "combined-electricity-4-2026-03",
+        utilityType: "electricity",
+        buildingId: BUILDING_B,
+        houseNumber: "4",
+        billingMonth: "2026-03",
+        meterNumber: "NO-METER",
+        previousReading: 0,
+        currentReading: 0,
+        unitsConsumed: 0,
+        ratePerUnitKsh: 0,
+        fixedChargeKsh: 350,
+        amountKsh: 350,
+        balanceKsh: 350,
+        dueDate,
+        createdAt,
+        updatedAt: "2026-03-20T12:00:00.000Z",
+        payments: [],
+        note: "Combined utility fee (water+electricity) for 2026-03.",
+        status: "overdue",
+        daysToDue: -5
+      }
+    ]
+  } as any);
+
+  service.setCombinedChargeBuildingIds([BUILDING_B]);
+  service.setCombinedChargeRoomAmounts([
+    {
+      buildingId: BUILDING_B,
+      houseNumber: "4",
+      amountKsh: 220
+    }
+  ]);
+
+  const bills = service.listBills({ buildingId: BUILDING_B, houseNumber: "4" });
+  const water = bills.find((item) => item.utilityType === "water");
+  const electricity = bills.find((item) => item.utilityType === "electricity");
+
+  assert.ok(water);
+  assert.equal(water.amountKsh, 220);
+  assert.equal(water.balanceKsh, 220);
+  assert.equal(water.fixedChargeKsh, 220);
+
+  assert.ok(electricity);
+  assert.equal(electricity.amountKsh, 0);
+  assert.equal(electricity.balanceKsh, 0);
+});
+
+test("room-level combined utility override is ignored for rooms with both meters", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
+  const createdAt = new Date().toISOString();
+
+  service.importState({
+    meters: [
+      {
+        utilityType: "water",
+        buildingId: BUILDING_B,
+        houseNumber: "5",
+        meterNumber: "WTR-0005",
+        updatedAt: createdAt
+      },
+      {
+        utilityType: "electricity",
+        buildingId: BUILDING_B,
+        houseNumber: "5",
+        meterNumber: "ELEC-0005",
+        updatedAt: createdAt
+      }
+    ],
+    bills: [
+      {
+        id: "combined-water-5-2026-03",
+        utilityType: "water",
+        buildingId: BUILDING_B,
+        houseNumber: "5",
+        billingMonth: "2026-03",
+        meterNumber: "NO-METER",
+        previousReading: 0,
+        currentReading: 0,
+        unitsConsumed: 0,
+        ratePerUnitKsh: 0,
+        fixedChargeKsh: 350,
+        amountKsh: 350,
+        balanceKsh: 350,
+        dueDate,
+        createdAt,
+        updatedAt: "2026-03-20T12:00:00.000Z",
+        payments: [],
+        note: "Combined utility fee (water+electricity) for 2026-03.",
+        status: "overdue",
+        daysToDue: -5
+      },
+      {
+        id: "combined-electricity-5-2026-03",
+        utilityType: "electricity",
+        buildingId: BUILDING_B,
+        houseNumber: "5",
+        billingMonth: "2026-03",
+        meterNumber: "NO-METER",
+        previousReading: 0,
+        currentReading: 0,
+        unitsConsumed: 0,
+        ratePerUnitKsh: 0,
+        fixedChargeKsh: 350,
+        amountKsh: 350,
+        balanceKsh: 350,
+        dueDate,
+        createdAt,
+        updatedAt: "2026-03-20T12:00:00.000Z",
+        payments: [],
+        note: "Combined utility fee (water+electricity) for 2026-03.",
+        status: "overdue",
+        daysToDue: -5
+      }
+    ]
+  } as any);
+
+  service.setCombinedChargeBuildingIds([BUILDING_B]);
+  service.setCombinedChargeRoomAmounts([
+    {
+      buildingId: BUILDING_B,
+      houseNumber: "5",
+      amountKsh: 180
+    }
+  ]);
+
+  const bills = service.listBills({ buildingId: BUILDING_B, houseNumber: "5" });
+  const water = bills.find((item) => item.utilityType === "water");
+  const electricity = bills.find((item) => item.utilityType === "electricity");
+
+  assert.ok(water);
+  assert.equal(water.amountKsh, 350);
+  assert.equal(water.balanceKsh, 350);
+
+  assert.ok(electricity);
+  assert.equal(electricity.amountKsh, 350);
+  assert.equal(electricity.balanceKsh, 350);
+});
+
+test("purges room-scoped utility state when a room is removed", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.upsertMeter("water", BUILDING_B, "46", {
+    meterNumber: "WTR-0046"
+  });
+  service.createBill("water", BUILDING_B, "46", {
+    billingMonth: "2026-03",
+    currentReading: 110,
+    ratePerUnitKsh: 15,
+    fixedChargeKsh: 0,
+    dueDate
+  });
+  service.recordPayment("water", BUILDING_B, "46", {
+    amountKsh: 200,
+    provider: "cash",
+    providerReference: "UTIL-46-CASH-200"
+  });
+
+  assert.equal(service.purgeHouse(BUILDING_B, "46"), true);
+  assert.equal(service.listMeters({ buildingId: BUILDING_B, houseNumber: "46" }).length, 0);
+  assert.equal(service.listBills({ buildingId: BUILDING_B, houseNumber: "46" }).length, 0);
+  assert.equal(service.listPayments({ buildingId: BUILDING_B, houseNumber: "46" }).length, 0);
+});
+
 test("records utility payment against oldest outstanding bill", () => {
   const service = new UtilityBillingService();
   const dueDate = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();

@@ -1,6 +1,5 @@
 import { initPasswordVisibilityToggles } from "./password-visibility.js";
 import { initResponsiveTables } from "./mobile-table.js";
-import { createUploadedImageGallery } from "./cloudinary-upload.js";
 
 const authStatusEl = document.getElementById("auth-status");
 const adminRoleEl = document.getElementById("admin-role");
@@ -8,11 +7,15 @@ const adminLogoutBtnEl = document.getElementById("admin-logout-btn");
 const refreshAllBtnEl = document.getElementById("refresh-all-btn");
 
 const metricBuildingsEl = document.getElementById("metric-buildings");
-const metricOpenTicketsEl = document.getElementById("metric-open-tickets");
-const metricBreachedTicketsEl = document.getElementById("metric-breached-tickets");
-const metricOverdueRentEl = document.getElementById("metric-overdue-rent");
-const metricRentPaymentsEl = document.getElementById("metric-rent-payments");
-const metricWifiPaymentsEl = document.getElementById("metric-wifi-payments");
+const metricActiveLandlordsEl = document.getElementById("metric-active-landlords");
+const metricUnassignedBuildingsEl = document.getElementById("metric-unassigned-buildings");
+const metricPendingLandlordAccessEl = document.getElementById(
+  "metric-pending-landlord-access"
+);
+const metricResidentRecoveryEl = document.getElementById("metric-resident-recovery");
+const metricAccountRecoveryEl = document.getElementById("metric-account-recovery");
+const platformSummaryEl = document.getElementById("platform-summary");
+const registrySummaryEl = document.getElementById("registry-summary");
 
 const landlordAccessBodyEl = document.getElementById("landlord-access-body");
 const refreshLandlordAccessBtn = document.getElementById("refresh-landlord-access");
@@ -25,12 +28,10 @@ const refreshAccountPasswordRecoveryBtn = document.getElementById(
   "refresh-account-password-recovery"
 );
 
-const ticketsBodyEl = document.getElementById("tickets-body");
-const ticketFilterFormEl = document.getElementById("ticket-filter-form");
-const ticketFilterStatusEl = document.getElementById("ticket-filter-status");
-const ticketFilterQueueEl = document.getElementById("ticket-filter-queue");
-const ticketFilterHouseEl = document.getElementById("ticket-filter-house");
-const refreshTicketsBtn = document.getElementById("refresh-tickets");
+const landlordPortfoliosBodyEl = document.getElementById("landlord-portfolios-body");
+const refreshPortfoliosBtn = document.getElementById("refresh-portfolios");
+const ownershipGapBodyEl = document.getElementById("ownership-gap-body");
+const refreshOwnershipGapsBtn = document.getElementById("refresh-ownership-gaps");
 
 const buildingCreateFormEl = document.getElementById("building-create-form");
 const buildingNameEl = document.getElementById("building-name");
@@ -41,91 +42,38 @@ const buildingCctvStatusEl = document.getElementById("building-cctv-status");
 const buildingsBodyEl = document.getElementById("buildings-body");
 const refreshBuildingsBtn = document.getElementById("refresh-buildings");
 
-const utilityMeterFormEl = document.getElementById("utility-meter-form");
-const utilityMeterTypeEl = document.getElementById("utility-meter-type");
-const utilityMeterHouseEl = document.getElementById("utility-meter-house");
-const utilityMeterNumberEl = document.getElementById("utility-meter-number");
-
-const utilityBillFormEl = document.getElementById("utility-bill-form");
-const utilityBillTypeEl = document.getElementById("utility-bill-type");
-const utilityBillHouseEl = document.getElementById("utility-bill-house");
-const utilityBillMonthEl = document.getElementById("utility-bill-month");
-const utilityBillPreviousReadingEl = document.getElementById(
-  "utility-bill-previous-reading"
-);
-const utilityBillCurrentReadingEl = document.getElementById(
-  "utility-bill-current-reading"
-);
-const utilityBillRateEl = document.getElementById("utility-bill-rate");
-const utilityBillFixedEl = document.getElementById("utility-bill-fixed");
-const utilityBillDueDateEl = document.getElementById("utility-bill-due-date");
-const utilityBillNoteEl = document.getElementById("utility-bill-note");
-const utilityBillsBodyEl = document.getElementById("utility-bills-body");
-const refreshUtilityBillsBtn = document.getElementById("refresh-utility-bills");
-
-const utilityPaymentFormEl = document.getElementById("utility-payment-form");
-const utilityPaymentTypeEl = document.getElementById("utility-payment-type");
-const utilityPaymentHouseEl = document.getElementById("utility-payment-house");
-const utilityPaymentMonthEl = document.getElementById("utility-payment-month");
-const utilityPaymentAmountEl = document.getElementById("utility-payment-amount");
-const utilityPaymentProviderEl = document.getElementById(
-  "utility-payment-provider"
-);
-const utilityPaymentReferenceEl = document.getElementById(
-  "utility-payment-reference"
-);
-const utilityPaymentPaidAtEl = document.getElementById("utility-payment-paid-at");
-const utilityPaymentNoteEl = document.getElementById("utility-payment-note");
-const utilityPaymentsBodyEl = document.getElementById("utility-payments-body");
-const refreshUtilityPaymentsBtn = document.getElementById(
-  "refresh-utility-payments"
-);
-
-const rentUpsertFormEl = document.getElementById("rent-upsert-form");
-const rentBuildingEl = document.getElementById("rent-building");
-const rentHouseEl = document.getElementById("rent-house");
-const rentDueDateEl = document.getElementById("rent-due-date");
-const rentMonthlyEl = document.getElementById("rent-monthly");
-const rentBalanceEl = document.getElementById("rent-balance");
-const rentNoteEl = document.getElementById("rent-note");
-const rentLedgerBodyEl = document.getElementById("rent-ledger-body");
-const refreshRentLedgerBtn = document.getElementById("refresh-rent-ledger");
-
-const rentPaymentsFilterFormEl = document.getElementById("rent-payments-filter-form");
-const rentPaymentsBuildingEl = document.getElementById("rent-payments-building");
-const rentPaymentsHouseEl = document.getElementById("rent-payments-house");
-const rentPaymentsBodyEl = document.getElementById("rent-payments-body");
-const refreshRentPaymentsBtn = document.getElementById("refresh-rent-payments");
-
-const wifiPackagesBuildingEl = document.getElementById("wifi-packages-building");
-const packageListEl = document.getElementById("package-list");
-const packageTemplate = document.getElementById("package-card-template");
-const paymentsBodyEl = document.getElementById("payments-body");
-const refreshPackagesBtn = document.getElementById("refresh-packages");
-const refreshPaymentsBtn = document.getElementById("refresh-payments");
-
 const adminErrorEl = document.getElementById("admin-error");
 
 const state = {
   role: "-",
-  buildings: [],
-  selectedWifiPackagesBuildingId: null
+  overview: null,
+  buildings: []
 };
 
 initResponsiveTables();
 
 function showError(message) {
+  if (!(adminErrorEl instanceof HTMLElement)) {
+    return;
+  }
+
   adminErrorEl.textContent = message;
   adminErrorEl.classList.remove("hidden");
 }
 
 function clearError() {
+  if (!(adminErrorEl instanceof HTMLElement)) {
+    return;
+  }
+
   adminErrorEl.textContent = "";
   adminErrorEl.classList.add("hidden");
 }
 
 function setStatus(message) {
-  authStatusEl.textContent = message;
+  if (authStatusEl instanceof HTMLElement) {
+    authStatusEl.textContent = message;
+  }
 }
 
 function redirectToLogin() {
@@ -144,16 +92,12 @@ function formatDateTime(value) {
   }).format(date);
 }
 
-function formatCurrency(value) {
-  return `KSh ${Number(value ?? 0).toLocaleString("en-US")}`;
-}
-
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
+    .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
 
@@ -161,27 +105,14 @@ function normalizeHouse(value) {
   return String(value ?? "").trim().toUpperCase();
 }
 
-function toIsoFromDateTimeLocal(value) {
-  const raw = String(value ?? "").trim();
-  if (!raw) {
-    return null;
+function appendEmptyRow(body, colspan, message) {
+  if (!(body instanceof HTMLElement)) {
+    return;
   }
 
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return date.toISOString();
-}
-
-function toBillingMonth(value) {
-  const raw = String(value ?? "").trim();
-  if (!raw) {
-    return "";
-  }
-
-  return raw.slice(0, 7);
+  const row = document.createElement("tr");
+  row.innerHTML = `<td colspan="${colspan}">${escapeHtml(message)}</td>`;
+  body.append(row);
 }
 
 async function requestJson(url, options = {}) {
@@ -191,7 +122,6 @@ async function requestJson(url, options = {}) {
   });
 
   const payload = await response.json().catch(() => ({}));
-
   if (!response.ok) {
     const issueMessage = payload.issues?.[0]?.message;
     const err = new Error(
@@ -210,8 +140,7 @@ function handleAdminError(error, fallback) {
     return;
   }
 
-  const message = error instanceof Error ? error.message : fallback;
-  showError(message);
+  showError(error instanceof Error ? error.message : fallback);
 }
 
 async function ensureAdminSession() {
@@ -219,7 +148,11 @@ async function ensureAdminSession() {
     const payload = await requestJson("/api/auth/admin/session");
     const role = payload.data?.role ?? "admin";
     state.role = role;
-    adminRoleEl.textContent = `role: ${role}`;
+
+    if (adminRoleEl instanceof HTMLElement) {
+      adminRoleEl.textContent = `role: ${role}`;
+    }
+
     setStatus(`Signed in as ${role}.`);
     return true;
   } catch (error) {
@@ -229,12 +162,46 @@ async function ensureAdminSession() {
 }
 
 function renderOverview(overview) {
-  metricBuildingsEl.textContent = String(overview?.buildings ?? 0);
-  metricOpenTicketsEl.textContent = String(overview?.ticketsOpen ?? 0);
-  metricBreachedTicketsEl.textContent = String(overview?.ticketsBreached ?? 0);
-  metricOverdueRentEl.textContent = String(overview?.rentOverdue ?? 0);
-  metricRentPaymentsEl.textContent = String(overview?.rentPaymentsTotal ?? 0);
-  metricWifiPaymentsEl.textContent = String(overview?.wifiPaymentsTotal ?? 0);
+  state.overview = overview;
+
+  if (metricBuildingsEl instanceof HTMLElement) {
+    metricBuildingsEl.textContent = String(overview?.buildings ?? 0);
+  }
+  if (metricActiveLandlordsEl instanceof HTMLElement) {
+    metricActiveLandlordsEl.textContent = String(overview?.activeLandlords ?? 0);
+  }
+  if (metricUnassignedBuildingsEl instanceof HTMLElement) {
+    metricUnassignedBuildingsEl.textContent = String(overview?.unassignedBuildings ?? 0);
+  }
+  if (metricPendingLandlordAccessEl instanceof HTMLElement) {
+    metricPendingLandlordAccessEl.textContent = String(
+      overview?.pendingLandlordAccess ?? 0
+    );
+  }
+  if (metricResidentRecoveryEl instanceof HTMLElement) {
+    metricResidentRecoveryEl.textContent = String(
+      overview?.residentPasswordRecoveryPending ?? 0
+    );
+  }
+  if (metricAccountRecoveryEl instanceof HTMLElement) {
+    metricAccountRecoveryEl.textContent = String(
+      overview?.accountPasswordRecoveryPending ?? 0
+    );
+  }
+
+  if (platformSummaryEl instanceof HTMLElement) {
+    const buildings = Number(overview?.buildings ?? 0);
+    const assignedBuildings = Number(overview?.assignedBuildings ?? 0);
+    const trackedUnits = Number(overview?.trackedUnits ?? 0);
+    const pendingRecoveries =
+      Number(overview?.residentPasswordRecoveryPending ?? 0) +
+      Number(overview?.accountPasswordRecoveryPending ?? 0);
+
+    platformSummaryEl.textContent =
+      `${assignedBuildings} of ${buildings} buildings currently have a landlord owner, ` +
+      `${trackedUnits.toLocaleString("en-US")} tracked units are registered, and ` +
+      `${pendingRecoveries} password recovery request(s) are waiting in admin queues.`;
+  }
 }
 
 async function submitLandlordAccessDecision(requestId, action, note) {
@@ -265,6 +232,10 @@ async function revokeLandlordRole(userId, note) {
 }
 
 function renderLandlordAccessRequests(requests) {
+  if (!(landlordAccessBodyEl instanceof HTMLElement)) {
+    return;
+  }
+
   landlordAccessBodyEl.replaceChildren();
   const visibleRequests = Array.isArray(requests)
     ? requests.filter((item) => {
@@ -276,9 +247,7 @@ function renderLandlordAccessRequests(requests) {
     : [];
 
   if (visibleRequests.length === 0) {
-    const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="7">No landlord access requests found.</td>';
-    landlordAccessBodyEl.append(row);
+    appendEmptyRow(landlordAccessBodyEl, 7, "No landlord access requests found.");
     return;
   }
 
@@ -294,11 +263,11 @@ function renderLandlordAccessRequests(requests) {
     if (request.status === "pending") {
       row.innerHTML = `
         <td>${formatDateTime(request.requestedAt)}</td>
-        <td>${request.user.fullName}</td>
-        <td>${request.user.email}</td>
-        <td>${request.user.phone}</td>
-        <td><strong>${request.status}</strong></td>
-        <td>${reason}</td>
+        <td>${escapeHtml(request.user.fullName)}</td>
+        <td>${escapeHtml(request.user.email)}</td>
+        <td>${escapeHtml(request.user.phone)}</td>
+        <td><strong>${escapeHtml(request.status)}</strong></td>
+        <td>${escapeHtml(reason)}</td>
         <td>
           <div class="inline-fields compact-fields" style="grid-template-columns: 1fr 1fr 1fr;">
             <input data-action="note" type="text" maxlength="500" placeholder="Optional review note" />
@@ -322,16 +291,14 @@ function renderLandlordAccessRequests(requests) {
             await submitLandlordAccessDecision(
               request.id,
               action,
-              noteInput.value.trim()
+              noteInput instanceof HTMLInputElement ? noteInput.value.trim() : ""
             );
-            if (action === "approve") {
-              setStatus(
-                `Landlord request ${request.id.slice(0, 8)} approved. User can sign in to landlord portal with existing account password using email or phone (${request.user.phone}).`
-              );
-            } else {
-              setStatus(`Landlord request ${request.id.slice(0, 8)} rejected.`);
-            }
-            await loadLandlordAccessRequests();
+            setStatus(
+              action === "approve"
+                ? `Landlord request ${request.id.slice(0, 8)} approved.`
+                : `Landlord request ${request.id.slice(0, 8)} rejected.`
+            );
+            await Promise.all([loadOverview(), loadLandlordAccessRequests(), loadBuildings()]);
           } catch (error) {
             handleAdminError(error, "Failed to review landlord access request.");
           } finally {
@@ -355,14 +322,14 @@ function renderLandlordAccessRequests(requests) {
       if (canRevokeLandlord) {
         row.innerHTML = `
           <td>${formatDateTime(request.requestedAt)}</td>
-          <td>${request.user.fullName}</td>
-          <td>${request.user.email}</td>
-          <td>${request.user.phone}</td>
-          <td><strong>${request.status}</strong></td>
-          <td>${reason}</td>
+          <td>${escapeHtml(request.user.fullName)}</td>
+          <td>${escapeHtml(request.user.email)}</td>
+          <td>${escapeHtml(request.user.phone)}</td>
+          <td><strong>${escapeHtml(request.status)}</strong></td>
+          <td>${escapeHtml(reason)}</td>
           <td>
             <button data-action="revoke-landlord" type="button" class="btn-danger">Remove Landlord</button>
-            <br /><small>${reviewedAt} • ${reviewedBy}</small>
+            <br /><small>${escapeHtml(reviewedAt)} • ${escapeHtml(reviewedBy)}</small>
           </td>
         `;
 
@@ -396,7 +363,11 @@ function renderLandlordAccessRequests(requests) {
                 setStatus(
                   `Removed landlord role from ${request.user.fullName}. Cleared ${Number(revoked.clearedBuildingsCount ?? 0)} building owner link(s).`
                 );
-                await Promise.all([loadLandlordAccessRequests(), loadBuildings()]);
+                await Promise.all([
+                  loadOverview(),
+                  loadLandlordAccessRequests(),
+                  loadBuildings()
+                ]);
               } catch (error) {
                 handleAdminError(error, "Failed to remove landlord role.");
               } finally {
@@ -408,12 +379,12 @@ function renderLandlordAccessRequests(requests) {
       } else {
         row.innerHTML = `
           <td>${formatDateTime(request.requestedAt)}</td>
-          <td>${request.user.fullName}</td>
-          <td>${request.user.email}</td>
-          <td>${request.user.phone}</td>
-          <td><strong>${request.status}</strong></td>
-          <td>${reason}</td>
-          <td>${reviewedAt}<br /><small>${reviewedBy}</small></td>
+          <td>${escapeHtml(request.user.fullName)}</td>
+          <td>${escapeHtml(request.user.email)}</td>
+          <td>${escapeHtml(request.user.phone)}</td>
+          <td><strong>${escapeHtml(request.status)}</strong></td>
+          <td>${escapeHtml(reason)}</td>
+          <td>${escapeHtml(reviewedAt)}<br /><small>${escapeHtml(reviewedBy)}</small></td>
         `;
       }
     }
@@ -467,12 +438,14 @@ async function submitAccountPasswordRecoveryDecision(
 }
 
 function renderPasswordRecoveryRequests(requests) {
+  if (!(passwordRecoveryBodyEl instanceof HTMLElement)) {
+    return;
+  }
+
   passwordRecoveryBodyEl.replaceChildren();
 
   if (!Array.isArray(requests) || requests.length === 0) {
-    const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="7">No password recovery requests found.</td>';
-    passwordRecoveryBodyEl.append(row);
+    appendEmptyRow(passwordRecoveryBodyEl, 7, "No password recovery requests found.");
     return;
   }
 
@@ -485,16 +458,16 @@ function renderPasswordRecoveryRequests(requests) {
     if (request.status === "pending") {
       row.innerHTML = `
         <td>${formatDateTime(request.requestedAt)}</td>
-        <td>${request.buildingId}</td>
-        <td>${request.houseNumber}</td>
-        <td>${request.phoneMask ?? request.phoneNumber}</td>
-        <td><strong>${request.status}</strong></td>
-        <td>${residentNote}</td>
+        <td>${escapeHtml(request.buildingId)}</td>
+        <td>${escapeHtml(request.houseNumber)}</td>
+        <td>${escapeHtml(request.phoneMask ?? request.phoneNumber)}</td>
+        <td><strong>${escapeHtml(request.status)}</strong></td>
+        <td>${escapeHtml(residentNote)}</td>
         <td>
           <div class="inline-fields compact-fields" style="grid-template-columns: 1fr 1fr 1fr;">
             <input data-action="temporary-password" type="password" minlength="8" maxlength="128" placeholder="Temp password" />
             <input data-action="note" type="text" maxlength="500" placeholder="Admin note (optional)" />
-            <div style="display:flex;gap:8px;align-items:center;">
+            <div class="decision-actions">
               <button data-action="approve" type="button">Issue Reset</button>
               <button data-action="reject" type="button">Reject</button>
             </div>
@@ -516,22 +489,27 @@ function renderPasswordRecoveryRequests(requests) {
 
         void (async () => {
           try {
-            const temporaryPassword = tempPasswordInput.value.trim();
+            const temporaryPassword =
+              tempPasswordInput instanceof HTMLInputElement
+                ? tempPasswordInput.value.trim()
+                : "";
             if (action === "approve" && temporaryPassword.length < 8) {
               throw new Error("Temporary password must be at least 8 characters.");
             }
+
             await submitPasswordRecoveryDecision(
               request.id,
               action,
               temporaryPassword,
-              noteInput.value.trim()
+              noteInput instanceof HTMLInputElement ? noteInput.value.trim() : ""
             );
+
             setStatus(
-              `Password recovery request ${request.id.slice(0, 8)} ${
+              `Resident recovery ${request.id.slice(0, 8)} ${
                 action === "approve" ? "approved" : "rejected"
               }.`
             );
-            await loadPasswordRecoveryRequests();
+            await Promise.all([loadOverview(), loadPasswordRecoveryRequests()]);
           } catch (error) {
             handleAdminError(error, "Failed to review password recovery request.");
           } finally {
@@ -551,12 +529,12 @@ function renderPasswordRecoveryRequests(requests) {
     } else {
       row.innerHTML = `
         <td>${formatDateTime(request.requestedAt)}</td>
-        <td>${request.buildingId}</td>
-        <td>${request.houseNumber}</td>
-        <td>${request.phoneMask ?? request.phoneNumber}</td>
-        <td><strong>${request.status}</strong></td>
-        <td>${residentNote}</td>
-        <td>${reviewedAt}<br /><small>${reviewedBy}</small></td>
+        <td>${escapeHtml(request.buildingId)}</td>
+        <td>${escapeHtml(request.houseNumber)}</td>
+        <td>${escapeHtml(request.phoneMask ?? request.phoneNumber)}</td>
+        <td><strong>${escapeHtml(request.status)}</strong></td>
+        <td>${escapeHtml(residentNote)}</td>
+        <td>${escapeHtml(reviewedAt)}<br /><small>${escapeHtml(reviewedBy)}</small></td>
       `;
     }
 
@@ -567,12 +545,18 @@ function renderPasswordRecoveryRequests(requests) {
 }
 
 function renderAccountPasswordRecoveryRequests(requests) {
+  if (!(accountPasswordRecoveryBodyEl instanceof HTMLElement)) {
+    return;
+  }
+
   accountPasswordRecoveryBodyEl.replaceChildren();
 
   if (!Array.isArray(requests) || requests.length === 0) {
-    const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="7">No landlord account recovery requests found.</td>';
-    accountPasswordRecoveryBodyEl.append(row);
+    appendEmptyRow(
+      accountPasswordRecoveryBodyEl,
+      7,
+      "No landlord account recovery requests found."
+    );
     return;
   }
 
@@ -589,16 +573,16 @@ function renderAccountPasswordRecoveryRequests(requests) {
     if (request.status === "pending") {
       row.innerHTML = `
         <td>${formatDateTime(request.requestedAt)}</td>
-        <td>${request.fullName}</td>
-        <td>${request.role}</td>
-        <td>${identifier}</td>
-        <td><strong>${request.status}</strong></td>
-        <td>${accountNote}</td>
+        <td>${escapeHtml(request.fullName)}</td>
+        <td>${escapeHtml(request.role)}</td>
+        <td>${escapeHtml(identifier)}</td>
+        <td><strong>${escapeHtml(request.status)}</strong></td>
+        <td>${escapeHtml(accountNote)}</td>
         <td>
           <div class="inline-fields compact-fields" style="grid-template-columns: 1fr 1fr 1fr;">
             <input data-action="temporary-password" type="password" minlength="8" maxlength="128" placeholder="Temp password" />
             <input data-action="note" type="text" maxlength="500" placeholder="Admin note (optional)" />
-            <div style="display:flex;gap:8px;align-items:center;">
+            <div class="decision-actions">
               <button data-action="approve" type="button">Issue Reset</button>
               <button data-action="reject" type="button">Reject</button>
             </div>
@@ -620,22 +604,27 @@ function renderAccountPasswordRecoveryRequests(requests) {
 
         void (async () => {
           try {
-            const temporaryPassword = tempPasswordInput.value.trim();
+            const temporaryPassword =
+              tempPasswordInput instanceof HTMLInputElement
+                ? tempPasswordInput.value.trim()
+                : "";
             if (action === "approve" && temporaryPassword.length < 8) {
               throw new Error("Temporary password must be at least 8 characters.");
             }
+
             await submitAccountPasswordRecoveryDecision(
               request.id,
               action,
               temporaryPassword,
-              noteInput.value.trim()
+              noteInput instanceof HTMLInputElement ? noteInput.value.trim() : ""
             );
+
             setStatus(
-              `Account recovery request ${request.id.slice(0, 8)} ${
+              `Account recovery ${request.id.slice(0, 8)} ${
                 action === "approve" ? "approved" : "rejected"
               }.`
             );
-            await loadAccountPasswordRecoveryRequests();
+            await Promise.all([loadOverview(), loadAccountPasswordRecoveryRequests()]);
           } catch (error) {
             handleAdminError(error, "Failed to review account recovery request.");
           } finally {
@@ -655,12 +644,12 @@ function renderAccountPasswordRecoveryRequests(requests) {
     } else {
       row.innerHTML = `
         <td>${formatDateTime(request.requestedAt)}</td>
-        <td>${request.fullName}</td>
-        <td>${request.role}</td>
-        <td>${identifier}</td>
-        <td><strong>${request.status}</strong></td>
-        <td>${accountNote}</td>
-        <td>${reviewedAt}<br /><small>${reviewedBy}</small></td>
+        <td>${escapeHtml(request.fullName)}</td>
+        <td>${escapeHtml(request.role)}</td>
+        <td>${escapeHtml(identifier)}</td>
+        <td><strong>${escapeHtml(request.status)}</strong></td>
+        <td>${escapeHtml(accountNote)}</td>
+        <td>${escapeHtml(reviewedAt)}<br /><small>${escapeHtml(reviewedBy)}</small></td>
       `;
     }
 
@@ -670,303 +659,207 @@ function renderAccountPasswordRecoveryRequests(requests) {
   initPasswordVisibilityToggles(accountPasswordRecoveryBodyEl);
 }
 
-function createTicketStatusOptions(currentStatus) {
-  const statuses = ["open", "triaged", "in_progress", "resolved"];
-  return statuses
-    .map(
-      (status) =>
-        `<option value="${status}" ${status === currentStatus ? "selected" : ""}>${status}</option>`
-    )
-    .join("");
+function deriveLandlordPortfolios(buildings) {
+  const portfolios = new Map();
+
+  buildings.forEach((building) => {
+    if (!building.landlordUserId) {
+      return;
+    }
+
+    const key = building.landlordUserId;
+    const current = portfolios.get(key) ?? {
+      landlordUserId: key,
+      fullName: building.landlordOwnerName ?? "Unknown landlord",
+      phone: building.landlordOwnerPhone ?? "-",
+      role: building.landlordOwnerRole ?? "landlord",
+      buildingCount: 0,
+      trackedUnits: 0,
+      latestUpdatedAt: "",
+      buildings: []
+    };
+
+    current.buildingCount += 1;
+    current.trackedUnits +=
+      typeof building.units === "number" && Number.isFinite(building.units)
+        ? building.units
+        : 0;
+    current.buildings.push({
+      id: building.id,
+      name: building.name
+    });
+    if (!current.latestUpdatedAt || building.updatedAt > current.latestUpdatedAt) {
+      current.latestUpdatedAt = building.updatedAt;
+    }
+
+    portfolios.set(key, current);
+  });
+
+  return [...portfolios.values()].sort((left, right) => {
+    if (right.buildingCount !== left.buildingCount) {
+      return right.buildingCount - left.buildingCount;
+    }
+
+    return left.fullName.localeCompare(right.fullName);
+  });
 }
 
-function renderTickets(tickets) {
-  ticketsBodyEl.replaceChildren();
-
-  if (!Array.isArray(tickets) || tickets.length === 0) {
-    const row = document.createElement("tr");
-    row.innerHTML = `<td colspan="7">No tickets found.</td>`;
-    ticketsBodyEl.append(row);
+function renderLandlordPortfolios(buildings) {
+  if (!(landlordPortfoliosBodyEl instanceof HTMLElement)) {
     return;
   }
 
-  tickets.forEach((ticket) => {
-    const row = document.createElement("tr");
-    const slaText = ticket.slaBreached
-      ? `BREACHED (${ticket.slaHours}h)`
-      : `${ticket.slaHours}h (${ticket.slaState})`;
+  landlordPortfoliosBodyEl.replaceChildren();
+  const portfolios = deriveLandlordPortfolios(buildings);
 
-    const detailsText = ticket.details
-      ? `<div class="ticket-details">${escapeHtml(ticket.details)}</div>`
-      : "";
-    const replyText = ticket.resolutionNotes || ticket.adminNote;
-    const replyLine = replyText
-      ? `<div class="ticket-details muted">Last update: ${escapeHtml(replyText)}</div>`
-      : "";
+  if (portfolios.length === 0) {
+    appendEmptyRow(
+      landlordPortfoliosBodyEl,
+      6,
+      "No landlord portfolios yet. Assign buildings to landlord accounts first."
+    );
+    return;
+  }
+
+  portfolios.forEach((portfolio) => {
+    const row = document.createElement("tr");
+    const portfolioNames = portfolio.buildings
+      .map((item) => `${item.name} (${item.id})`)
+      .join(", ");
 
     row.innerHTML = `
-      <td><strong>${escapeHtml(ticket.title)}</strong><br /><small>${escapeHtml(ticket.id.slice(0, 8))} • ${escapeHtml(ticket.type)}</small>${detailsText}${replyLine}</td>
-      <td>${escapeHtml(ticket.houseNumber)}</td>
-      <td>${escapeHtml(ticket.queue)}</td>
-      <td>${escapeHtml(ticket.status)}</td>
-      <td>${slaText}</td>
-      <td>${formatDateTime(ticket.createdAt)}</td>
       <td>
-        <div class="inline-fields compact-fields" style="grid-template-columns: 1fr;">
-          <select data-action="status">${createTicketStatusOptions(ticket.status)}</select>
-          <input data-action="note" type="text" placeholder="admin note / resolution" />
-          <button data-action="save" type="button">Save</button>
-        </div>
+        <strong>${escapeHtml(portfolio.fullName)}</strong><br />
+        <small>${escapeHtml(portfolio.phone)}</small>
       </td>
+      <td>${escapeHtml(portfolio.role)}</td>
+      <td>${portfolio.buildingCount}</td>
+      <td>${portfolio.trackedUnits.toLocaleString("en-US")}</td>
+      <td>${escapeHtml(formatDateTime(portfolio.latestUpdatedAt))}</td>
+      <td><small>${escapeHtml(portfolioNames)}</small></td>
     `;
 
-    const ticketCell = row.children[0];
-    if (ticketCell instanceof HTMLTableCellElement) {
-      const gallery = createUploadedImageGallery(ticket.evidenceAttachments, {
-        linkLabel: "Open issue photo"
-      });
-      if (gallery) {
-        gallery.classList.add("ticket-attachment-gallery");
-        ticketCell.append(gallery);
-      }
-    }
-
-    const statusSelect = row.querySelector('select[data-action="status"]');
-    const noteInput = row.querySelector('input[data-action="note"]');
-    const saveButton = row.querySelector('button[data-action="save"]');
-
-    saveButton.addEventListener("click", async () => {
-      clearError();
-      saveButton.disabled = true;
-
-      const nextStatus = statusSelect.value;
-      const note = noteInput.value.trim();
-
-      try {
-        await requestJson(`/api/admin/tickets/${ticket.id}/status`, {
-          method: "PATCH",
-          headers: {
-            "content-type": "application/json"
-          },
-          body: JSON.stringify({
-            status: nextStatus,
-            adminNote: note || undefined,
-            resolutionNotes: nextStatus === "resolved" ? note || undefined : undefined
-          })
-        });
-
-        setStatus(`Ticket ${ticket.id.slice(0, 8)} updated to ${nextStatus}.`);
-        await Promise.all([loadOverview(), loadTickets()]);
-      } catch (error) {
-        handleAdminError(error, "Failed to update ticket status.");
-      } finally {
-        saveButton.disabled = false;
-      }
-    });
-
-    ticketsBodyEl.append(row);
+    landlordPortfoliosBodyEl.append(row);
   });
+}
+
+function renderOwnershipGaps(buildings) {
+  if (!(ownershipGapBodyEl instanceof HTMLElement)) {
+    return;
+  }
+
+  ownershipGapBodyEl.replaceChildren();
+  const gaps = buildings
+    .filter((building) => !building.landlordUserId)
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+
+  if (gaps.length === 0) {
+    appendEmptyRow(
+      ownershipGapBodyEl,
+      6,
+      "Every registered building currently has an assigned landlord owner."
+    );
+    return;
+  }
+
+  gaps.forEach((building) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>
+        <strong>${escapeHtml(building.name)}</strong><br />
+        <small>${escapeHtml(building.id)}</small>
+      </td>
+      <td>${escapeHtml(building.county)}</td>
+      <td>${escapeHtml(building.units ?? "-")}</td>
+      <td>${escapeHtml(building.cctvStatus)}</td>
+      <td>${escapeHtml(formatDateTime(building.updatedAt))}</td>
+      <td><small>Assign a landlord from Building Registry below.</small></td>
+    `;
+    ownershipGapBodyEl.append(row);
+  });
+}
+
+function renderRegistrySummary() {
+  if (!(registrySummaryEl instanceof HTMLElement)) {
+    return;
+  }
+
+  const buildings = state.buildings;
+  const assigned = buildings.filter((item) => item.landlordUserId).length;
+  const unassigned = buildings.length - assigned;
+  const trackedUnits = buildings.reduce(
+    (sum, item) =>
+      sum + (typeof item.units === "number" && Number.isFinite(item.units) ? item.units : 0),
+    0
+  );
+
+  registrySummaryEl.textContent =
+    `${assigned} building(s) are assigned, ${unassigned} are still waiting for an owner, ` +
+    `and ${trackedUnits.toLocaleString("en-US")} unit(s) are registered in the platform.`;
 }
 
 function renderBuildings(rows) {
+  if (!(buildingsBodyEl instanceof HTMLElement)) {
+    return;
+  }
+
   buildingsBodyEl.replaceChildren();
 
   if (!Array.isArray(rows) || rows.length === 0) {
-    const row = document.createElement("tr");
-    row.innerHTML = `<td colspan="9">No buildings configured.</td>`;
-    buildingsBodyEl.append(row);
+    appendEmptyRow(buildingsBodyEl, 9, "No buildings configured.");
     return;
   }
 
-  rows.forEach((building) => {
-    const ownerLabel = building.landlordOwnerName
-      ? `${building.landlordOwnerName}<br /><small>${building.landlordOwnerPhone ?? "-"}</small>`
-      : "<small>Unassigned</small>";
+  rows
+    .slice()
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .forEach((building) => {
+      const ownerLabel = building.landlordOwnerName
+        ? `${escapeHtml(building.landlordOwnerName)}<br /><small>${escapeHtml(
+            building.landlordOwnerPhone ?? "-"
+          )}</small>`
+        : '<small class="registry-status registry-status-warn">Unassigned</small>';
 
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td><small>${building.id}</small></td>
-      <td>${building.name}</td>
-      <td>${building.county}</td>
-      <td>${building.address}</td>
-      <td>${building.units ?? "-"}</td>
-      <td>${ownerLabel}</td>
-      <td>${building.cctvStatus}</td>
-      <td>${formatDateTime(building.updatedAt)}</td>
-      <td>
-        <button
-          type="button"
-          data-action="assign-building-landlord"
-          data-building-id="${building.id}"
-          data-building-name="${building.name}"
-          data-owner-phone="${building.landlordOwnerPhone ?? ""}"
-        >
-          Assign Landlord
-        </button>
-        <button
-          type="button"
-          class="btn-danger"
-          data-action="delete-building"
-          data-building-id="${building.id}"
-          data-building-name="${building.name}"
-        >
-          Delete
-        </button>
-      </td>
-    `;
-    buildingsBodyEl.append(row);
-  });
-}
-
-function renderWifiPackageBuildingOptions(rows) {
-  wifiPackagesBuildingEl.replaceChildren();
-
-  if (!Array.isArray(rows) || rows.length === 0) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "No building available";
-    wifiPackagesBuildingEl.append(option);
-    wifiPackagesBuildingEl.disabled = true;
-    state.selectedWifiPackagesBuildingId = null;
-    return;
-  }
-
-  wifiPackagesBuildingEl.disabled = false;
-
-  rows.forEach((building) => {
-    const option = document.createElement("option");
-    option.value = building.id;
-    option.textContent = `${building.name} (${building.id})`;
-    wifiPackagesBuildingEl.append(option);
-  });
-
-  const selectedBuildingId =
-    state.selectedWifiPackagesBuildingId &&
-    rows.some((item) => item.id === state.selectedWifiPackagesBuildingId)
-      ? state.selectedWifiPackagesBuildingId
-      : rows[0]?.id ?? "";
-
-  state.selectedWifiPackagesBuildingId = selectedBuildingId || null;
-  wifiPackagesBuildingEl.value = selectedBuildingId;
-}
-
-function renderUtilityBills(rows) {
-  utilityBillsBodyEl.replaceChildren();
-
-  if (!Array.isArray(rows) || rows.length === 0) {
-    const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="9">No utility bills posted.</td>';
-    utilityBillsBodyEl.append(row);
-    return;
-  }
-
-  rows.forEach((item) => {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td>${item.utilityType}</td>
-      <td>${item.houseNumber}</td>
-      <td>${item.billingMonth}</td>
-      <td>${item.meterNumber}</td>
-      <td>${Number(item.unitsConsumed ?? 0).toLocaleString("en-US")}</td>
-      <td>${formatCurrency(item.amountKsh)}</td>
-      <td>${formatCurrency(item.balanceKsh)}</td>
-      <td>${formatDateTime(item.dueDate)}</td>
-      <td>${item.status}</td>
-    `;
-    utilityBillsBodyEl.append(row);
-  });
-}
-
-function renderUtilityPayments(rows) {
-  utilityPaymentsBodyEl.replaceChildren();
-
-  if (!Array.isArray(rows) || rows.length === 0) {
-    const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="7">No utility payments found.</td>';
-    utilityPaymentsBodyEl.append(row);
-    return;
-  }
-
-  rows.forEach((item) => {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td>${item.utilityType}</td>
-      <td>${item.houseNumber}</td>
-      <td>${item.billingMonth ?? "-"}</td>
-      <td>${item.provider}</td>
-      <td>${item.providerReference ?? "-"}</td>
-      <td>${formatCurrency(item.amountKsh)}</td>
-      <td>${formatDateTime(item.paidAt)}</td>
-    `;
-
-    utilityPaymentsBodyEl.append(row);
-  });
-}
-
-function renderRentLedger(rows) {
-  rentLedgerBodyEl.replaceChildren();
-
-  if (!Array.isArray(rows) || rows.length === 0) {
-    const row = document.createElement("tr");
-    row.innerHTML = `<td colspan="6">No rent profiles configured.</td>`;
-    rentLedgerBodyEl.append(row);
-    return;
-  }
-
-  rows.forEach((item) => {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td>${item.buildingId ?? "-"}</td>
-      <td>${item.houseNumber}</td>
-      <td>${item.status}</td>
-      <td>${formatCurrency(item.balanceKsh)}</td>
-      <td>${formatDateTime(item.dueDate)}</td>
-      <td>${formatDateTime(item.updatedAt)}</td>
-    `;
-    rentLedgerBodyEl.append(row);
-  });
-}
-
-function renderRentPayments(rows) {
-  rentPaymentsBodyEl.replaceChildren();
-
-  if (!Array.isArray(rows) || rows.length === 0) {
-    const row = document.createElement("tr");
-    row.innerHTML = `<td colspan="7">No rent payments found.</td>`;
-    rentPaymentsBodyEl.append(row);
-    return;
-  }
-
-  rows.forEach((item) => {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td>${item.providerReference}</td>
-      <td>${item.provider ?? "-"}</td>
-      <td>${item.buildingId ?? "-"}</td>
-      <td>${item.houseNumber}</td>
-      <td>${formatCurrency(item.amountKsh)}</td>
-      <td>${item.phoneNumber ?? "-"}</td>
-      <td>${formatDateTime(item.paidAt)}</td>
-    `;
-
-    rentPaymentsBodyEl.append(row);
-  });
-}
-
-function createPackagePayload(form) {
-  const formData = new FormData(form);
-
-  return {
-    name: String(formData.get("name") ?? "").trim(),
-    profile: String(formData.get("profile") ?? "").trim(),
-    hours: Number(formData.get("hours")),
-    priceKsh: Number(formData.get("priceKsh")),
-    enabled: formData.get("enabled") === "on"
-  };
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td><small>${escapeHtml(building.id)}</small></td>
+        <td>${escapeHtml(building.name)}</td>
+        <td>${escapeHtml(building.county)}</td>
+        <td>${escapeHtml(building.address)}</td>
+        <td>${escapeHtml(building.units ?? "-")}</td>
+        <td>${ownerLabel}</td>
+        <td>${escapeHtml(building.cctvStatus)}</td>
+        <td>${escapeHtml(formatDateTime(building.updatedAt))}</td>
+        <td>
+          <button
+            type="button"
+            data-action="assign-building-landlord"
+            data-building-id="${escapeHtml(building.id)}"
+            data-building-name="${escapeHtml(building.name)}"
+            data-owner-phone="${escapeHtml(building.landlordOwnerPhone ?? "")}"
+          >
+            ${building.landlordUserId ? "Reassign Landlord" : "Assign Landlord"}
+          </button>
+          <button
+            type="button"
+            class="btn-danger"
+            data-action="delete-building"
+            data-building-id="${escapeHtml(building.id)}"
+            data-building-name="${escapeHtml(building.name)}"
+          >
+            Delete
+          </button>
+        </td>
+      `;
+      buildingsBodyEl.append(row);
+    });
 }
 
 function createBuildingPayload() {
-  const unitsRaw = String(buildingUnitsEl.value ?? "").trim();
+  const unitsRaw =
+    buildingUnitsEl instanceof HTMLInputElement
+      ? String(buildingUnitsEl.value ?? "").trim()
+      : "";
   const units = unitsRaw === "" ? undefined : Number(unitsRaw);
 
   if (
@@ -977,134 +870,28 @@ function createBuildingPayload() {
   }
 
   return {
-    name: String(buildingNameEl.value ?? "").trim(),
-    county: String(buildingCountyEl.value ?? "").trim(),
-    address: String(buildingAddressEl.value ?? "").trim(),
+    name:
+      buildingNameEl instanceof HTMLInputElement
+        ? String(buildingNameEl.value ?? "").trim()
+        : "",
+    county:
+      buildingCountyEl instanceof HTMLInputElement
+        ? String(buildingCountyEl.value ?? "").trim()
+        : "",
+    address:
+      buildingAddressEl instanceof HTMLInputElement
+        ? String(buildingAddressEl.value ?? "").trim()
+        : "",
     units,
-    cctvStatus: String(buildingCctvStatusEl.value ?? "none"),
+    cctvStatus:
+      buildingCctvStatusEl instanceof HTMLSelectElement
+        ? String(buildingCctvStatusEl.value ?? "none")
+        : "none",
     media: {
       imageUrls: [],
       videoUrls: []
     }
   };
-}
-
-function createUtilityBillPayload() {
-  const previousRaw = String(utilityBillPreviousReadingEl.value ?? "").trim();
-  const previousReading = previousRaw === "" ? undefined : Number(previousRaw);
-
-  return {
-    utilityType: String(utilityBillTypeEl.value ?? "water"),
-    houseNumber: normalizeHouse(utilityBillHouseEl.value),
-    payload: {
-      billingMonth: toBillingMonth(utilityBillMonthEl.value),
-      previousReading,
-      currentReading: Number(utilityBillCurrentReadingEl.value),
-      ratePerUnitKsh: Number(utilityBillRateEl.value),
-      fixedChargeKsh: Number(utilityBillFixedEl.value || 0),
-      dueDate: toIsoFromDateTimeLocal(utilityBillDueDateEl.value),
-      note: utilityBillNoteEl.value.trim() || undefined
-    }
-  };
-}
-
-function createUtilityPaymentPayload() {
-  return {
-    utilityType: String(utilityPaymentTypeEl.value ?? "water"),
-    houseNumber: normalizeHouse(utilityPaymentHouseEl.value),
-    payload: {
-      billingMonth: toBillingMonth(utilityPaymentMonthEl.value) || undefined,
-      amountKsh: Number(utilityPaymentAmountEl.value),
-      provider: String(utilityPaymentProviderEl.value ?? "mpesa"),
-      providerReference: utilityPaymentReferenceEl.value.trim() || undefined,
-      paidAt: toIsoFromDateTimeLocal(utilityPaymentPaidAtEl.value) || undefined,
-      note: utilityPaymentNoteEl.value.trim() || undefined
-    }
-  };
-}
-
-function renderPackages(packages) {
-  packageListEl.replaceChildren();
-
-  if (!Array.isArray(packages) || packages.length === 0) {
-    packageListEl.textContent = "No packages available.";
-    return;
-  }
-
-  packages.forEach((pkg) => {
-    const fragment = packageTemplate.content.cloneNode(true);
-    const form = fragment.querySelector(".package-card");
-
-    fragment.querySelector(".package-id").textContent = pkg.id;
-    form.elements.name.value = pkg.name;
-    form.elements.profile.value = pkg.profile;
-    form.elements.hours.value = String(pkg.hours);
-    form.elements.priceKsh.value = String(pkg.priceKsh);
-    form.elements.enabled.checked = Boolean(pkg.enabled);
-
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      clearError();
-
-      const payload = createPackagePayload(form);
-      const buildingId = state.selectedWifiPackagesBuildingId;
-      const submitButton = form.querySelector("button");
-      submitButton.disabled = true;
-
-      try {
-        if (!buildingId) {
-          throw new Error("Select a building before editing Wi-Fi packages.");
-        }
-
-        await requestJson(
-          `/api/admin/wifi/packages/${pkg.id}?buildingId=${encodeURIComponent(buildingId)}`,
-          {
-          method: "PATCH",
-          headers: {
-            "content-type": "application/json"
-          },
-          body: JSON.stringify(payload)
-          }
-        );
-
-        setStatus(`Updated ${pkg.id} for ${buildingId} successfully.`);
-        await Promise.all([loadOverview(), loadPackages()]);
-      } catch (error) {
-        handleAdminError(error, "Package update failed.");
-      } finally {
-        submitButton.disabled = false;
-      }
-    });
-
-    packageListEl.append(fragment);
-  });
-}
-
-function renderWifiPayments(payments) {
-  paymentsBodyEl.replaceChildren();
-
-  if (!Array.isArray(payments) || payments.length === 0) {
-    const row = document.createElement("tr");
-    row.innerHTML = `<td colspan="6">No Wi-Fi transactions yet.</td>`;
-    paymentsBodyEl.append(row);
-    return;
-  }
-
-  payments.forEach((item) => {
-    const row = document.createElement("tr");
-    const packageLabel = `${item.package.name} (${item.package.hours}h)`;
-
-    row.innerHTML = `
-      <td>${item.checkoutReference}</td>
-      <td>${item.status}</td>
-      <td>${packageLabel}</td>
-      <td>${formatCurrency(item.amountKsh)}</td>
-      <td>${item.phoneNumber}</td>
-      <td>${formatDateTime(item.updatedAt)}</td>
-    `;
-
-    paymentsBodyEl.append(row);
-  });
 }
 
 async function loadOverview() {
@@ -1131,98 +918,27 @@ async function loadAccountPasswordRecoveryRequests() {
   renderAccountPasswordRecoveryRequests(payload.data ?? []);
 }
 
-async function loadTickets() {
-  const params = new URLSearchParams();
-  const status = ticketFilterStatusEl.value.trim();
-  const queue = ticketFilterQueueEl.value.trim();
-  const house = normalizeHouse(ticketFilterHouseEl.value);
-
-  if (status) params.set("status", status);
-  if (queue) params.set("queue", queue);
-  if (house) params.set("houseNumber", house);
-  params.set("limit", "300");
-
-  const payload = await requestJson(`/api/admin/tickets?${params.toString()}`);
-  renderTickets(payload.data ?? []);
-}
-
 async function loadBuildings() {
   const payload = await requestJson("/api/admin/buildings");
   state.buildings = payload.data ?? [];
   renderBuildings(state.buildings);
-  renderWifiPackageBuildingOptions(state.buildings);
-}
-
-async function loadUtilityBills() {
-  const payload = await requestJson("/api/admin/utilities/bills?limit=500");
-  renderUtilityBills(payload.data ?? []);
-}
-
-async function loadUtilityPayments() {
-  const payload = await requestJson("/api/admin/utilities/payments?limit=500");
-  renderUtilityPayments(payload.data ?? []);
-}
-
-async function loadRentLedger() {
-  const payload = await requestJson("/api/admin/rent-ledger?limit=400");
-  renderRentLedger(payload.data ?? []);
-}
-
-async function loadRentPayments() {
-  const params = new URLSearchParams();
-  const buildingId = String(rentPaymentsBuildingEl.value ?? "").trim().toUpperCase();
-  const house = normalizeHouse(rentPaymentsHouseEl.value);
-  if (buildingId) {
-    params.set("buildingId", buildingId);
-  }
-  if (house) {
-    params.set("houseNumber", house);
-  }
-
-  const query = params.toString();
-  const payload = await requestJson(
-    query ? `/api/admin/rent-payments?${query}` : "/api/admin/rent-payments"
-  );
-  renderRentPayments(payload.data ?? []);
-}
-
-async function loadPackages() {
-  const buildingId = state.selectedWifiPackagesBuildingId;
-  if (!buildingId) {
-    renderPackages([]);
-    return;
-  }
-
-  const payload = await requestJson(
-    `/api/admin/wifi/packages?buildingId=${encodeURIComponent(buildingId)}`
-  );
-  renderPackages(payload.data ?? []);
-}
-
-async function loadWifiPayments() {
-  const payload = await requestJson("/api/admin/wifi/payments?limit=150");
-  renderWifiPayments(payload.data ?? []);
+  renderLandlordPortfolios(state.buildings);
+  renderOwnershipGaps(state.buildings);
+  renderRegistrySummary();
 }
 
 async function loadAdminData() {
   clearError();
 
   try {
-    await loadBuildings();
     await Promise.all([
       loadOverview(),
+      loadBuildings(),
       loadLandlordAccessRequests(),
       loadPasswordRecoveryRequests(),
-      loadAccountPasswordRecoveryRequests(),
-      loadTickets(),
-      loadUtilityBills(),
-      loadUtilityPayments(),
-      loadRentLedger(),
-      loadRentPayments(),
-      loadPackages(),
-      loadWifiPayments()
+      loadAccountPasswordRecoveryRequests()
     ]);
-    setStatus(`Signed in as ${state.role}. Data refreshed.`);
+    setStatus(`Signed in as ${state.role}. Platform data refreshed.`);
   } catch (error) {
     handleAdminError(error, "Unable to load admin data.");
     setStatus("Admin data load failed.");
@@ -1235,90 +951,137 @@ async function signOut() {
       method: "POST"
     });
   } catch (_error) {
-    // continue logout redirect
+    // Continue logout redirect.
   }
 
   redirectToLogin();
 }
 
-ticketFilterFormEl.addEventListener("submit", (event) => {
-  event.preventDefault();
-  void loadTickets().catch((error) => {
-    handleAdminError(error, "Unable to filter tickets.");
-  });
-});
+if (buildingCreateFormEl instanceof HTMLFormElement) {
+  buildingCreateFormEl.addEventListener("submit", (event) => {
+    event.preventDefault();
+    clearError();
 
-buildingCreateFormEl.addEventListener("submit", (event) => {
-  event.preventDefault();
-  clearError();
-
-  let payload;
-  try {
-    payload = createBuildingPayload();
-  } catch (error) {
-    handleAdminError(error, "Unable to build payload.");
-    return;
-  }
-
-  if (!payload.name || !payload.county || !payload.address) {
-    showError("Building name, county, and address are required.");
-    return;
-  }
-
-  const submitButton = buildingCreateFormEl.querySelector("button[type='submit']");
-  submitButton.disabled = true;
-
-  void (async () => {
+    let payload;
     try {
-      await requestJson("/api/buildings", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify(payload)
-      });
-
-      buildingCreateFormEl.reset();
-      buildingCctvStatusEl.value = "none";
-      setStatus(`Building ${payload.name} created successfully.`);
-      await Promise.all([loadOverview(), loadBuildings()]);
+      payload = createBuildingPayload();
     } catch (error) {
-      handleAdminError(error, "Failed to create building.");
-    } finally {
-      submitButton.disabled = false;
-    }
-  })();
-});
-
-buildingsBodyEl.addEventListener("click", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLButtonElement)) {
-    return;
-  }
-
-  const action = String(target.dataset.action || "");
-
-  const buildingId = String(target.dataset.buildingId || "").trim();
-  const buildingName = String(target.dataset.buildingName || buildingId).trim();
-  if (!buildingId) {
-    return;
-  }
-
-  if (action === "assign-building-landlord") {
-    const currentOwnerPhone = String(target.dataset.ownerPhone || "").trim();
-    const promptValue =
-      currentOwnerPhone && currentOwnerPhone !== "-" ? currentOwnerPhone : "";
-    const identifierRaw = window.prompt(
-      `Assign landlord for ${buildingName} (${buildingId}).\nEnter landlord phone or email:`,
-      promptValue
-    );
-    if (identifierRaw == null) {
+      handleAdminError(error, "Unable to prepare building payload.");
       return;
     }
 
-    const identifier = String(identifierRaw).trim();
-    if (!identifier) {
-      showError("Provide landlord phone or email.");
+    if (!payload.name || !payload.county || !payload.address) {
+      showError("Building name, county, and address are required.");
+      return;
+    }
+
+    const submitButton = buildingCreateFormEl.querySelector("button[type='submit']");
+    if (!(submitButton instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    submitButton.disabled = true;
+
+    void (async () => {
+      try {
+        await requestJson("/api/buildings", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+
+        buildingCreateFormEl.reset();
+        if (buildingCctvStatusEl instanceof HTMLSelectElement) {
+          buildingCctvStatusEl.value = "none";
+        }
+
+        setStatus(`Building ${payload.name} created successfully.`);
+        await Promise.all([loadOverview(), loadBuildings()]);
+      } catch (error) {
+        handleAdminError(error, "Failed to create building.");
+      } finally {
+        submitButton.disabled = false;
+      }
+    })();
+  });
+}
+
+if (buildingsBodyEl instanceof HTMLElement) {
+  buildingsBodyEl.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    const action = String(target.dataset.action || "");
+    const buildingId = String(target.dataset.buildingId || "").trim();
+    const buildingName = String(target.dataset.buildingName || buildingId).trim();
+    if (!buildingId) {
+      return;
+    }
+
+    if (action === "assign-building-landlord") {
+      const currentOwnerPhone = String(target.dataset.ownerPhone || "").trim();
+      const identifierRaw = window.prompt(
+        `Assign landlord for ${buildingName} (${buildingId}).\nEnter landlord phone or email:`,
+        currentOwnerPhone
+      );
+      if (identifierRaw == null) {
+        return;
+      }
+
+      const identifier = String(identifierRaw).trim();
+      if (!identifier) {
+        showError("Provide landlord phone or email.");
+        return;
+      }
+
+      target.disabled = true;
+      clearError();
+
+      void (async () => {
+        try {
+          const payload = await requestJson(
+            `/api/admin/buildings/${encodeURIComponent(buildingId)}/landlord`,
+            {
+              method: "PATCH",
+              headers: {
+                "content-type": "application/json"
+              },
+              body: JSON.stringify({
+                identifier
+              })
+            }
+          );
+
+          const landlord = payload.data?.landlord;
+          setStatus(
+            `Assigned ${landlord?.fullName ?? "landlord"} to ${buildingName}.`
+          );
+          await Promise.all([
+            loadOverview(),
+            loadBuildings(),
+            loadLandlordAccessRequests()
+          ]);
+        } catch (error) {
+          handleAdminError(error, "Failed to assign landlord to building.");
+        } finally {
+          target.disabled = false;
+        }
+      })();
+      return;
+    }
+
+    if (action !== "delete-building") {
+      return;
+    }
+
+    const shouldProceed = window.confirm(
+      `Delete ${buildingName} (${buildingId})? This permanently removes the building and linked unit records.`
+    );
+    if (!shouldProceed) {
       return;
     }
 
@@ -1327,308 +1090,69 @@ buildingsBodyEl.addEventListener("click", (event) => {
 
     void (async () => {
       try {
-        const payload = await requestJson(
-          `/api/admin/buildings/${encodeURIComponent(buildingId)}/landlord`,
-          {
-            method: "PATCH",
-            headers: {
-              "content-type": "application/json"
-            },
-            body: JSON.stringify({
-              identifier
-            })
-          }
-        );
+        await requestJson(`/api/admin/buildings/${encodeURIComponent(buildingId)}`, {
+          method: "DELETE",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            confirmBuildingId: buildingId,
+            confirmationText: "DELETE"
+          })
+        });
 
-        const landlord = payload.data?.landlord;
-        setStatus(
-          `Assigned ${landlord?.fullName ?? "landlord"} (${landlord?.phone ?? "-"}) to ${buildingName}.`
-        );
-        await Promise.all([loadBuildings(), loadLandlordAccessRequests()]);
+        setStatus(`Deleted building ${buildingName} (${buildingId}).`);
+        await Promise.all([loadOverview(), loadBuildings()]);
       } catch (error) {
-        handleAdminError(error, "Failed to assign landlord to building.");
+        handleAdminError(error, "Failed to delete building.");
       } finally {
         target.disabled = false;
       }
     })();
-    return;
-  }
-
-  if (action !== "delete-building") {
-    return;
-  }
-
-  const shouldProceed = window.confirm(
-    `Delete ${buildingName} (${buildingId})? This action permanently removes the building and linked unit records.`
-  );
-  if (!shouldProceed) {
-    return;
-  }
-
-  target.disabled = true;
-  clearError();
-
-  void (async () => {
-    try {
-      await requestJson(`/api/admin/buildings/${encodeURIComponent(buildingId)}`, {
-        method: "DELETE",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify({
-          confirmBuildingId: buildingId,
-          confirmationText: "DELETE"
-        })
-      });
-
-      setStatus(`Deleted building ${buildingName} (${buildingId}).`);
-      await Promise.all([loadOverview(), loadBuildings()]);
-    } catch (error) {
-      handleAdminError(error, "Failed to delete building.");
-    } finally {
-      target.disabled = false;
-    }
-  })();
-});
-
-utilityMeterFormEl.addEventListener("submit", (event) => {
-  event.preventDefault();
-  clearError();
-
-  const utilityType = String(utilityMeterTypeEl.value ?? "water");
-  const houseNumber = normalizeHouse(utilityMeterHouseEl.value);
-  const meterNumber = utilityMeterNumberEl.value.trim();
-
-  if (!houseNumber || !meterNumber) {
-    showError("Utility meter requires type, house, and meter number.");
-    return;
-  }
-
-  const submitButton = utilityMeterFormEl.querySelector("button[type='submit']");
-  submitButton.disabled = true;
-
-  void (async () => {
-    try {
-      await requestJson(
-        `/api/admin/utilities/${encodeURIComponent(utilityType)}/${encodeURIComponent(houseNumber)}/meter`,
-        {
-          method: "PUT",
-          headers: {
-            "content-type": "application/json"
-          },
-          body: JSON.stringify({ meterNumber })
-        }
-      );
-
-      setStatus(`Meter saved for ${utilityType} (${houseNumber}).`);
-    } catch (error) {
-      handleAdminError(error, "Failed to save utility meter.");
-    } finally {
-      submitButton.disabled = false;
-    }
-  })();
-});
-
-utilityBillFormEl.addEventListener("submit", (event) => {
-  event.preventDefault();
-  clearError();
-
-  const utility = createUtilityBillPayload();
-
-  if (!utility.houseNumber || !utility.payload.billingMonth || !utility.payload.dueDate) {
-    showError("Utility bill requires house, month, and due date.");
-    return;
-  }
-
-  const submitButton = utilityBillFormEl.querySelector("button[type='submit']");
-  submitButton.disabled = true;
-
-  void (async () => {
-    try {
-      await requestJson(
-        `/api/admin/utilities/${encodeURIComponent(utility.utilityType)}/${encodeURIComponent(utility.houseNumber)}/bills`,
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json"
-          },
-          body: JSON.stringify(utility.payload)
-        }
-      );
-
-      setStatus(
-        `${utility.utilityType} bill posted for ${utility.houseNumber} (${utility.payload.billingMonth}).`
-      );
-      await Promise.all([loadOverview(), loadUtilityBills()]);
-    } catch (error) {
-      handleAdminError(error, "Failed to post utility bill.");
-    } finally {
-      submitButton.disabled = false;
-    }
-  })();
-});
-
-utilityPaymentFormEl.addEventListener("submit", (event) => {
-  event.preventDefault();
-  clearError();
-
-  const utility = createUtilityPaymentPayload();
-
-  if (!utility.houseNumber || !Number.isFinite(utility.payload.amountKsh)) {
-    showError("Utility payment requires house and amount.");
-    return;
-  }
-
-  const submitButton = utilityPaymentFormEl.querySelector("button[type='submit']");
-  submitButton.disabled = true;
-
-  void (async () => {
-    try {
-      await requestJson(
-        `/api/admin/utilities/${encodeURIComponent(utility.utilityType)}/${encodeURIComponent(utility.houseNumber)}/payments`,
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json"
-          },
-          body: JSON.stringify(utility.payload)
-        }
-      );
-
-      setStatus(`Utility payment posted for ${utility.utilityType} (${utility.houseNumber}).`);
-      await Promise.all([loadUtilityBills(), loadUtilityPayments()]);
-    } catch (error) {
-      handleAdminError(error, "Failed to record utility payment.");
-    } finally {
-      submitButton.disabled = false;
-    }
-  })();
-});
-
-rentUpsertFormEl.addEventListener("submit", (event) => {
-  event.preventDefault();
-  clearError();
-
-  const buildingId = String(rentBuildingEl.value ?? "").trim().toUpperCase();
-  const houseNumber = normalizeHouse(rentHouseEl.value);
-  const dueDateIso = toIsoFromDateTimeLocal(rentDueDateEl.value);
-
-  if (!buildingId || !houseNumber || !dueDateIso) {
-    showError("Provide a building, valid house, and due date.");
-    return;
-  }
-
-  const payload = {
-    buildingId,
-    monthlyRentKsh: Number(rentMonthlyEl.value),
-    balanceKsh: Number(rentBalanceEl.value),
-    dueDate: dueDateIso,
-    note: rentNoteEl.value.trim() || undefined
-  };
-
-  void (async () => {
-    try {
-      await requestJson(`/api/admin/rent-due/${encodeURIComponent(houseNumber)}`, {
-        method: "PUT",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify(payload)
-      });
-
-      setStatus(`Rent profile saved for ${buildingId} house ${houseNumber}.`);
-      await Promise.all([loadOverview(), loadRentLedger(), loadRentPayments()]);
-    } catch (error) {
-      handleAdminError(error, "Failed to save rent profile.");
-    }
-  })();
-});
-
-rentPaymentsFilterFormEl.addEventListener("submit", (event) => {
-  event.preventDefault();
-  void loadRentPayments().catch((error) => {
-    handleAdminError(error, "Unable to filter rent payments.");
   });
-});
+}
 
-refreshLandlordAccessBtn.addEventListener("click", () => {
+refreshLandlordAccessBtn?.addEventListener("click", () => {
   void loadLandlordAccessRequests().catch((error) => {
     handleAdminError(error, "Unable to refresh landlord access requests.");
   });
 });
 
-refreshPasswordRecoveryBtn.addEventListener("click", () => {
+refreshPasswordRecoveryBtn?.addEventListener("click", () => {
   void loadPasswordRecoveryRequests().catch((error) => {
     handleAdminError(error, "Unable to refresh password recovery requests.");
   });
 });
 
-refreshAccountPasswordRecoveryBtn.addEventListener("click", () => {
+refreshAccountPasswordRecoveryBtn?.addEventListener("click", () => {
   void loadAccountPasswordRecoveryRequests().catch((error) => {
     handleAdminError(error, "Unable to refresh account password recovery requests.");
   });
 });
 
-refreshTicketsBtn.addEventListener("click", () => {
-  void loadTickets().catch((error) => {
-    handleAdminError(error, "Unable to refresh tickets.");
+refreshPortfoliosBtn?.addEventListener("click", () => {
+  void Promise.all([loadOverview(), loadBuildings()]).catch((error) => {
+    handleAdminError(error, "Unable to refresh landlord portfolios.");
   });
 });
 
-refreshBuildingsBtn.addEventListener("click", () => {
-  void loadBuildings().catch((error) => {
+refreshOwnershipGapsBtn?.addEventListener("click", () => {
+  void Promise.all([loadOverview(), loadBuildings()]).catch((error) => {
+    handleAdminError(error, "Unable to refresh ownership gaps.");
+  });
+});
+
+refreshBuildingsBtn?.addEventListener("click", () => {
+  void Promise.all([loadOverview(), loadBuildings()]).catch((error) => {
     handleAdminError(error, "Unable to refresh buildings.");
   });
 });
 
-refreshUtilityBillsBtn.addEventListener("click", () => {
-  void loadUtilityBills().catch((error) => {
-    handleAdminError(error, "Unable to refresh utility bills.");
-  });
-});
-
-refreshUtilityPaymentsBtn.addEventListener("click", () => {
-  void loadUtilityPayments().catch((error) => {
-    handleAdminError(error, "Unable to refresh utility payments.");
-  });
-});
-
-refreshRentLedgerBtn.addEventListener("click", () => {
-  void loadRentLedger().catch((error) => {
-    handleAdminError(error, "Unable to refresh rent ledger.");
-  });
-});
-
-refreshRentPaymentsBtn.addEventListener("click", () => {
-  void loadRentPayments().catch((error) => {
-    handleAdminError(error, "Unable to refresh rent payments.");
-  });
-});
-
-refreshPackagesBtn.addEventListener("click", () => {
-  void loadPackages().catch((error) => {
-    handleAdminError(error, "Unable to refresh packages.");
-  });
-});
-
-wifiPackagesBuildingEl.addEventListener("change", () => {
-  state.selectedWifiPackagesBuildingId = wifiPackagesBuildingEl.value || null;
-  void loadPackages().catch((error) => {
-    handleAdminError(error, "Unable to refresh packages.");
-  });
-});
-
-refreshPaymentsBtn.addEventListener("click", () => {
-  void loadWifiPayments().catch((error) => {
-    handleAdminError(error, "Unable to refresh Wi-Fi payments.");
-  });
-});
-
-refreshAllBtnEl.addEventListener("click", () => {
+refreshAllBtnEl?.addEventListener("click", () => {
   void loadAdminData();
 });
 
-adminLogoutBtnEl.addEventListener("click", () => {
+adminLogoutBtnEl?.addEventListener("click", () => {
   void signOut();
 });
 

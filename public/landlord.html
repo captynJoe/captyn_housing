@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CAPTYN Housing Landlord</title>
+    <title>Management Portal</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=20260322b" />
-    <link rel="stylesheet" href="/landlord.css?v=20260322c" />
+    <link rel="stylesheet" href="/landlord.css?v=20260403a" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -19,8 +19,8 @@
       <section class="panel landlord-navbar-panel">
         <div class="landlord-navbar-head">
           <div class="landlord-navbar-copy">
-            <p class="tag landlord-navbar-tag">CAPTYN Housing</p>
-            <h1 class="landlord-navbar-title">Landlord Utility Desk</h1>
+            <p id="landlord-brand-tag" class="tag landlord-navbar-tag">Property Portfolio</p>
+            <h1 id="landlord-brand-title" class="landlord-navbar-title">Management Portal</h1>
             <p class="sidebar-label">Workspace</p>
             <p class="sidebar-note">
               Keep each workflow focused. Building setup now opens in a side drawer.
@@ -108,7 +108,7 @@
           <button
             type="button"
             class="landlord-nav-btn"
-            data-landlord-view="utilities"
+            data-landlord-view="expenses"
             data-landlord-section-target="utilities-expenditures-section"
           >
             Expenses
@@ -160,7 +160,8 @@
           </div>
           <p class="status-text">
             Use this board to jump straight into a room and review only rent-enabled collections.
-            Utility-only rooms are tracked from the Residents view with current due and arrears split out.
+            Utility arrears and utility-only rooms are surfaced in the Utilities view, where one
+            room-level utility status table acts as the landlord source of truth.
           </p>
           <div class="table-wrap" id="overview-collections-section">
             <table>
@@ -184,6 +185,21 @@
         <section
           class="panel wide-panel landlord-view hidden"
           data-landlord-view-panel="overview"
+          id="overview-utility-arrears-section"
+        >
+          <div class="panel-head">
+            <h2>Utility Billing</h2>
+          </div>
+          <p class="status-text">
+            The Utilities view now carries the single landlord utility table for room balances,
+            overdue amounts, and current payables. Use that table as the source of truth instead
+            of comparing multiple summaries.
+          </p>
+        </section>
+
+        <section
+          class="panel wide-panel landlord-view hidden"
+          data-landlord-view-panel="residents"
           id="overview-payment-access-section"
         >
           <div class="panel-head">
@@ -213,7 +229,7 @@
 
         <section
           class="panel wide-panel landlord-view hidden"
-          data-landlord-view-panel="overview"
+          data-landlord-view-panel="utilities"
           id="overview-wifi-packages-section"
         >
           <div class="panel-head">
@@ -387,7 +403,7 @@
 
         <section
           class="panel wide-panel landlord-view hidden"
-          data-landlord-view-panel="overview"
+          data-landlord-view-panel="applications"
           id="overview-issues-section"
         >
           <div class="panel-head">
@@ -529,8 +545,7 @@
                 id="rent-payment-reference"
                 type="text"
                 maxlength="120"
-                placeholder="MANUAL-RENT-001"
-                required
+                placeholder="Optional for cash"
               />
             </label>
             <button id="rent-payment-submit" type="submit">Record Rent Payment</button>
@@ -645,7 +660,8 @@
           <p class="status-text">
             Enter water/electricity meter numbers and number of members for every house in
             the selected building, then save in one action. Set fixed charges for houses with
-            faulty or missing meters.
+            faulty or missing meters, and set a room utility amount for combined-charge
+            buildings like Village Inn.
           </p>
           <div class="table-wrap">
             <table>
@@ -659,6 +675,7 @@
                   <th>Electricity Meter</th>
                   <th>Water Fixed (KSh)</th>
                   <th>Electric Fixed (KSh)</th>
+                  <th>Room Utility Amount (KSh)</th>
                   <th>Resident Action</th>
                   <th>Room Action</th>
                 </tr>
@@ -701,13 +718,13 @@
 
           <div class="utility-summary-card">
             <div class="panel-head">
-              <h3>Utility Arrears by Room</h3>
+              <h3>Utility Room Status</h3>
             </div>
             <p class="status-text">
-              Room status is based on one monthly utility payable amount per
-              room. Zero-value placeholder rows are excluded, and Village Inn
-              rooms with both meters show upcoming months as waiting for meter
-              readings until real readings are posted.
+              This is the landlord source of truth for utility balances by
+              room. It combines overdue arrears and the current payable month
+              into one room-level view so you do not have to compare multiple
+              tables.
             </p>
             <div class="table-wrap">
               <table>
@@ -724,27 +741,30 @@
                     <th>Summary</th>
                   </tr>
                 </thead>
-                <tbody id="utility-room-summary-body"></tbody>
+                <tbody id="utility-room-summary-body" data-utility-room-summary-body></tbody>
               </table>
             </div>
           </div>
 
-          <div class="panel-head utility-raw-ledger-head">
-            <h3>Raw Utility Bill Ledger</h3>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Utility</th>
-                  <th>House</th>
-                  <th>Meter Number</th>
-                  <th>Updated</th>
-                </tr>
-              </thead>
-              <tbody id="meters-body"></tbody>
-            </table>
-          </div>
+          <details class="secondary-ledger-panel">
+            <summary>Registered Meters</summary>
+            <p class="status-text">
+              Meter registry is supporting setup data only. It does not decide what a room owes.
+            </p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Utility</th>
+                    <th>House</th>
+                    <th>Meter Number</th>
+                    <th>Updated</th>
+                  </tr>
+                </thead>
+                <tbody id="meters-body"></tbody>
+              </table>
+            </div>
+          </details>
         </section>
 
         <section
@@ -809,24 +829,31 @@
             <button type="submit">Post Monthly Bill</button>
           </form>
 
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Utility</th>
-                  <th>House</th>
-                  <th>Month</th>
-                  <th>Meter</th>
-                  <th>Units</th>
-                  <th>Amount</th>
-                  <th>Balance</th>
-                  <th>Due</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody id="utility-bills-body"></tbody>
-            </table>
-          </div>
+          <details class="secondary-ledger-panel">
+            <summary>Monthly Bill Details</summary>
+            <p class="status-text">
+              These are raw monthly bill rows. Use Utility Room Status above as the landlord
+              source of truth for what each room currently owes.
+            </p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Utility</th>
+                    <th>House</th>
+                    <th>Month</th>
+                    <th>Meter</th>
+                    <th>Units</th>
+                    <th>Amount</th>
+                    <th>Balance</th>
+                    <th>Due</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="utility-bills-body"></tbody>
+              </table>
+            </div>
+          </details>
         </section>
 
         <section
@@ -835,9 +862,73 @@
           id="utilities-payments-section"
         >
           <div class="panel-head">
-            <h2>Resident Utility Payments</h2>
+            <h2>Utility Payments</h2>
             <button id="refresh-payments" type="button">Refresh</button>
           </div>
+
+          <form id="utility-payment-form" class="package-card">
+            <div class="inline-fields compact-fields">
+              <label>
+                Utility Type
+                <select id="utility-payment-type" required>
+                  <option value="water">water</option>
+                  <option value="electricity">electricity</option>
+                </select>
+              </label>
+              <label>
+                House
+                <input id="utility-payment-house" type="text" maxlength="24" placeholder="A-12" required />
+              </label>
+              <label>
+                Billing Month (optional)
+                <input id="utility-payment-month" type="month" />
+              </label>
+            </div>
+            <div class="inline-fields compact-fields">
+              <label>
+                Amount (KSh)
+                <input id="utility-payment-amount" type="number" min="1" step="0.01" required />
+              </label>
+              <label>
+                Provider
+                <select id="utility-payment-provider">
+                  <option value="cash">cash</option>
+                  <option value="mpesa">mpesa</option>
+                  <option value="bank">bank</option>
+                  <option value="card">card</option>
+                </select>
+              </label>
+              <label>
+                Paid At (optional)
+                <input id="utility-payment-paid-at" type="datetime-local" />
+              </label>
+            </div>
+            <div class="inline-fields compact-fields">
+              <label>
+                Reference (optional)
+                <input
+                  id="utility-payment-reference"
+                  type="text"
+                  maxlength="120"
+                  placeholder="CASH-WATER-1-2026-02"
+                />
+              </label>
+              <label>
+                Note (optional)
+                <input
+                  id="utility-payment-note"
+                  type="text"
+                  maxlength="280"
+                  placeholder="Manual payment recorded by landlord."
+                />
+              </label>
+            </div>
+            <button id="utility-payment-submit" type="submit">Record Utility Payment</button>
+          </form>
+          <p id="utility-payment-help" class="status-text">
+            Click an overdue or payable status in Utility Arrears by Room to preload the oldest
+            actionable bill for that room into this form.
+          </p>
 
           <div class="table-wrap">
             <table>
@@ -859,7 +950,7 @@
 
         <section
           class="panel wide-panel landlord-view hidden"
-          data-landlord-view-panel="utilities"
+          data-landlord-view-panel="expenses"
           id="utilities-expenditures-section"
         >
           <div class="panel-head">
@@ -1008,6 +1099,76 @@
           <div class="action-row">
             <button id="utility-sheet-submit-btn" type="submit">Save Meters + Post Bills</button>
             <button id="utility-sheet-reload-btn" type="button" class="ghost-btn">Reload Houses</button>
+          </div>
+        </form>
+      </aside>
+
+      <div id="overview-utility-payment-backdrop" class="landlord-drawer-backdrop hidden"></div>
+      <aside
+        id="overview-utility-payment-modal"
+        class="landlord-sheet-modal hidden"
+        aria-label="Quick utility payment"
+      >
+        <header class="landlord-drawer-head">
+          <h2>Quick Utility Payment</h2>
+          <button id="close-overview-utility-payment-btn" type="button" class="ghost-btn">
+            Close
+          </button>
+        </header>
+
+        <form id="overview-utility-payment-form" class="package-card landlord-sheet-form">
+          <p id="overview-utility-payment-summary" class="status-text">
+            Record a landlord-side cash payment without leaving overview.
+          </p>
+
+          <div class="inline-fields compact-fields">
+            <label>
+              Building
+              <input id="overview-utility-payment-building" type="text" readonly />
+            </label>
+            <label>
+              House
+              <input id="overview-utility-payment-house" type="text" readonly />
+            </label>
+            <label>
+              Utility
+              <input id="overview-utility-payment-type-label" type="text" readonly />
+            </label>
+          </div>
+
+          <div class="inline-fields compact-fields">
+            <label>
+              Payment Month
+              <input id="overview-utility-payment-month" type="month" required />
+            </label>
+            <label>
+              Amount Paid (KSh)
+              <input id="overview-utility-payment-amount" type="number" min="1" step="1" required />
+            </label>
+            <label>
+              Paid At (optional)
+              <input id="overview-utility-payment-paid-at" type="datetime-local" />
+            </label>
+          </div>
+
+          <label>
+            Receipt / Note (optional)
+            <input
+              id="overview-utility-payment-reference"
+              type="text"
+              maxlength="120"
+              placeholder="Optional for cash"
+            />
+          </label>
+
+          <p id="overview-utility-payment-help" class="status-text">
+            The bill and overdue totals refresh after save.
+          </p>
+
+          <div class="action-row">
+            <button id="overview-utility-payment-submit-btn" type="submit">
+              Record Cash Payment
+            </button>
           </div>
         </form>
       </aside>
@@ -1177,6 +1338,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=20260322c"></script>
+    <script type="module" src="/landlord.js?v=20260403a"></script>
   </body>
 </html>

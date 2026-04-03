@@ -1,10 +1,18 @@
-const RESIDENT_SW_URL = "/resident-sw.js?v=20260315g";
+import {
+  applyDocumentBranding,
+  getResidentProfileTitle,
+  getResidentShellBrand
+} from "./portal-branding.js";
+
+const RESIDENT_SW_URL = "/resident-sw.js?v=20260325b";
 
 const apiStatusEl = document.getElementById("api-status");
 const authStateEl = document.getElementById("auth-state");
 const feedbackBoxEl = document.getElementById("feedback-box");
 const userMenuToggleEl = document.getElementById("user-menu-toggle");
 const userMenuPanelEl = document.getElementById("user-menu-panel");
+const profileBrandEl = document.getElementById("profile-brand");
+const profileHeroTitleEl = document.getElementById("profile-hero-title");
 const residentSessionPanelEl = document.getElementById("resident-session-panel");
 const residentSessionSummaryEl = document.getElementById("resident-session-summary");
 const residentLogoutBtnEl = document.getElementById("resident-logout-btn");
@@ -164,6 +172,21 @@ function setSignedOutState(apiStatus = "Online") {
   residentSessionPanelEl.classList.add("hidden");
   userLayoutEl.classList.add("hidden");
   userAuthPanelEl.classList.remove("hidden");
+  updateProfileBranding();
+}
+
+function updateProfileBranding(buildingName = "") {
+  const shellBrand = getResidentShellBrand(buildingName);
+  const profileTitle = getResidentProfileTitle(buildingName);
+
+  if (profileBrandEl instanceof HTMLElement) {
+    profileBrandEl.textContent = shellBrand;
+  }
+  if (profileHeroTitleEl instanceof HTMLElement) {
+    profileHeroTitleEl.textContent = profileTitle;
+  }
+
+  applyDocumentBranding(profileTitle, shellBrand);
 }
 
 function renderProfile(profile) {
@@ -177,6 +200,7 @@ function renderProfile(profile) {
   const resident = profile.resident;
   const agreement = profile.agreement;
   const building = profile.building;
+  updateProfileBranding(building?.name);
 
   residentSessionSummaryEl.textContent = `House ${session.houseNumber} (${session.phoneMask}) • ${formatVerificationLabel(
     session

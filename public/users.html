@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CAPTYN Housing - Resident Portal</title>
+    <title>Resident Portal</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -13,15 +13,15 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#0f7b76" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="CAPTYN Housing" />
+    <meta name="apple-mobile-web-app-title" content="Resident Portal" />
     <link rel="icon" href="/icons/housing-app.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/users.css?v=20260323b" />
+    <link rel="stylesheet" href="/users.css?v=20260325a" />
   </head>
   <body class="app-loading">
     <div class="ambient" aria-hidden="true"></div>
     <main class="shell">
       <header class="topbar">
-        <a class="brand" href="/">CAPTYN Housing</a>
+        <a id="resident-brand" class="brand" href="/">Resident Portal</a>
         <div class="user-menu">
           <button
             id="user-menu-toggle"
@@ -54,7 +54,7 @@
 
       <header class="hero portal-header">
         <div class="portal-copy">
-          <h1>Resident workspace</h1>
+          <h1 id="resident-hero-title">Resident Portal</h1>
         </div>
 
         <div class="hero-workspace portal-nav" aria-label="Workspace quick navigation">
@@ -144,6 +144,10 @@
               Forgot Password
             </button>
           </div>
+          <label class="remember-device-toggle">
+            <input id="resident-remember-device" type="checkbox" />
+            Remember this device for faster sign-in next time
+          </label>
 
           <section class="section-head">
             <h2>Access request details</h2>
@@ -774,6 +778,6 @@
       </article>
     </section>
 
-    <script type="module" src="/users.js?v=20260323b"></script>
+    <script type="module" src="/users.js?v=20260325b"></script>
   </body>
 </html>

@@ -1,7 +1,7 @@
 {
   "id": "/resident",
-  "name": "CAPTYN Housing Resident",
-  "short_name": "Housing",
+  "name": "Resident Portal",
+  "short_name": "Resident",
   "description": "Resident workspace for rent, utility, and support updates.",
   "start_url": "/resident",
   "scope": "/",

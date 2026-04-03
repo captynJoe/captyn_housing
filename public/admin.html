@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/admin.css?v=20260322a" />
+    <link rel="stylesheet" href="/admin.css?v=20260324a" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -18,9 +18,10 @@
       <header class="hero">
         <div>
           <p class="tag">CAPTYN Housing</p>
-          <h1>Operations Admin</h1>
+          <h1>Platform Admin</h1>
           <p class="subtitle">
-            Wi-Fi operations plus oversight across landlord and resident portals.
+            Building registry, landlord access, password recovery, and ownership oversight across
+            the full housing portfolio.
           </p>
           <p id="auth-status" class="status-text">Checking admin session...</p>
         </div>
@@ -35,19 +36,55 @@
 
       <section class="panel metrics-panel">
         <div class="panel-head">
-          <h2>Overview</h2>
+          <h2>Portfolio Overview</h2>
         </div>
         <div class="metrics-grid">
-          <article class="metric-card"><p>Buildings</p><strong id="metric-buildings">-</strong></article>
-          <article class="metric-card"><p>Open Tickets</p><strong id="metric-open-tickets">-</strong></article>
-          <article class="metric-card"><p>SLA Breached</p><strong id="metric-breached-tickets">-</strong></article>
-          <article class="metric-card"><p>Overdue Rent</p><strong id="metric-overdue-rent">-</strong></article>
-          <article class="metric-card"><p>Rent Payments</p><strong id="metric-rent-payments">-</strong></article>
-          <article class="metric-card"><p>Wi-Fi Payments</p><strong id="metric-wifi-payments">-</strong></article>
+          <article class="metric-card">
+            <p>Buildings</p>
+            <strong id="metric-buildings">-</strong>
+          </article>
+          <article class="metric-card">
+            <p>Active Landlords</p>
+            <strong id="metric-active-landlords">-</strong>
+          </article>
+          <article class="metric-card">
+            <p>Unassigned Buildings</p>
+            <strong id="metric-unassigned-buildings">-</strong>
+          </article>
+          <article class="metric-card">
+            <p>Pending Landlord Access</p>
+            <strong id="metric-pending-landlord-access">-</strong>
+          </article>
+          <article class="metric-card">
+            <p>Resident Recoveries</p>
+            <strong id="metric-resident-recovery">-</strong>
+          </article>
+          <article class="metric-card">
+            <p>Account Recoveries</p>
+            <strong id="metric-account-recovery">-</strong>
+          </article>
         </div>
+        <p id="platform-summary" class="panel-note">
+          Platform coverage is loading.
+        </p>
       </section>
 
       <section class="layout">
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Platform Role Boundaries</h2>
+          </div>
+          <p class="panel-note">
+            Admin owns platform governance only: building registry, landlord access, ownership
+            assignment, and password recovery.
+          </p>
+          <p class="status-text">
+            Complaints, room issues, theft cases, utility billing, rent collection, and Wi-Fi
+            operations stay with the landlord who owns the specific building. Those workflows now
+            belong in the <a href="/landlord" class="home-link">Landlord Portal</a>.
+          </p>
+        </section>
+
         <section class="panel wide-panel">
           <div class="panel-head">
             <h2>Landlord Access Approvals</h2>
@@ -81,8 +118,8 @@
             <button id="refresh-password-recovery" type="button">Refresh</button>
           </div>
           <p class="panel-note">
-            Residents submit forgot-password requests with building + house + phone. Verify identity
-            before issuing a temporary password.
+            Residents submit forgot-password requests with building, house, and phone. Verify
+            identity before issuing a temporary password.
           </p>
           <div class="table-wrap">
             <table>
@@ -104,12 +141,12 @@
 
         <section class="panel wide-panel">
           <div class="panel-head">
-            <h2>Account Password Recovery (Landlord)</h2>
+            <h2>Account Password Recovery</h2>
             <button id="refresh-account-password-recovery" type="button">Refresh</button>
           </div>
           <p class="panel-note">
-            Landlord-side forgot-password requests are reviewed here. Issue temporary passwords
-            only after identity verification.
+            Landlord-side account recovery is reviewed here. Issue temporary passwords only after
+            identity verification.
           </p>
           <div class="table-wrap">
             <table>
@@ -131,50 +168,52 @@
 
         <section class="panel wide-panel">
           <div class="panel-head">
-            <h2>Ticket Lifecycle + SLA</h2>
-            <button id="refresh-tickets" type="button">Refresh</button>
+            <h2>Landlord Portfolio</h2>
+            <button id="refresh-portfolios" type="button">Refresh</button>
           </div>
-
-          <form id="ticket-filter-form" class="inline-fields compact-fields">
-            <label>
-              Status
-              <select id="ticket-filter-status">
-                <option value="">All</option>
-                <option value="open">open</option>
-                <option value="triaged">triaged</option>
-                <option value="in_progress">in_progress</option>
-                <option value="resolved">resolved</option>
-              </select>
-            </label>
-            <label>
-              Queue
-              <select id="ticket-filter-queue">
-                <option value="">All</option>
-                <option value="maintenance">maintenance</option>
-                <option value="security">security</option>
-              </select>
-            </label>
-            <label>
-              House
-              <input id="ticket-filter-house" type="text" placeholder="A-12" />
-            </label>
-            <button type="submit">Apply</button>
-          </form>
-
+          <p class="panel-note">
+            Aggregated ownership view for scale. Use this to see how many buildings and tracked
+            units each landlord currently carries.
+          </p>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Ticket</th>
-                  <th>House</th>
-                  <th>Queue</th>
-                  <th>Status</th>
-                  <th>SLA</th>
-                  <th>Created</th>
-                  <th>Action</th>
+                  <th>Landlord</th>
+                  <th>Role</th>
+                  <th>Buildings</th>
+                  <th>Units</th>
+                  <th>Latest Update</th>
+                  <th>Portfolio</th>
                 </tr>
               </thead>
-              <tbody id="tickets-body"></tbody>
+              <tbody id="landlord-portfolios-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Ownership Gaps</h2>
+            <button id="refresh-ownership-gaps" type="button">Refresh</button>
+          </div>
+          <p class="panel-note">
+            Buildings without an assigned landlord should be resolved quickly so complaints and
+            resident workflows always have a responsible owner.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Building</th>
+                  <th>County</th>
+                  <th>Units</th>
+                  <th>CCTV</th>
+                  <th>Updated</th>
+                  <th>Next Action</th>
+                </tr>
+              </thead>
+              <tbody id="ownership-gap-body"></tbody>
             </table>
           </div>
         </section>
@@ -184,6 +223,9 @@
             <h2>Building Registry</h2>
             <button id="refresh-buildings" type="button">Refresh</button>
           </div>
+          <p id="registry-summary" class="panel-note">
+            Registered buildings are loading.
+          </p>
 
           <form id="building-create-form" class="package-card">
             <div class="inline-fields compact-fields">
@@ -257,357 +299,11 @@
             </table>
           </div>
         </section>
-
-        <section class="panel wide-panel">
-          <div class="panel-head">
-            <h2>Utility Operations Ownership</h2>
-          </div>
-          <p class="panel-note">
-            Utility meters, monthly bills, and utility payment posting are managed by landlords.
-            Admin handles governance and oversight only.
-          </p>
-          <p class="status-text">
-            Use the <a href="/landlord" class="home-link">Landlord Portal</a> for utility workflows.
-          </p>
-        </section>
-
-        <section class="panel wide-panel hidden" aria-hidden="true">
-          <div class="panel-head">
-            <h2>Utility Bills (Water + Electricity)</h2>
-            <button id="refresh-utility-bills" type="button">Refresh</button>
-          </div>
-
-          <form id="utility-meter-form" class="package-card">
-            <div class="inline-fields compact-fields">
-              <label>
-                Utility Type
-                <select id="utility-meter-type" required>
-                  <option value="water">water</option>
-                  <option value="electricity">electricity</option>
-                </select>
-              </label>
-              <label>
-                House
-                <input id="utility-meter-house" type="text" placeholder="A-12" required />
-              </label>
-            </div>
-            <label>
-              Meter Number
-              <input id="utility-meter-number" type="text" maxlength="80" placeholder="WTR-10291" required />
-            </label>
-            <button type="submit">Save Meter</button>
-          </form>
-
-          <form id="utility-bill-form" class="package-card">
-            <div class="inline-fields compact-fields">
-              <label>
-                Utility Type
-                <select id="utility-bill-type" required>
-                  <option value="water">water</option>
-                  <option value="electricity">electricity</option>
-                </select>
-              </label>
-              <label>
-                House
-                <input id="utility-bill-house" type="text" placeholder="A-12" required />
-              </label>
-              <label>
-                Billing Month
-                <input id="utility-bill-month" type="month" required />
-              </label>
-            </div>
-            <div class="inline-fields compact-fields">
-              <label>
-                Previous Reading (optional)
-                <input id="utility-bill-previous-reading" type="number" min="0" step="0.001" />
-              </label>
-              <label>
-                Current Reading
-                <input id="utility-bill-current-reading" type="number" min="0" step="0.001" required />
-              </label>
-              <label>
-                Rate/Unit (KSh)
-                <input id="utility-bill-rate" type="number" min="0" step="0.01" required />
-              </label>
-              <label>
-                Fixed Charge (KSh)
-                <input id="utility-bill-fixed" type="number" min="0" step="0.01" value="0" required />
-              </label>
-            </div>
-            <div class="inline-fields compact-fields">
-              <label>
-                Due Date
-                <input id="utility-bill-due-date" type="datetime-local" required />
-              </label>
-              <label>
-                Note (optional)
-                <input id="utility-bill-note" type="text" maxlength="280" placeholder="Billed from landlord monthly meter read." />
-              </label>
-            </div>
-            <button type="submit">Post Monthly Bill</button>
-          </form>
-
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Utility</th>
-                  <th>House</th>
-                  <th>Month</th>
-                  <th>Meter</th>
-                  <th>Units</th>
-                  <th>Amount</th>
-                  <th>Balance</th>
-                  <th>Due</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody id="utility-bills-body"></tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="panel wide-panel hidden" aria-hidden="true">
-          <div class="panel-head">
-            <h2>Utility Payments</h2>
-            <button id="refresh-utility-payments" type="button">Refresh</button>
-          </div>
-
-          <form id="utility-payment-form" class="package-card">
-            <div class="inline-fields compact-fields">
-              <label>
-                Utility Type
-                <select id="utility-payment-type" required>
-                  <option value="water">water</option>
-                  <option value="electricity">electricity</option>
-                </select>
-              </label>
-              <label>
-                House
-                <input id="utility-payment-house" type="text" placeholder="A-12" required />
-              </label>
-              <label>
-                Billing Month (optional)
-                <input id="utility-payment-month" type="month" />
-              </label>
-            </div>
-            <div class="inline-fields compact-fields">
-              <label>
-                Amount (KSh)
-                <input id="utility-payment-amount" type="number" min="1" required />
-              </label>
-              <label>
-                Provider
-                <select id="utility-payment-provider" required>
-                  <option value="mpesa">mpesa</option>
-                  <option value="cash">cash</option>
-                  <option value="bank">bank</option>
-                  <option value="card">card</option>
-                </select>
-              </label>
-              <label>
-                Reference (optional)
-                <input id="utility-payment-reference" type="text" maxlength="120" placeholder="MPE1234" />
-              </label>
-            </div>
-            <div class="inline-fields compact-fields">
-              <label>
-                Paid At (optional)
-                <input id="utility-payment-paid-at" type="datetime-local" />
-              </label>
-              <label>
-                Note (optional)
-                <input id="utility-payment-note" type="text" maxlength="280" />
-              </label>
-            </div>
-            <button type="submit">Record Utility Payment</button>
-          </form>
-
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Utility</th>
-                  <th>House</th>
-                  <th>Month</th>
-                  <th>Provider</th>
-                  <th>Reference</th>
-                  <th>Amount</th>
-                  <th>Paid At</th>
-                </tr>
-              </thead>
-              <tbody id="utility-payments-body"></tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Rent Ledger</h2>
-            <button id="refresh-rent-ledger" type="button">Refresh</button>
-          </div>
-          <form id="rent-upsert-form" class="package-card">
-            <div class="inline-fields compact-fields">
-              <label>
-                Building
-                <input id="rent-building" type="text" placeholder="CAPTYN001" required />
-              </label>
-              <label>
-                House
-                <input id="rent-house" type="text" placeholder="A-12" required />
-              </label>
-              <label>
-                Due Date
-                <input id="rent-due-date" type="datetime-local" required />
-              </label>
-            </div>
-            <div class="inline-fields compact-fields">
-              <label>
-                Monthly (KSh)
-                <input id="rent-monthly" type="number" min="0" required />
-              </label>
-              <label>
-                Balance (KSh)
-                <input id="rent-balance" type="number" min="0" required />
-              </label>
-            </div>
-            <label>
-              Note
-              <input id="rent-note" type="text" maxlength="280" />
-            </label>
-            <button type="submit">Save Rent Profile</button>
-          </form>
-
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Building</th>
-                  <th>House</th>
-                  <th>Status</th>
-                  <th>Balance</th>
-                  <th>Due</th>
-                  <th>Updated</th>
-                </tr>
-              </thead>
-              <tbody id="rent-ledger-body"></tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Rent Payments</h2>
-            <button id="refresh-rent-payments" type="button">Refresh</button>
-          </div>
-          <form id="rent-payments-filter-form" class="inline-fields compact-fields">
-            <label>
-              Building (optional)
-              <input id="rent-payments-building" type="text" placeholder="CAPTYN001" />
-            </label>
-            <label>
-              House (optional)
-              <input id="rent-payments-house" type="text" placeholder="A-12" />
-            </label>
-            <button type="submit">Filter</button>
-          </form>
-
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Reference</th>
-                  <th>Provider</th>
-                  <th>Building</th>
-                  <th>House</th>
-                  <th>Amount</th>
-                  <th>Phone</th>
-                  <th>Paid At</th>
-                </tr>
-              </thead>
-              <tbody id="rent-payments-body"></tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Wi-Fi Package Controls</h2>
-            <button id="refresh-packages" type="button">Refresh</button>
-          </div>
-          <p class="panel-note">
-            Edit package names, durations, and pricing in KSh.
-          </p>
-          <div class="inline-fields compact-fields">
-            <label>
-              Building
-              <select id="wifi-packages-building"></select>
-            </label>
-          </div>
-          <div id="package-list" class="package-list"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Wi-Fi Transactions</h2>
-            <button id="refresh-payments" type="button">Refresh</button>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Reference</th>
-                  <th>Status</th>
-                  <th>Package</th>
-                  <th>Amount</th>
-                  <th>Phone</th>
-                  <th>Updated</th>
-                </tr>
-              </thead>
-              <tbody id="payments-body"></tbody>
-            </table>
-          </div>
-        </section>
       </section>
 
       <section id="admin-error" class="error-box hidden"></section>
     </main>
 
-    <template id="package-card-template">
-      <form class="package-card">
-        <h3 class="package-id"></h3>
-        <label>
-          Name
-          <input name="name" type="text" required />
-        </label>
-        <label>
-          Profile
-          <input name="profile" type="text" required />
-        </label>
-        <label>
-          <input name="enabled" type="checkbox" />
-          Enabled for checkout
-        </label>
-        <div class="inline-fields">
-          <label>
-            Hours
-            <input name="hours" type="number" min="1" max="72" required />
-          </label>
-          <label>
-            Price (KSh)
-            <input
-              name="priceKsh"
-              type="number"
-              min="1"
-              max="10000"
-              required
-            />
-          </label>
-        </div>
-        <button type="submit">Save Package</button>
-      </form>
-    </template>
-
-    <script type="module" src="/admin.js?v=20260322a"></script>
+    <script type="module" src="/admin.js?v=20260324a"></script>
   </body>
 </html>

@@ -21,6 +21,11 @@ export type BuildingConfigurationRecord = {
   caretakerEnabled: boolean;
   expenditureTrackingEnabled: boolean;
   utilityBillingMode: UtilityBillingMode;
+  defaultWaterRatePerUnitKsh: number | null;
+  defaultElectricityRatePerUnitKsh: number | null;
+  defaultWaterFixedChargeKsh: number | null;
+  defaultElectricityFixedChargeKsh: number | null;
+  defaultCombinedUtilityChargeKsh: number | null;
   utilityBalanceVisibleDays: number;
   rentGraceDays: number;
   allowManualRentPosting: boolean;
@@ -49,6 +54,11 @@ export interface UpdateBuildingConfigurationInput {
   caretakerEnabled?: boolean;
   expenditureTrackingEnabled?: boolean;
   utilityBillingMode?: UtilityBillingMode;
+  defaultWaterRatePerUnitKsh?: number | null;
+  defaultElectricityRatePerUnitKsh?: number | null;
+  defaultWaterFixedChargeKsh?: number | null;
+  defaultElectricityFixedChargeKsh?: number | null;
+  defaultCombinedUtilityChargeKsh?: number | null;
   utilityBalanceVisibleDays?: number;
   rentGraceDays?: number;
   allowManualRentPosting?: boolean;
@@ -74,18 +84,17 @@ const DEFAULT_CONFIG = {
   caretakerEnabled: false,
   expenditureTrackingEnabled: false,
   utilityBillingMode: "metered" as UtilityBillingMode,
+  defaultWaterRatePerUnitKsh: 150 as number | null,
+  defaultElectricityRatePerUnitKsh: null as number | null,
+  defaultWaterFixedChargeKsh: null as number | null,
+  defaultElectricityFixedChargeKsh: null as number | null,
+  defaultCombinedUtilityChargeKsh: null as number | null,
   utilityBalanceVisibleDays: 7,
   rentGraceDays: 0,
   allowManualRentPosting: true,
   allowManualUtilityPosting: true,
   wifiAccessMode: "disabled" as WifiAccessMode
 };
-
-function legacyUtilityBillingModeForBuilding(building: Pick<Building, "name">): UtilityBillingMode {
-  return String(building.name ?? "").trim().toLowerCase() === "village inn"
-    ? "combined_charge"
-    : DEFAULT_CONFIG.utilityBillingMode;
-}
 
 function mapConfig(value: BuildingConfiguration): BuildingConfigurationRecord {
   return {
@@ -101,6 +110,11 @@ function mapConfig(value: BuildingConfiguration): BuildingConfigurationRecord {
     caretakerEnabled: value.caretakerEnabled,
     expenditureTrackingEnabled: value.expenditureTrackingEnabled,
     utilityBillingMode: value.utilityBillingMode,
+    defaultWaterRatePerUnitKsh: value.defaultWaterRatePerUnitKsh,
+    defaultElectricityRatePerUnitKsh: value.defaultElectricityRatePerUnitKsh,
+    defaultWaterFixedChargeKsh: value.defaultWaterFixedChargeKsh,
+    defaultElectricityFixedChargeKsh: value.defaultElectricityFixedChargeKsh,
+    defaultCombinedUtilityChargeKsh: value.defaultCombinedUtilityChargeKsh,
     utilityBalanceVisibleDays: value.utilityBalanceVisibleDays,
     rentGraceDays: value.rentGraceDays,
     allowManualRentPosting: value.allowManualRentPosting,
@@ -116,6 +130,19 @@ function mapConfig(value: BuildingConfiguration): BuildingConfigurationRecord {
     createdAt: value.createdAt.toISOString(),
     updatedAt: value.updatedAt.toISOString()
   };
+}
+
+function normalizeOptionalNonNegativeNumber(value: number | null | undefined): number | null | undefined {
+  if (value == null) {
+    return value;
+  }
+
+  const normalized = Number(value);
+  if (!Number.isFinite(normalized)) {
+    return 0;
+  }
+
+  return Math.max(0, normalized);
 }
 
 export function toPaymentAccessRecord(
@@ -148,8 +175,7 @@ export class BuildingConfigurationService {
           update: {},
           create: {
             buildingId: building.id,
-            ...DEFAULT_CONFIG,
-            utilityBillingMode: legacyUtilityBillingModeForBuilding(building)
+            ...DEFAULT_CONFIG
           }
         })
       )
@@ -214,10 +240,31 @@ export class BuildingConfigurationService {
     input: UpdateBuildingConfigurationInput,
     actor?: UpdateActor
   ): Promise<BuildingConfigurationRecord> {
+    const normalizedDefaultWaterRatePerUnitKsh = normalizeOptionalNonNegativeNumber(
+      input.defaultWaterRatePerUnitKsh
+    );
+    const normalizedDefaultElectricityRatePerUnitKsh =
+      normalizeOptionalNonNegativeNumber(input.defaultElectricityRatePerUnitKsh);
+    const normalizedDefaultWaterFixedChargeKsh = normalizeOptionalNonNegativeNumber(
+      input.defaultWaterFixedChargeKsh
+    );
+    const normalizedDefaultElectricityFixedChargeKsh = normalizeOptionalNonNegativeNumber(
+      input.defaultElectricityFixedChargeKsh
+    );
+    const normalizedDefaultCombinedUtilityChargeKsh =
+      input.defaultCombinedUtilityChargeKsh == null
+        ? input.defaultCombinedUtilityChargeKsh
+        : Math.max(0, Math.round(Number(input.defaultCombinedUtilityChargeKsh) || 0));
+
     const row = await this.prisma.buildingConfiguration.upsert({
       where: { buildingId },
       update: {
         ...input,
+        defaultWaterRatePerUnitKsh: normalizedDefaultWaterRatePerUnitKsh,
+        defaultElectricityRatePerUnitKsh: normalizedDefaultElectricityRatePerUnitKsh,
+        defaultWaterFixedChargeKsh: normalizedDefaultWaterFixedChargeKsh,
+        defaultElectricityFixedChargeKsh: normalizedDefaultElectricityFixedChargeKsh,
+        defaultCombinedUtilityChargeKsh: normalizedDefaultCombinedUtilityChargeKsh,
         updatedByRole: actor?.role ?? null,
         updatedByUserId: actor?.userId ?? null,
         note: input.note?.trim() || null
@@ -226,6 +273,11 @@ export class BuildingConfigurationService {
         buildingId,
         ...DEFAULT_CONFIG,
         ...input,
+        defaultWaterRatePerUnitKsh: normalizedDefaultWaterRatePerUnitKsh,
+        defaultElectricityRatePerUnitKsh: normalizedDefaultElectricityRatePerUnitKsh,
+        defaultWaterFixedChargeKsh: normalizedDefaultWaterFixedChargeKsh,
+        defaultElectricityFixedChargeKsh: normalizedDefaultElectricityFixedChargeKsh,
+        defaultCombinedUtilityChargeKsh: normalizedDefaultCombinedUtilityChargeKsh,
         updatedByRole: actor?.role,
         updatedByUserId: actor?.userId,
         note: input.note?.trim() || undefined

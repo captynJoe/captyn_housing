@@ -265,14 +265,29 @@ export const billingMonthSchema = z
     message: "Use YYYY-MM format for billing month."
   });
 
+const utilityMeterNumberField = z
+  .string()
+  .trim()
+  .min(1)
+  .max(80)
+  .refine(
+    (value) => {
+      const normalized = value.trim().toUpperCase();
+      return normalized !== "NO-METER" && normalized !== "METER-UNSET";
+    },
+    {
+      message: "Enter the actual meter number or leave the field blank."
+    }
+  );
+
 export const upsertUtilityMeterSchema = z.object({
-  meterNumber: z.string().trim().min(1).max(80)
+  meterNumber: utilityMeterNumberField
 });
 
 export const createUtilityBillSchema = z
   .object({
     billingMonth: billingMonthSchema,
-    meterNumber: z.string().trim().min(1).max(80).optional(),
+    meterNumber: utilityMeterNumberField.optional(),
     previousReading: z.number().min(0).max(10_000_000).optional(),
     currentReading: z.number().min(0).max(10_000_000).optional(),
     ratePerUnitKsh: z.number().min(0).max(50_000).optional(),
@@ -654,6 +669,11 @@ export const landlordBuildingConfigurationUpdateSchema = z
     caretakerEnabled: z.boolean().optional(),
     expenditureTrackingEnabled: z.boolean().optional(),
     utilityBillingMode: utilityBillingModeSchema.optional(),
+    defaultWaterRatePerUnitKsh: z.number().min(0).max(50_000).nullable().optional(),
+    defaultElectricityRatePerUnitKsh: z.number().min(0).max(50_000).nullable().optional(),
+    defaultWaterFixedChargeKsh: z.number().min(0).max(200_000).nullable().optional(),
+    defaultElectricityFixedChargeKsh: z.number().min(0).max(200_000).nullable().optional(),
+    defaultCombinedUtilityChargeKsh: z.number().int().min(0).max(200_000).nullable().optional(),
     utilityBalanceVisibleDays: z.number().int().min(0).max(60).optional(),
     rentGraceDays: z.number().int().min(0).max(31).optional(),
     allowManualRentPosting: z.boolean().optional(),
@@ -674,7 +694,12 @@ export const landlordBuildingConfigurationUpdateSchema = z
       typeof value.maintenanceEnabled === "boolean" ||
       typeof value.caretakerEnabled === "boolean" ||
       typeof value.expenditureTrackingEnabled === "boolean" ||
+      value.defaultWaterRatePerUnitKsh !== undefined ||
+      value.defaultElectricityRatePerUnitKsh !== undefined ||
+      value.defaultWaterFixedChargeKsh !== undefined ||
+      value.defaultElectricityFixedChargeKsh !== undefined ||
       typeof value.utilityBalanceVisibleDays === "number" ||
+      value.defaultCombinedUtilityChargeKsh !== undefined ||
       typeof value.rentGraceDays === "number" ||
       typeof value.allowManualRentPosting === "boolean" ||
       typeof value.allowManualUtilityPosting === "boolean" ||
@@ -688,6 +713,13 @@ export const landlordBuildingConfigurationUpdateSchema = z
 const optionalMeterNumberSchema = z.string().trim().max(80).optional();
 const householdMembersSchema = z.number().int().min(0).max(20);
 const optionalFixedChargeSchema = z.number().min(0).max(200_000).optional();
+const optionalReadingSchema = z.number().min(0).max(10_000_000).optional();
+const utilityRateDefaultsSchema = z
+  .object({
+    waterRatePerUnitKsh: z.number().min(0).max(50_000).optional(),
+    electricityRatePerUnitKsh: z.number().min(0).max(50_000).optional()
+  })
+  .optional();
 
 export const landlordUtilityRegistryUpsertSchema = z.object({
   rows: z
@@ -704,18 +736,50 @@ export const landlordUtilityRegistryUpsertSchema = z.object({
     )
     .min(1)
     .max(2_000),
-  rateDefaults: z
-    .object({
-      waterRatePerUnitKsh: z.number().min(0).max(50_000).optional(),
-      electricityRatePerUnitKsh: z.number().min(0).max(50_000).optional()
-    })
-    .optional()
+  rateDefaults: utilityRateDefaultsSchema
 });
 
 export const landlordMonthlyCombinedUtilityChargeSchema = z.object({
   billingMonth: billingMonthSchema,
   amountKsh: z.number().int().min(1).max(200_000),
   acknowledgeImpact: z.literal(true)
+});
+
+export const landlordUtilityBulkSubmissionAuditCreateSchema = z.object({
+  billingMonth: billingMonthSchema,
+  dueDate: z.string().datetime(),
+  note: z.string().trim().max(280).optional(),
+  defaultWaterFixedChargeKsh: z.number().min(0).max(200_000).nullable().optional(),
+  defaultElectricityFixedChargeKsh: z.number().min(0).max(200_000).nullable().optional(),
+  defaultCombinedUtilityChargeKsh: z.number().int().min(0).max(200_000).nullable().optional(),
+  monthlyCombinedUtilityChargeKsh: z.number().int().min(0).max(200_000).nullable().optional(),
+  rateDefaults: utilityRateDefaultsSchema,
+  rows: z
+    .array(
+      z.object({
+        houseNumber: nonEmptyString.max(24),
+        householdMembers: householdMembersSchema.optional(),
+        hasActiveResident: z.boolean().optional(),
+        waterMeterNumber: optionalMeterNumberSchema,
+        waterPreviousReading: optionalReadingSchema,
+        waterCurrentReading: optionalReadingSchema,
+        waterFixedChargeKsh: optionalFixedChargeSchema,
+        electricityMeterNumber: optionalMeterNumberSchema,
+        electricityPreviousReading: optionalReadingSchema,
+        electricityCurrentReading: optionalReadingSchema,
+        electricityFixedChargeKsh: optionalFixedChargeSchema
+      })
+    )
+    .min(1)
+    .max(2_000)
+});
+
+export const landlordUtilityBulkSubmissionAuditFinalizeSchema = z.object({
+  status: z.enum(["completed", "partial_failed", "failed"]),
+  postedCount: z.number().int().min(0).max(10_000),
+  requestedCount: z.number().int().min(0).max(10_000),
+  failures: z.array(z.string().trim().min(1).max(500)).max(500).default([]),
+  completedAt: z.string().datetime().optional()
 });
 
 export const landlordAssignCaretakerSchema = z.object({
@@ -929,6 +993,12 @@ export type LandlordBuildingConfigurationUpdateInput = z.infer<
 >;
 export type LandlordUtilityRegistryUpsertInput = z.infer<
   typeof landlordUtilityRegistryUpsertSchema
+>;
+export type LandlordUtilityBulkSubmissionAuditCreateInput = z.infer<
+  typeof landlordUtilityBulkSubmissionAuditCreateSchema
+>;
+export type LandlordUtilityBulkSubmissionAuditFinalizeInput = z.infer<
+  typeof landlordUtilityBulkSubmissionAuditFinalizeSchema
 >;
 export type LandlordAssignCaretakerInput = z.infer<
   typeof landlordAssignCaretakerSchema

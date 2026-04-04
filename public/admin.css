@@ -492,11 +492,34 @@ tbody td {
     max-width: 100%;
   }
 
+  .table-wrap table[data-mobile-cards="true"] td .password-toggle-wrap .password-toggle-btn {
+    width: 34px;
+    min-width: 34px;
+    max-width: none;
+    padding: 0;
+  }
+
+  .table-wrap table[data-mobile-cards="true"] td.admin-review-cell {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
   .table-wrap table[data-mobile-cards="true"] .decision-actions {
     flex-direction: column;
   }
 
   .table-wrap table[data-mobile-cards="true"] .decision-actions button {
+    width: 100%;
+  }
+
+  .table-wrap table[data-mobile-cards="true"] .admin-review-layout,
+  .table-wrap table[data-mobile-cards="true"] .admin-review-layout-single,
+  .table-wrap table[data-mobile-cards="true"] .admin-review-layout-reset {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .table-wrap table[data-mobile-cards="true"] .admin-review-layout .decision-actions {
     width: 100%;
   }
 
@@ -527,6 +550,34 @@ tbody td {
 
 .decision-actions button {
   min-width: 88px;
+}
+
+.admin-review-layout {
+  display: grid;
+  gap: 10px;
+  align-items: end;
+}
+
+.admin-review-layout-single {
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+}
+
+.admin-review-layout-reset {
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+}
+
+.admin-review-layout > * {
+  min-width: 0;
+}
+
+.admin-review-layout .decision-actions {
+  height: 100%;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.admin-review-layout .decision-actions button {
+  flex: 1 1 116px;
 }
 
 .btn-danger {

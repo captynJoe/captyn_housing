@@ -8,7 +8,6 @@ import type {
 
 export type UtilityType = UtilityTypeInput;
 export const UTILITY_LEGACY_BUILDING_ID = "__LEGACY__";
-const DEFAULT_COMBINED_UTILITY_CHARGE_KSH = 350;
 const UTILITY_BALANCE_VISIBILITY_WINDOW_DAYS = 7;
 
 export interface UtilityMeterRecord {
@@ -98,6 +97,7 @@ interface ListUtilityBillsOptions {
   utilityType?: UtilityType;
   buildingId?: string;
   houseNumber?: string;
+  billingMonth?: string;
   limit?: number;
 }
 
@@ -125,6 +125,11 @@ export interface UtilityRoomBalanceSummary {
 export interface CombinedUtilityChargeMonthlyAmount {
   buildingId: string;
   billingMonth: string;
+  amountKsh: number;
+}
+
+export interface CombinedUtilityChargeBuildingAmount {
+  buildingId: string;
   amountKsh: number;
 }
 
@@ -234,11 +239,27 @@ function isCombinedUtilityFeeRecord(record: UtilityBillRecord): boolean {
   return String(record.note ?? "").trim().startsWith("Combined utility fee");
 }
 
+function normalizeConfiguredMeterNumber(value: string | undefined): string {
+  const normalized = String(value ?? "").trim();
+  const upper = normalized.toUpperCase();
+  if (!normalized || upper === "NO-METER" || upper === "METER-UNSET") {
+    return "";
+  }
+
+  return normalized;
+}
+
+function normalizeStoredBillMeterNumber(value: string | undefined): string {
+  const normalized = String(value ?? "").trim();
+  if (normalized.toUpperCase() === "METER-UNSET") {
+    return "";
+  }
+
+  return normalized;
+}
+
 function hasUsableMeterNumber(value: string | undefined): boolean {
-  const normalized = String(value ?? "").trim().toUpperCase();
-  return Boolean(
-    normalized && normalized !== "NO-METER" && normalized !== "METER-UNSET"
-  );
+  return Boolean(normalizeConfiguredMeterNumber(value));
 }
 
 export class UtilityBillingService {
@@ -250,6 +271,7 @@ export class UtilityBillingService {
   >();
   private stateChangeHandler?: UtilityBillingStateChangeHandler;
   private combinedChargeBuildingIds = new Set<string>();
+  private readonly combinedChargeAmountsByBuilding = new Map<string, number>();
   private readonly combinedChargeAmountsByMonth = new Map<string, number>();
   private readonly combinedChargeAmountsByRoom = new Map<string, number>();
 
@@ -259,6 +281,30 @@ export class UtilityBillingService {
         .map((item) => normalizeBuildingId(item))
         .filter((item) => item && item !== UTILITY_LEGACY_BUILDING_ID)
     );
+    this.normalizeCombinedChargeState();
+  }
+
+  setCombinedChargeBuildingAmounts(
+    records: CombinedUtilityChargeBuildingAmount[]
+  ): void {
+    this.combinedChargeAmountsByBuilding.clear();
+
+    for (const record of records) {
+      if (!record?.buildingId) {
+        continue;
+      }
+
+      const amountKsh = Number(record.amountKsh);
+      if (!Number.isFinite(amountKsh) || amountKsh <= 0) {
+        continue;
+      }
+
+      this.combinedChargeAmountsByBuilding.set(
+        normalizeBuildingId(record.buildingId),
+        Math.max(0, Math.round(amountKsh))
+      );
+    }
+
     this.normalizeCombinedChargeState();
   }
 
@@ -327,18 +373,26 @@ export class UtilityBillingService {
     return { meters, bills };
   }
 
-  importState(state: UtilityBillingPersistedState | null | undefined): void {
+  importState(state: UtilityBillingPersistedState | null | undefined): boolean {
     this.meters.clear();
     this.billsByLedger.clear();
     this.paymentReferenceIndex.clear();
 
+    let normalizedLegacyPlaceholders = false;
+
     if (!state) {
-      return;
+      return normalizedLegacyPlaceholders;
     }
 
     if (Array.isArray(state.meters)) {
       for (const meter of state.meters) {
         if (!meter || !meter.utilityType || !meter.houseNumber || !meter.meterNumber) {
+          continue;
+        }
+
+        const meterNumber = normalizeConfiguredMeterNumber(meter.meterNumber);
+        if (!meterNumber) {
+          normalizedLegacyPlaceholders = true;
           continue;
         }
 
@@ -350,7 +404,7 @@ export class UtilityBillingService {
           utilityType: meter.utilityType,
           buildingId: normalizedBuildingId,
           houseNumber: normalizedHouse,
-          meterNumber: String(meter.meterNumber).trim(),
+          meterNumber,
           updatedAt: meter.updatedAt || nowIso()
         };
 
@@ -377,6 +431,10 @@ export class UtilityBillingService {
         );
         const key = ledgerKey(snapshot.utilityType, normalizedBuildingId, normalizedHouse);
         const records = this.billsByLedger.get(key) ?? [];
+        const meterNumber = normalizeStoredBillMeterNumber(snapshot.meterNumber);
+        if (meterNumber !== String(snapshot.meterNumber ?? "").trim()) {
+          normalizedLegacyPlaceholders = true;
+        }
 
         const record: UtilityBillRecord = {
           id: snapshot.id,
@@ -384,7 +442,7 @@ export class UtilityBillingService {
           buildingId: normalizedBuildingId,
           houseNumber: normalizedHouse,
           billingMonth: snapshot.billingMonth,
-          meterNumber: snapshot.meterNumber,
+          meterNumber,
           previousReading: Number(snapshot.previousReading ?? 0),
           currentReading: Number(snapshot.currentReading ?? 0),
           unitsConsumed: Number(snapshot.unitsConsumed ?? 0),
@@ -421,6 +479,7 @@ export class UtilityBillingService {
     }
 
     this.normalizeCombinedChargeState();
+    return normalizedLegacyPlaceholders;
   }
 
   upsertMeter(
@@ -431,11 +490,17 @@ export class UtilityBillingService {
   ): UtilityMeterRecord {
     const normalizedBuildingId = normalizeBuildingId(buildingId);
     const normalizedHouse = normalizeHouseNumber(houseNumber);
+    const meterNumber = normalizeConfiguredMeterNumber(input.meterNumber);
+    if (!meterNumber) {
+      throw new Error(
+        "Enter the actual meter number. Leave the field blank for rooms without a meter."
+      );
+    }
     const meter: UtilityMeterRecord = {
       utilityType,
       buildingId: normalizedBuildingId,
       houseNumber: normalizedHouse,
-      meterNumber: input.meterNumber.trim(),
+      meterNumber,
       updatedAt: nowIso()
     };
 
@@ -565,9 +630,10 @@ export class UtilityBillingService {
       );
     }
 
-    const inputMeterNumber = input.meterNumber?.trim() || "";
+    const inputMeterNumber = normalizeConfiguredMeterNumber(input.meterNumber);
     const existingMeter = this.getMeter(utilityType, normalizedBuildingId, normalizedHouse);
-    const meterNumber = inputMeterNumber || existingMeter?.meterNumber || "";
+    const meterNumber =
+      inputMeterNumber || normalizeConfiguredMeterNumber(existingMeter?.meterNumber);
     const hasMeter =
       meterNumber.length > 0 || input.currentReading != null || input.ratePerUnitKsh != null;
 
@@ -625,7 +691,7 @@ export class UtilityBillingService {
       buildingId: normalizedBuildingId,
       houseNumber: normalizedHouse,
       billingMonth: input.billingMonth,
-      meterNumber: hasMeter ? (meterNumber || "METER-UNSET") : "NO-METER",
+      meterNumber: hasMeter ? meterNumber : "NO-METER",
       previousReading,
       currentReading,
       unitsConsumed,
@@ -664,6 +730,10 @@ export class UtilityBillingService {
       .flatMap((items) => items)
       .filter((item) => {
         if (options.utilityType && item.utilityType !== options.utilityType) {
+          return false;
+        }
+
+        if (options.billingMonth && item.billingMonth !== options.billingMonth) {
           return false;
         }
 
@@ -1103,7 +1173,6 @@ export class UtilityBillingService {
   }
 
   private normalizeBaselineCombinedCharges(): void {
-    const fallbackByRoom = new Map<string, number>();
     const configuredMetersByRoom = new Map<string, Set<UtilityType>>();
 
     for (const meter of this.meters.values()) {
@@ -1115,19 +1184,6 @@ export class UtilityBillingService {
       const bucket = configuredMetersByRoom.get(roomKey) ?? new Set<UtilityType>();
       bucket.add(meter.utilityType);
       configuredMetersByRoom.set(roomKey, bucket);
-    }
-
-    for (const records of this.billsByLedger.values()) {
-      for (const record of records) {
-        if (record.amountKsh <= 0) {
-          continue;
-        }
-
-        const roomKey = `${record.buildingId}::${record.houseNumber}`;
-        if (!fallbackByRoom.has(roomKey)) {
-          fallbackByRoom.set(roomKey, record.amountKsh);
-        }
-      }
     }
 
     const baselineGroups = new Map<string, UtilityBillRecord[]>();
@@ -1166,18 +1222,22 @@ export class UtilityBillingService {
 
       const fallbackAmount =
         this.getCombinedChargeAmountForRoom(reference.buildingId, reference.houseNumber) ??
-        fallbackByRoom.get(roomKey) ??
         this.getCombinedChargeAmount(reference.buildingId, reference.billingMonth) ??
-        DEFAULT_COMBINED_UTILITY_CHARGE_KSH;
-      if (!Number.isFinite(fallbackAmount) || fallbackAmount <= 0) {
+        this.getCombinedChargeAmountForBuilding(reference.buildingId);
+      if (
+        fallbackAmount == null ||
+        !Number.isFinite(fallbackAmount) ||
+        fallbackAmount <= 0
+      ) {
         continue;
       }
+      const resolvedFallbackAmount = Math.max(0, Number(fallbackAmount));
 
       const target =
         records.find((item) => item.utilityType === "water") ?? reference;
-      target.amountKsh = fallbackAmount;
-      target.balanceKsh = fallbackAmount;
-      target.fixedChargeKsh = fallbackAmount;
+      target.amountKsh = resolvedFallbackAmount;
+      target.balanceKsh = resolvedFallbackAmount;
+      target.fixedChargeKsh = resolvedFallbackAmount;
       target.previousReading = 0;
       target.currentReading = 0;
       target.unitsConsumed = 0;
@@ -1185,7 +1245,6 @@ export class UtilityBillingService {
       target.meterNumber = "NO-METER";
       target.note = `Combined utility fee (water+electricity) for ${target.billingMonth}.`;
       target.updatedAt = nowIso();
-      fallbackByRoom.set(roomKey, fallbackAmount);
     }
   }
 
@@ -1254,11 +1313,20 @@ export class UtilityBillingService {
         target.buildingId,
         target.billingMonth
       );
+      const buildingAmount = this.getCombinedChargeAmountForBuilding(target.buildingId);
       const combinedAmount =
         roomAmount ??
         (postedAmounts.length > 0
           ? Math.max(...postedAmounts)
-          : configuredAmount ?? DEFAULT_COMBINED_UTILITY_CHARGE_KSH);
+          : configuredAmount ?? buildingAmount);
+      if (
+        combinedAmount == null ||
+        !Number.isFinite(combinedAmount) ||
+        combinedAmount <= 0
+      ) {
+        continue;
+      }
+      const resolvedCombinedAmount = Math.max(0, Number(combinedAmount));
       const mergedPayments = records
         .flatMap((item) => item.payments ?? [])
         .sort((a, b) => b.paidAt.localeCompare(a.paidAt))
@@ -1274,9 +1342,9 @@ export class UtilityBillingService {
         0
       );
 
-      target.amountKsh = combinedAmount;
-      target.balanceKsh = Math.max(0, combinedAmount - totalPaid);
-      target.fixedChargeKsh = combinedAmount;
+      target.amountKsh = resolvedCombinedAmount;
+      target.balanceKsh = Math.max(0, resolvedCombinedAmount - totalPaid);
+      target.fixedChargeKsh = resolvedCombinedAmount;
       target.previousReading = 0;
       target.currentReading = 0;
       target.unitsConsumed = 0;
@@ -1312,6 +1380,13 @@ export class UtilityBillingService {
   ): number | undefined {
     const value = this.combinedChargeAmountsByMonth.get(
       `${normalizeBuildingId(buildingId)}::${billingMonth}`
+    );
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  private getCombinedChargeAmountForBuilding(buildingId: string): number | undefined {
+    const value = this.combinedChargeAmountsByBuilding.get(
+      normalizeBuildingId(buildingId)
     );
     return Number.isFinite(value) ? value : undefined;
   }

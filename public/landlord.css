@@ -749,6 +749,33 @@
   min-width: 125px;
 }
 
+.registry-reading-cell {
+  display: grid;
+  gap: 2px;
+  min-width: 110px;
+  line-height: 1.2;
+}
+
+.registry-reading-cell strong {
+  color: #102331;
+  font-size: 0.95rem;
+}
+
+.registry-reading-cell small {
+  color: rgba(16, 35, 49, 0.68);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.registry-reading-cell.is-empty strong {
+  color: rgba(16, 35, 49, 0.48);
+}
+
+.registry-reading-cell.is-restored strong {
+  color: #186e6e;
+}
+
 @media (max-width: 1200px) {
   .metrics-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));

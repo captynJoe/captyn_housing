@@ -525,6 +525,20 @@ export class UserAccountService {
     };
   }
 
+  async hasActiveResidentTenancy(input: {
+    buildingId: string;
+    houseNumber: string;
+    phoneNumber: string;
+  }) {
+    const tenancy = await this.findActiveTenancyByHouseAndPhone({
+      buildingId: input.buildingId,
+      houseNumber: input.houseNumber,
+      phoneNumber: input.phoneNumber
+    });
+
+    return Boolean(tenancy);
+  }
+
   async resolveUserByIdentifier(identifier: string): Promise<{
     identifierType: "email" | "phone";
     normalizedIdentifier: string;

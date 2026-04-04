@@ -147,6 +147,7 @@ const overviewRoomBuildingSelectEl = document.getElementById("overview-room-buil
 const overviewRoomSearchInputEl = document.getElementById("overview-room-search-input");
 const overviewOpenRoomBtnEl = document.getElementById("overview-open-room-btn");
 const registryBuildingSelectEl = document.getElementById("registry-building-select");
+const registryReadingMonthEl = document.getElementById("registry-reading-month");
 const registryLoadBtnEl = document.getElementById("registry-load-btn");
 const registrySaveBtnEl = document.getElementById("registry-save-btn");
 const openUtilitySheetBtnEl = document.getElementById("open-utility-sheet-btn");
@@ -164,6 +165,15 @@ const utilitySheetBillingMonthEl = document.getElementById(
 const utilitySheetDueDateEl = document.getElementById("utility-sheet-due-date");
 const utilitySheetWaterRateEl = document.getElementById("utility-sheet-water-rate");
 const utilitySheetElectricRateEl = document.getElementById("utility-sheet-electric-rate");
+const utilitySheetWaterFixedDefaultEl = document.getElementById(
+  "utility-sheet-water-fixed-default"
+);
+const utilitySheetElectricFixedDefaultEl = document.getElementById(
+  "utility-sheet-electric-fixed-default"
+);
+const utilitySheetBuildingCombinedChargeEl = document.getElementById(
+  "utility-sheet-building-combined-charge"
+);
 const utilitySheetCombinedChargeEl = document.getElementById(
   "utility-sheet-combined-charge"
 );
@@ -272,11 +282,13 @@ const state = {
   role: "-",
   activeLandlordView: "overview",
   buildings: [],
+  buildingById: new Map(),
   applications: [],
   pendingApplicationsCount: 0,
   rentStatus: [],
   selectedRentPaymentBuildingId: "",
   paymentAccess: [],
+  paymentAccessByBuildingId: new Map(),
   wifiPackages: [],
   wifiPackagesUnavailableReason: "",
   selectedWifiPackageBuildingId: "",
@@ -286,12 +298,15 @@ const state = {
   selectedTicketBuildingId: "",
   residentUsersCount: 0,
   registryRows: [],
+  registryRoomByKey: new Map(),
   utilityRateDefaults: null,
+  utilitySheetBuildingConfiguration: null,
   utilitySheetMonthlyCombinedCharge: null,
   caretakerRequests: [],
   caretakers: [],
   tickets: [],
   residentDirectory: [],
+  residentDirectoryByKey: new Map(),
   selectedResidentsBuildingId: "",
   selectedOverviewRoomBuildingId: "all",
   residentStatusFilter: "all",
@@ -301,7 +316,13 @@ const state = {
   selectedResidentAgreementError: "",
   residentAgreementLoading: false,
   meters: [],
+  meterByKey: new Map(),
   bills: [],
+  latestUtilityBillByKey: new Map(),
+  utilityBillByMonthKey: new Map(),
+  registryReadingMonth: "",
+  registryReadingBills: [],
+  registryReadingBillByKey: new Map(),
   payments: [],
   expenditures: []
 };
@@ -311,6 +332,254 @@ const APPLICATION_REFRESH_INTERVAL_MS = 30_000;
 const UTILITY_BALANCE_VISIBILITY_WINDOW_DAYS = 7;
 
 initResponsiveTables();
+
+function normalizeLookupBuildingId(buildingId) {
+  return String(buildingId ?? "").trim();
+}
+
+function buildingHouseLookupKey(buildingId, houseNumber) {
+  const normalizedHouse = normalizeHouse(houseNumber);
+  if (!normalizedHouse) {
+    return "";
+  }
+
+  return `${normalizeLookupBuildingId(buildingId)}::${normalizedHouse}`;
+}
+
+function utilityBuildingHouseLookupKey(utilityType, buildingId, houseNumber) {
+  const normalizedHouse = normalizeHouse(houseNumber);
+  if (!normalizedHouse) {
+    return "";
+  }
+
+  return `${String(utilityType ?? "").trim().toLowerCase()}::${normalizeLookupBuildingId(
+    buildingId
+  )}::${normalizedHouse}`;
+}
+
+function utilityBuildingHouseMonthLookupKey(
+  utilityType,
+  buildingId,
+  houseNumber,
+  billingMonth
+) {
+  const baseKey = utilityBuildingHouseLookupKey(utilityType, buildingId, houseNumber);
+  const normalizedMonth = toBillingMonth(billingMonth);
+  if (!baseKey || !normalizedMonth) {
+    return "";
+  }
+
+  return `${baseKey}::${normalizedMonth}`;
+}
+
+function buildRoomIndex(rows) {
+  const index = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((item) => {
+    const key = buildingHouseLookupKey(item.buildingId, item.houseNumber);
+    if (key) {
+      index.set(key, item);
+    }
+  });
+  return index;
+}
+
+function buildMeterIndex(rows) {
+  const index = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((item) => {
+    const key = utilityBuildingHouseLookupKey(
+      item.utilityType,
+      item.buildingId,
+      item.houseNumber
+    );
+    if (key) {
+      index.set(key, item);
+    }
+  });
+  return index;
+}
+
+function buildLatestUtilityBillIndex(rows) {
+  const index = new Map();
+
+  (Array.isArray(rows) ? rows : []).forEach((item) => {
+    const key = utilityBuildingHouseLookupKey(
+      item.utilityType,
+      item.buildingId,
+      item.houseNumber
+    );
+    if (!key) {
+      return;
+    }
+
+    const current = index.get(key);
+    if (!current) {
+      index.set(key, item);
+      return;
+    }
+
+    const currentMonth = String(current.billingMonth ?? "");
+    const nextMonth = String(item.billingMonth ?? "");
+    if (nextMonth > currentMonth) {
+      index.set(key, item);
+      return;
+    }
+
+    if (nextMonth === currentMonth) {
+      const currentUpdated = String(current.updatedAt ?? "");
+      const nextUpdated = String(item.updatedAt ?? "");
+      if (nextUpdated > currentUpdated) {
+        index.set(key, item);
+      }
+    }
+  });
+
+  return index;
+}
+
+function buildUtilityBillMonthIndex(rows) {
+  const index = new Map();
+
+  (Array.isArray(rows) ? rows : []).forEach((item) => {
+    const key = utilityBuildingHouseMonthLookupKey(
+      item.utilityType,
+      item.buildingId,
+      item.houseNumber,
+      item.billingMonth
+    );
+    if (!key) {
+      return;
+    }
+
+    const current = index.get(key);
+    if (!current) {
+      index.set(key, item);
+      return;
+    }
+
+    const currentUpdated = String(current.updatedAt ?? "");
+    const nextUpdated = String(item.updatedAt ?? "");
+    if (nextUpdated > currentUpdated) {
+      index.set(key, item);
+    }
+  });
+
+  return index;
+}
+
+function setBuildings(rows) {
+  state.buildings = Array.isArray(rows) ? rows : [];
+  state.buildingById = new Map(
+    state.buildings
+      .map((item) => [normalizeLookupBuildingId(item.id), item])
+      .filter(([key]) => Boolean(key))
+  );
+}
+
+function setPaymentAccess(rows) {
+  state.paymentAccess = Array.isArray(rows) ? rows : [];
+  state.paymentAccessByBuildingId = new Map(
+    state.paymentAccess
+      .map((item) => [normalizeLookupBuildingId(item.buildingId), item])
+      .filter(([key]) => Boolean(key))
+  );
+}
+
+function setRegistryRows(rows) {
+  state.registryRows = Array.isArray(rows) ? rows : [];
+  state.registryRoomByKey = buildRoomIndex(state.registryRows);
+}
+
+function setResidentDirectory(rows) {
+  state.residentDirectory = Array.isArray(rows) ? rows : [];
+  state.residentDirectoryByKey = buildRoomIndex(state.residentDirectory);
+}
+
+function setMeters(rows) {
+  state.meters = Array.isArray(rows) ? rows : [];
+  state.meterByKey = buildMeterIndex(state.meters);
+}
+
+function setBills(rows) {
+  state.bills = Array.isArray(rows) ? rows : [];
+  state.latestUtilityBillByKey = buildLatestUtilityBillIndex(state.bills);
+  state.utilityBillByMonthKey = buildUtilityBillMonthIndex(state.bills);
+}
+
+function setRegistryReadingBills(rows) {
+  state.registryReadingBills = Array.isArray(rows) ? rows : [];
+  state.registryReadingBillByKey = buildUtilityBillMonthIndex(
+    state.registryReadingBills
+  );
+}
+
+function getBuildingRecord(buildingId) {
+  const normalizedBuildingId = normalizeLookupBuildingId(buildingId);
+  if (!normalizedBuildingId) {
+    return null;
+  }
+
+  return state.buildingById.get(normalizedBuildingId) ?? null;
+}
+
+function getPaymentAccessRecord(buildingId) {
+  const normalizedBuildingId = normalizeLookupBuildingId(buildingId);
+  if (!normalizedBuildingId) {
+    return null;
+  }
+
+  return state.paymentAccessByBuildingId.get(normalizedBuildingId) ?? null;
+}
+
+function getIndexedRoom(index, buildingId, houseNumber) {
+  const exactKey = buildingHouseLookupKey(buildingId, houseNumber);
+  if (!exactKey) {
+    return null;
+  }
+
+  return index.get(exactKey) ?? index.get(buildingHouseLookupKey("", houseNumber)) ?? null;
+}
+
+function getLatestUtilityBill(utilityType, buildingId, houseNumber) {
+  const exactKey = utilityBuildingHouseLookupKey(utilityType, buildingId, houseNumber);
+  if (!exactKey) {
+    return null;
+  }
+
+  return (
+    state.latestUtilityBillByKey.get(exactKey) ??
+    state.latestUtilityBillByKey.get(
+      utilityBuildingHouseLookupKey(utilityType, "", houseNumber)
+    ) ??
+    null
+  );
+}
+
+function getUtilityBillForMonth(utilityType, buildingId, houseNumber, billingMonth) {
+  const exactKey = utilityBuildingHouseMonthLookupKey(
+    utilityType,
+    buildingId,
+    houseNumber,
+    billingMonth
+  );
+  if (!exactKey) {
+    return null;
+  }
+
+  const legacyKey = utilityBuildingHouseMonthLookupKey(
+    utilityType,
+    "",
+    houseNumber,
+    billingMonth
+  );
+
+  return (
+    state.registryReadingBillByKey.get(exactKey) ??
+    state.registryReadingBillByKey.get(legacyKey) ??
+    state.utilityBillByMonthKey.get(exactKey) ??
+    state.utilityBillByMonthKey.get(legacyKey) ??
+    null
+  );
+}
 
 function setStatus(message) {
   authStatusEl.textContent = formatHouseManagerText(message);
@@ -399,10 +668,7 @@ function redirectToLogin() {
 }
 
 function getBuildingNameById(buildingId) {
-  const normalizedBuildingId = String(buildingId ?? "").trim();
-  return (
-    state.buildings.find((item) => String(item.id) === normalizedBuildingId)?.name ?? ""
-  );
+  return getBuildingRecord(buildingId)?.name ?? "";
 }
 
 function resolveActiveLandlordBuildingName() {
@@ -726,6 +992,17 @@ function currentBillingMonth() {
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+function previousBillingMonth(value = new Date()) {
+  const parsed = value instanceof Date ? new Date(value) : new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  parsed.setUTCDate(1);
+  parsed.setUTCMonth(parsed.getUTCMonth() - 1);
+  return `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 function toMonthInputValue(value) {
   const raw = String(value ?? "").trim();
   if (!raw) {
@@ -742,17 +1019,6 @@ function toMonthInputValue(value) {
   }
 
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
-function getBuildingName(buildingId) {
-  return (
-    state.buildings.find((item) => String(item.id) === String(buildingId))?.name ??
-    String(buildingId ?? "")
-  );
-}
-
-function isVillageInnBuilding(buildingId) {
-  return getBuildingName(buildingId).trim().toLowerCase() === "village inn";
 }
 
 function utilityAmount(value) {
@@ -798,22 +1064,9 @@ function getUtilityPaidAmount(item) {
 }
 
 function findRegistryRoom(buildingId, houseNumber) {
-  const normalizedHouse = normalizeHouse(houseNumber);
-  if (!normalizedHouse) {
-    return null;
-  }
-
   return (
-    state.registryRows.find(
-      (item) =>
-        (!buildingId || !item.buildingId || String(item.buildingId) === String(buildingId)) &&
-        normalizeHouse(item.houseNumber) === normalizedHouse
-    ) ??
-    state.residentDirectory.find(
-      (item) =>
-        (!buildingId || !item.buildingId || String(item.buildingId) === String(buildingId)) &&
-        normalizeHouse(item.houseNumber) === normalizedHouse
-    ) ??
+    getIndexedRoom(state.registryRoomByKey, buildingId, houseNumber) ??
+    getIndexedRoom(state.residentDirectoryByKey, buildingId, houseNumber) ??
     null
   );
 }
@@ -826,12 +1079,12 @@ function getRoomMeterProfile(buildingId, houseNumber) {
     buildingId,
     houseNumber
   )?.meterNumber;
-  const waterMeterNumber = String(
+  const waterMeterNumber = normalizeUtilityMeterNumber(
     registryRoom?.waterMeterNumber ?? configuredWater ?? ""
-  ).trim();
-  const electricityMeterNumber = String(
+  );
+  const electricityMeterNumber = normalizeUtilityMeterNumber(
     registryRoom?.electricityMeterNumber ?? configuredElectricity ?? ""
-  ).trim();
+  );
 
   return {
     waterMeterNumber,
@@ -852,13 +1105,22 @@ function isCombinedFallbackUtilityBill(item) {
   );
 }
 
+function normalizeUtilityMeterNumber(value) {
+  const normalized = String(value ?? "").trim();
+  const upper = normalized.toUpperCase();
+  if (!normalized || upper === "NO-METER" || upper === "METER-UNSET") {
+    return "";
+  }
+
+  return normalized;
+}
+
 function hasUsableMeterNumber(value) {
-  const normalized = String(value ?? "").trim().toUpperCase();
-  return Boolean(normalized && normalized !== "NO-METER" && normalized !== "METER-UNSET");
+  return Boolean(normalizeUtilityMeterNumber(value));
 }
 
 function shouldAwaitMeterReadings(item) {
-  if (!item || isUtilityPlaceholderBill(item) || !isVillageInnBuilding(item.buildingId)) {
+  if (!item || isUtilityPlaceholderBill(item)) {
     return false;
   }
 
@@ -1284,11 +1546,7 @@ function getResidentLookupExactMatches(rows, query) {
 }
 
 function findResidentDirectoryEntry(buildingId, houseNumber) {
-  return state.residentDirectory.find(
-    (item) =>
-      item.buildingId === buildingId &&
-      normalizeHouse(item.houseNumber) === normalizeHouse(houseNumber)
-  );
+  return getIndexedRoom(state.residentDirectoryByKey, buildingId, houseNumber);
 }
 
 function openResidentDirectoryEntry(buildingId, houseNumber) {
@@ -2203,6 +2461,50 @@ function numericValueFromString(value) {
   return Number.isFinite(numeric) ? numeric : undefined;
 }
 
+function normalizeUtilityRateDefaults(rateDefaults, fallbackBuildingId = "") {
+  const buildingId = String(rateDefaults?.buildingId || fallbackBuildingId || "").trim();
+  if (!rateDefaults && !buildingId) {
+    return null;
+  }
+
+  return {
+    buildingId,
+    waterRatePerUnitKsh:
+      rateDefaults?.waterRatePerUnitKsh == null
+        ? undefined
+        : Number(rateDefaults.waterRatePerUnitKsh),
+    electricityRatePerUnitKsh:
+      rateDefaults?.electricityRatePerUnitKsh == null
+        ? undefined
+        : Number(rateDefaults.electricityRatePerUnitKsh)
+  };
+}
+
+function rateDefaultsFromBuildingConfiguration(configuration, fallbackBuildingId = "") {
+  if (!configuration) {
+    return null;
+  }
+
+  return normalizeUtilityRateDefaults(
+    {
+      buildingId: configuration.buildingId || fallbackBuildingId,
+      waterRatePerUnitKsh: configuration.defaultWaterRatePerUnitKsh,
+      electricityRatePerUnitKsh: configuration.defaultElectricityRatePerUnitKsh
+    },
+    fallbackBuildingId
+  );
+}
+
+function setUtilityPricingState(buildingConfiguration, rateDefaults, fallbackBuildingId = "") {
+  const normalizedBuildingId = String(
+    buildingConfiguration?.buildingId || fallbackBuildingId || ""
+  ).trim();
+  state.utilitySheetBuildingConfiguration = buildingConfiguration ?? null;
+  state.utilityRateDefaults =
+    rateDefaultsFromBuildingConfiguration(buildingConfiguration, normalizedBuildingId) ??
+    normalizeUtilityRateDefaults(rateDefaults, normalizedBuildingId);
+}
+
 function getUtilityRateDefault(utilityType, buildingId) {
   const defaults = state.utilityRateDefaults;
   if (!defaults) {
@@ -2244,6 +2546,22 @@ function syncUtilitySheetRateDefaults() {
   utilitySheetElectricRateEl.value = electricityValue;
 }
 
+function syncUtilitySheetBuildingFixedDefaults() {
+  if (!(utilitySheetWaterFixedDefaultEl instanceof HTMLInputElement)) {
+    return;
+  }
+  if (!(utilitySheetElectricFixedDefaultEl instanceof HTMLInputElement)) {
+    return;
+  }
+
+  utilitySheetWaterFixedDefaultEl.value = numberToInputString(
+    state.utilitySheetBuildingConfiguration?.defaultWaterFixedChargeKsh
+  );
+  utilitySheetElectricFixedDefaultEl.value = numberToInputString(
+    state.utilitySheetBuildingConfiguration?.defaultElectricityFixedChargeKsh
+  );
+}
+
 function syncUtilitySheetCombinedCharge() {
   if (!(utilitySheetCombinedChargeEl instanceof HTMLInputElement)) {
     return;
@@ -2252,6 +2570,189 @@ function syncUtilitySheetCombinedCharge() {
   utilitySheetCombinedChargeEl.value = numberToInputString(
     state.utilitySheetMonthlyCombinedCharge?.amountKsh
   );
+}
+
+function syncUtilitySheetBuildingCombinedCharge() {
+  if (!(utilitySheetBuildingCombinedChargeEl instanceof HTMLInputElement)) {
+    return;
+  }
+
+  utilitySheetBuildingCombinedChargeEl.value = numberToInputString(
+    state.utilitySheetBuildingConfiguration?.defaultCombinedUtilityChargeKsh
+  );
+}
+
+async function loadUtilitySheetBuildingConfiguration() {
+  const buildingId = String(
+    utilitySheetBuildingSelectEl?.value || state.selectedRegistryBuildingId || ""
+  ).trim();
+
+  setUtilityPricingState(null, null, buildingId);
+  syncUtilitySheetRateDefaults();
+  syncUtilitySheetBuildingFixedDefaults();
+  syncUtilitySheetBuildingCombinedCharge();
+
+  if (!buildingId) {
+    return;
+  }
+
+  const payload = await requestJson(
+    `/api/landlord/buildings/${encodeURIComponent(buildingId)}/configuration`
+  );
+  setUtilityPricingState(payload.data ?? null, null, buildingId);
+  syncUtilitySheetRateDefaults();
+  syncUtilitySheetBuildingFixedDefaults();
+  syncUtilitySheetBuildingCombinedCharge();
+
+  if (
+    utilitySheetModalEl instanceof HTMLElement &&
+    !utilitySheetModalEl.classList.contains("hidden")
+  ) {
+    renderUtilitySheetRows(state.registryRows);
+  }
+}
+
+function getBuildingUtilityFixedChargeDefault(utilityType, buildingId) {
+  const normalizedBuildingId = String(buildingId ?? "").trim();
+  const configuration = state.utilitySheetBuildingConfiguration;
+  const configurationBuildingId = String(configuration?.buildingId ?? "").trim();
+  if (!configuration || !normalizedBuildingId || configurationBuildingId !== normalizedBuildingId) {
+    return undefined;
+  }
+
+  const candidate =
+    utilityType === "water"
+      ? configuration.defaultWaterFixedChargeKsh
+      : configuration.defaultElectricityFixedChargeKsh;
+  if (!Number.isFinite(Number(candidate))) {
+    return undefined;
+  }
+
+  return Math.max(0, Number(candidate));
+}
+
+function getRoomUtilityFixedChargeDefault(utilityType, buildingId, houseNumber) {
+  const room = findRegistryRoom(buildingId, houseNumber);
+  const roomValue =
+    utilityType === "water"
+      ? room?.waterFixedChargeKsh
+      : room?.electricityFixedChargeKsh;
+  if (Number.isFinite(Number(roomValue)) && Number(roomValue) > 0) {
+    return Math.max(0, Number(roomValue));
+  }
+
+  return getBuildingUtilityFixedChargeDefault(utilityType, buildingId);
+}
+
+function utilityPricingNumbersEqual(left, right) {
+  if (left == null || right == null) {
+    return left == null && right == null;
+  }
+
+  return Math.abs(Number(left) - Number(right)) < 0.000001;
+}
+
+function getLatestAvailableUtilityBillingMonth(buildingId) {
+  const normalizedBuildingId = String(buildingId ?? "").trim();
+  let latestMonth = "";
+
+  state.bills.forEach((item) => {
+    const itemBuildingId = String(item?.buildingId ?? "").trim();
+    if (normalizedBuildingId && itemBuildingId && itemBuildingId !== normalizedBuildingId) {
+      return;
+    }
+
+    const candidate = toBillingMonth(item?.billingMonth);
+    if (candidate && candidate > latestMonth) {
+      latestMonth = candidate;
+    }
+  });
+
+  return latestMonth;
+}
+
+function getSelectedRegistryReadingMonth() {
+  const inputMonth = toBillingMonth(registryReadingMonthEl?.value);
+  if (inputMonth) {
+    return inputMonth;
+  }
+
+  const stateMonth = toBillingMonth(state.registryReadingMonth);
+  if (stateMonth) {
+    return stateMonth;
+  }
+
+  return (
+    getLatestAvailableUtilityBillingMonth(getSelectedUtilityBuildingId()) ||
+    previousBillingMonth()
+  );
+}
+
+function syncRegistryReadingMonthInput() {
+  const billingMonth = getSelectedRegistryReadingMonth();
+  state.registryReadingMonth = billingMonth;
+
+  if (registryReadingMonthEl instanceof HTMLInputElement) {
+    registryReadingMonthEl.value = toMonthInputValue(billingMonth);
+  }
+}
+
+function formatRegistryReadingMarkup(item, billingMonth) {
+  const emptyDetail = billingMonth ? `${billingMonth} unread` : "No reading";
+  if (!item) {
+    return `
+      <div class="registry-reading-cell is-empty">
+        <strong>-</strong>
+        <small>${escapeHtml(emptyDetail)}</small>
+      </div>
+    `;
+  }
+
+  const previousReading = Number(item.previousReading);
+  const currentReading = Number(item.currentReading);
+  const hasPreviousReading = Number.isFinite(previousReading) && previousReading > 0;
+  const hasCurrentReading = Number.isFinite(currentReading) && currentReading > 0;
+  const note = String(item.note ?? "").trim();
+  const noteLower = note.toLowerCase();
+  const isRestoredBaseline = noteLower.includes("restored");
+
+  if (!hasPreviousReading && !hasCurrentReading) {
+    return `
+      <div class="registry-reading-cell is-empty">
+        <strong>-</strong>
+        <small>${escapeHtml(
+          utilityAmount(item.amountKsh) > 0 ? "Combined charge" : "No reading"
+        )}</small>
+      </div>
+    `;
+  }
+
+  const resolvedReading = hasCurrentReading ? currentReading : previousReading;
+  let detail = "Saved";
+  if (
+    hasPreviousReading &&
+    hasCurrentReading &&
+    !utilityPricingNumbersEqual(previousReading, currentReading)
+  ) {
+    detail = `${numberToInputString(previousReading)} -> ${numberToInputString(
+      currentReading
+    )}`;
+  } else if (isRestoredBaseline) {
+    detail = "Restored baseline";
+  } else if (noteLower.includes("baseline")) {
+    detail = "Baseline";
+  } else if (hasCurrentReading || hasPreviousReading) {
+    detail = "Recorded";
+  }
+
+  return `
+    <div class="registry-reading-cell${isRestoredBaseline ? " is-restored" : ""}" title="${escapeHtml(
+      note || `${billingMonth || "Selected month"} reading`
+    )}">
+      <strong>${escapeHtml(numberToInputString(resolvedReading))}</strong>
+      <small>${escapeHtml(detail)}</small>
+    </div>
+  `;
 }
 
 async function loadUtilitySheetMonthlyCombinedCharge() {
@@ -2284,34 +2785,6 @@ function meterNumberForHouse(utilityType, buildingId, houseNumber, fallbackValue
   }
 
   return String(fallbackValue ?? "").trim();
-}
-
-function latestBillsByUtilityAndHouse() {
-  const map = new Map();
-  state.bills.forEach((item) => {
-    const key = `${item.utilityType}:${normalizeHouse(item.houseNumber)}`;
-    const current = map.get(key);
-    if (!current) {
-      map.set(key, item);
-      return;
-    }
-
-    const currentMonth = String(current.billingMonth ?? "");
-    const nextMonth = String(item.billingMonth ?? "");
-    if (nextMonth > currentMonth) {
-      map.set(key, item);
-      return;
-    }
-
-    if (nextMonth === currentMonth) {
-      const currentUpdated = String(current.updatedAt ?? "");
-      const nextUpdated = String(item.updatedAt ?? "");
-      if (nextUpdated > currentUpdated) {
-        map.set(key, item);
-      }
-    }
-  });
-  return map;
 }
 
 function syncUtilitySheetBuildingOptions() {
@@ -2355,18 +2828,14 @@ function renderUtilitySheetRows(rows) {
   }
 
   const buildingId = getSelectedUtilityBuildingId();
-  const latestBills = latestBillsByUtilityAndHouse();
-  const selectedBuilding = Array.isArray(state.buildings)
-    ? state.buildings.find((item) => item.id === buildingId)
-    : null;
-  const buildingName = String(selectedBuilding?.name ?? "").trim().toLowerCase();
-  const shouldTransferMeterReadings =
-    String(buildingId ?? "").trim().toUpperCase() === "CAPTYN-BLDG-00002" ||
-    buildingName === "village inn";
+  const isCombinedChargeBuilding =
+    String(state.utilitySheetBuildingConfiguration?.buildingId ?? "").trim() === buildingId &&
+    String(state.utilitySheetBuildingConfiguration?.utilityBillingMode ?? "").trim() ===
+      "combined_charge";
   [...rows].sort((a, b) => compareHouseNumber(a.houseNumber, b.houseNumber)).forEach((item) => {
     const houseNumber = normalizeHouse(item.houseNumber);
-    const waterBill = latestBills.get(`water:${houseNumber}`);
-    const electricityBill = latestBills.get(`electricity:${houseNumber}`);
+    const waterBill = getLatestUtilityBill("water", buildingId, houseNumber);
+    const electricityBill = getLatestUtilityBill("electricity", buildingId, houseNumber);
     const waterPrev =
       waterBill && Number.isFinite(Number(waterBill.currentReading))
         ? Number(waterBill.currentReading)
@@ -2375,18 +2844,6 @@ function renderUtilitySheetRows(rows) {
       electricityBill && Number.isFinite(Number(electricityBill.currentReading))
         ? Number(electricityBill.currentReading)
         : undefined;
-    const waterFixedDefault = Number.isFinite(Number(item.waterFixedChargeKsh))
-      ? Number(item.waterFixedChargeKsh)
-      : Number.isFinite(Number(waterBill?.fixedChargeKsh))
-        ? Number(waterBill?.fixedChargeKsh)
-        : 0;
-    const electricityFixedDefault = Number.isFinite(
-      Number(item.electricityFixedChargeKsh)
-    )
-      ? Number(item.electricityFixedChargeKsh)
-      : Number.isFinite(Number(electricityBill?.fixedChargeKsh))
-        ? Number(electricityBill?.fixedChargeKsh)
-        : 0;
 
     const waterMeterValue = meterNumberForHouse(
       "water",
@@ -2400,28 +2857,79 @@ function renderUtilitySheetRows(rows) {
       houseNumber,
       item.electricityMeterNumber
     );
-    const transferredWaterReading = shouldTransferMeterReadings
-      ? numericValueFromString(waterMeterValue)
-      : undefined;
-    const transferredElectricityReading = shouldTransferMeterReadings
-      ? numericValueFromString(electricityMeterValue)
-      : undefined;
+    const configuredWaterMeter = findConfiguredMeter("water", buildingId, houseNumber);
+    const configuredElectricityMeter = findConfiguredMeter(
+      "electricity",
+      buildingId,
+      houseNumber
+    );
+    const transferredWaterReading =
+      isCombinedChargeBuilding && !hasUsableMeterNumber(configuredWaterMeter?.meterNumber)
+        ? numericValueFromString(item.waterMeterNumber)
+        : undefined;
+    const transferredElectricityReading =
+      isCombinedChargeBuilding &&
+      !hasUsableMeterNumber(configuredElectricityMeter?.meterNumber)
+        ? numericValueFromString(item.electricityMeterNumber)
+        : undefined;
     const waterMeterNumber =
-      transferredWaterReading != null ? "" : String(waterMeterValue ?? "");
+      transferredWaterReading != null ? "" : normalizeUtilityMeterNumber(waterMeterValue);
     const electricityMeterNumber =
       transferredElectricityReading != null
         ? ""
-        : String(electricityMeterValue ?? "");
+        : normalizeUtilityMeterNumber(electricityMeterValue);
     const hasBothMeters =
       hasUsableMeterNumber(waterMeterNumber) && hasUsableMeterNumber(electricityMeterNumber);
-    const resolvedWaterFixedDefault = hasBothMeters ? 0 : waterFixedDefault;
-    const resolvedElectricityFixedDefault = hasBothMeters ? 0 : electricityFixedDefault;
+    const roomWaterFixedCharge =
+      Number.isFinite(Number(item.waterFixedChargeKsh)) && Number(item.waterFixedChargeKsh) > 0
+        ? Number(item.waterFixedChargeKsh)
+        : undefined;
+    const roomElectricityFixedCharge =
+      Number.isFinite(Number(item.electricityFixedChargeKsh)) &&
+      Number(item.electricityFixedChargeKsh) > 0
+        ? Number(item.electricityFixedChargeKsh)
+        : undefined;
+    const buildingWaterFixedCharge = getBuildingUtilityFixedChargeDefault(
+      "water",
+      buildingId
+    );
+    const buildingElectricityFixedCharge = getBuildingUtilityFixedChargeDefault(
+      "electricity",
+      buildingId
+    );
+    const latestWaterFixedCharge =
+      Number.isFinite(Number(waterBill?.fixedChargeKsh)) && Number(waterBill?.fixedChargeKsh) > 0
+        ? Number(waterBill?.fixedChargeKsh)
+        : undefined;
+    const latestElectricityFixedCharge =
+      Number.isFinite(Number(electricityBill?.fixedChargeKsh)) &&
+      Number(electricityBill?.fixedChargeKsh) > 0
+        ? Number(electricityBill?.fixedChargeKsh)
+        : undefined;
+    const resolvedWaterFixedDefault = hasBothMeters
+      ? 0
+      : roomWaterFixedCharge ??
+        buildingWaterFixedCharge ??
+        latestWaterFixedCharge;
+    const resolvedElectricityFixedDefault = hasBothMeters
+      ? 0
+      : roomElectricityFixedCharge ??
+        buildingElectricityFixedCharge ??
+        latestElectricityFixedCharge;
+    const autoWaterFixedCharge =
+      roomWaterFixedCharge != null ? undefined : resolvedWaterFixedDefault;
+    const autoElectricityFixedCharge =
+      roomElectricityFixedCharge != null ? undefined : resolvedElectricityFixedDefault;
 
     const row = document.createElement("tr");
     row.dataset.houseNumber = houseNumber;
     row.dataset.householdMembers = String(Number(item.householdMembers ?? 0));
     row.dataset.hasActiveResident = item.hasActiveResident ? "true" : "false";
     row.dataset.hasBothMeters = hasBothMeters ? "true" : "false";
+    row.dataset.roomWaterFixedCharge = numberToInputString(roomWaterFixedCharge);
+    row.dataset.roomElectricityFixedCharge = numberToInputString(roomElectricityFixedCharge);
+    row.dataset.autoWaterFixedCharge = numberToInputString(autoWaterFixedCharge);
+    row.dataset.autoElectricityFixedCharge = numberToInputString(autoElectricityFixedCharge);
     row.innerHTML = `
       <td><strong>${escapeHtml(houseNumber)}</strong></td>
       <td><input class="registry-table-input utility-sheet-input" data-field="waterMeterNumber" type="text" maxlength="80" placeholder="WTR-0001" value="${escapeHtml(waterMeterNumber)}" /></td>
@@ -2467,20 +2975,265 @@ function buildUtilitySheetRegistryPayload() {
       return;
     }
 
-    const waterFixedChargeKsh = toOptionalNumber(waterFixedInput.value) ?? 0;
+    const waterFixedChargeInput = toOptionalNumber(waterFixedInput.value);
+    const electricityFixedChargeInput = toOptionalNumber(electricityFixedInput.value);
+    const roomWaterFixedCharge = numericValueFromString(tr.dataset.roomWaterFixedCharge);
+    const roomElectricityFixedCharge = numericValueFromString(
+      tr.dataset.roomElectricityFixedCharge
+    );
+    const autoWaterFixedCharge = numericValueFromString(tr.dataset.autoWaterFixedCharge);
+    const autoElectricityFixedCharge = numericValueFromString(
+      tr.dataset.autoElectricityFixedCharge
+    );
+    const waterFixedChargeKsh =
+      waterFixedChargeInput == null
+        ? 0
+        : roomWaterFixedCharge != null && roomWaterFixedCharge > 0
+          ? waterFixedChargeInput
+          : autoWaterFixedCharge != null &&
+              utilityPricingNumbersEqual(waterFixedChargeInput, autoWaterFixedCharge)
+            ? 0
+            : waterFixedChargeInput;
     const electricityFixedChargeKsh =
-      toOptionalNumber(electricityFixedInput.value) ?? 0;
+      electricityFixedChargeInput == null
+        ? 0
+        : roomElectricityFixedCharge != null && roomElectricityFixedCharge > 0
+          ? electricityFixedChargeInput
+          : autoElectricityFixedCharge != null &&
+              utilityPricingNumbersEqual(
+                electricityFixedChargeInput,
+                autoElectricityFixedCharge
+              )
+            ? 0
+            : electricityFixedChargeInput;
 
     rows.push({
       houseNumber,
       householdMembers: Number.isInteger(householdMembers) ? householdMembers : 0,
-      waterMeterNumber: waterInput.value.trim() || undefined,
-      electricityMeterNumber: electricityInput.value.trim() || undefined,
+      waterMeterNumber: normalizeUtilityMeterNumber(waterInput.value) || undefined,
+      electricityMeterNumber:
+        normalizeUtilityMeterNumber(electricityInput.value) || undefined,
       waterFixedChargeKsh,
       electricityFixedChargeKsh
     });
   });
   return rows;
+}
+
+function buildUtilitySheetAuditRows() {
+  if (!(utilitySheetBodyEl instanceof HTMLElement)) {
+    return [];
+  }
+
+  const rows = [];
+  const trList = utilitySheetBodyEl.querySelectorAll("tr[data-house-number]");
+  trList.forEach((tr) => {
+    const houseNumber = normalizeHouse(tr.dataset.houseNumber);
+    if (!houseNumber) {
+      return;
+    }
+
+    const householdMembers = Number(tr.dataset.householdMembers ?? 0);
+    const waterMeterInput = tr.querySelector('input[data-field="waterMeterNumber"]');
+    const waterPreviousInput = tr.querySelector(
+      'input[data-field="waterPreviousReading"]'
+    );
+    const waterCurrentInput = tr.querySelector(
+      'input[data-field="waterCurrentReading"]'
+    );
+    const waterFixedInput = tr.querySelector(
+      'input[data-field="waterFixedChargeKsh"]'
+    );
+    const electricityMeterInput = tr.querySelector(
+      'input[data-field="electricityMeterNumber"]'
+    );
+    const electricityPreviousInput = tr.querySelector(
+      'input[data-field="electricityPreviousReading"]'
+    );
+    const electricityCurrentInput = tr.querySelector(
+      'input[data-field="electricityCurrentReading"]'
+    );
+    const electricityFixedInput = tr.querySelector(
+      'input[data-field="electricityFixedChargeKsh"]'
+    );
+
+    rows.push({
+      houseNumber,
+      householdMembers: Number.isInteger(householdMembers) ? householdMembers : 0,
+      hasActiveResident: tr.dataset.hasActiveResident === "true",
+      waterMeterNumber:
+        waterMeterInput instanceof HTMLInputElement
+          ? waterMeterInput.value.trim() || undefined
+          : undefined,
+      waterPreviousReading:
+        waterPreviousInput instanceof HTMLInputElement
+          ? toOptionalNumber(waterPreviousInput.value)
+          : undefined,
+      waterCurrentReading:
+        waterCurrentInput instanceof HTMLInputElement
+          ? toOptionalNumber(waterCurrentInput.value)
+          : undefined,
+      waterFixedChargeKsh:
+        waterFixedInput instanceof HTMLInputElement
+          ? toOptionalNumber(waterFixedInput.value)
+          : undefined,
+      electricityMeterNumber:
+        electricityMeterInput instanceof HTMLInputElement
+          ? electricityMeterInput.value.trim() || undefined
+          : undefined,
+      electricityPreviousReading:
+        electricityPreviousInput instanceof HTMLInputElement
+          ? toOptionalNumber(electricityPreviousInput.value)
+          : undefined,
+      electricityCurrentReading:
+        electricityCurrentInput instanceof HTMLInputElement
+          ? toOptionalNumber(electricityCurrentInput.value)
+          : undefined,
+      electricityFixedChargeKsh:
+        electricityFixedInput instanceof HTMLInputElement
+          ? toOptionalNumber(electricityFixedInput.value)
+          : undefined
+    });
+  });
+
+  return rows;
+}
+
+function csvCell(value) {
+  const stringValue = String(value ?? "");
+  if (!/[",\n]/.test(stringValue)) {
+    return stringValue;
+  }
+
+  return `"${stringValue.replace(/"/g, '""')}"`;
+}
+
+function buildUtilityBulkAuditCsv(record) {
+  const lines = [
+    ["Audit ID", record.id || ""],
+    ["Created At", record.createdAt || ""],
+    ["Building ID", record.buildingId || ""],
+    ["Building Name", record.buildingName || ""],
+    ["Billing Month", record.billingMonth || ""],
+    ["Due Date", record.dueDate || ""],
+    [
+      "Default Water Fixed Charge KSh",
+      record.defaultWaterFixedChargeKsh ?? ""
+    ],
+    [
+      "Default Electricity Fixed Charge KSh",
+      record.defaultElectricityFixedChargeKsh ?? ""
+    ],
+    [
+      "Default Combined Charge KSh",
+      record.defaultCombinedUtilityChargeKsh ?? ""
+    ],
+    [
+      "Monthly Combined Charge KSh",
+      record.monthlyCombinedUtilityChargeKsh ?? ""
+    ],
+    [
+      "Water Rate Per Unit KSh",
+      record.rateDefaults?.waterRatePerUnitKsh ?? ""
+    ],
+    [
+      "Electricity Rate Per Unit KSh",
+      record.rateDefaults?.electricityRatePerUnitKsh ?? ""
+    ],
+    ["Note", record.note || ""],
+    ["Status", record.result?.status || ""],
+    ["Posted Count", record.result?.postedCount ?? ""],
+    ["Requested Count", record.result?.requestedCount ?? ""],
+    ["Completed At", record.result?.completedAt || ""]
+  ].map((row) => row.map(csvCell).join(","));
+
+  lines.push("");
+  lines.push(
+    [
+      "House",
+      "Household Members",
+      "Has Active Resident",
+      "Water Meter",
+      "Water Previous",
+      "Water Current",
+      "Water Fixed KSh",
+      "Electricity Meter",
+      "Electricity Previous",
+      "Electricity Current",
+      "Electricity Fixed KSh"
+    ]
+      .map(csvCell)
+      .join(",")
+  );
+
+  (Array.isArray(record.rows) ? record.rows : []).forEach((row) => {
+    lines.push(
+      [
+        row.houseNumber || "",
+        row.householdMembers ?? "",
+        row.hasActiveResident ?? "",
+        row.waterMeterNumber || "",
+        row.waterPreviousReading ?? "",
+        row.waterCurrentReading ?? "",
+        row.waterFixedChargeKsh ?? "",
+        row.electricityMeterNumber || "",
+        row.electricityPreviousReading ?? "",
+        row.electricityCurrentReading ?? "",
+        row.electricityFixedChargeKsh ?? ""
+      ]
+        .map(csvCell)
+        .join(",")
+    );
+  });
+
+  if (Array.isArray(record.result?.failures) && record.result.failures.length > 0) {
+    lines.push("");
+    lines.push(csvCell("Failures"));
+    record.result.failures.forEach((failure) => {
+      lines.push(csvCell(failure));
+    });
+  }
+
+  return lines.join("\n");
+}
+
+function downloadUtilityBulkAuditCsv(record) {
+  const csv = buildUtilityBulkAuditCsv(record);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = [
+    "captyn-housing",
+    String(record.buildingId || "").trim().toLowerCase(),
+    String(record.billingMonth || "").trim(),
+    "bulk-utility-audit.csv"
+  ]
+    .filter(Boolean)
+    .join("-");
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => {
+    window.URL.revokeObjectURL(url);
+  }, 1000);
+}
+
+async function finalizeUtilityBulkAudit(buildingId, auditId, payload) {
+  if (!buildingId || !auditId) {
+    return;
+  }
+
+  await requestJson(
+    `/api/landlord/buildings/${encodeURIComponent(buildingId)}/utility-bulk-audits/${encodeURIComponent(auditId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    }
+  );
 }
 
 function buildUtilitySheetBillRequests(
@@ -2610,10 +3363,10 @@ function buildUtilitySheetBillRequests(
       const currentReading = toOptionalNumber(currentInput.value);
       const ratePerUnitKsh =
         utilityType === "water" ? waterRatePerUnitKsh : electricityRatePerUnitKsh;
-      const fixedChargeKsh = hasBothMeters ? 0 : toOptionalNumber(fixedInput.value) ?? 0;
+      const fixedChargeKsh = hasBothMeters ? 0 : toOptionalNumber(fixedInput.value);
 
       const hasMeteredFields = previousReading != null || currentReading != null;
-      const hasFixedCharge = fixedChargeKsh > 0;
+      const hasFixedCharge = fixedChargeKsh != null && fixedChargeKsh > 0;
       if (!hasMeteredFields && !hasFixedCharge) {
         return;
       }
@@ -2702,6 +3455,7 @@ async function openUtilitySheetModal() {
       loadRegistryRows(),
       loadMeters(),
       loadBills(),
+      loadUtilitySheetBuildingConfiguration(),
       loadUtilitySheetMonthlyCombinedCharge()
     ]);
     renderUtilitySheetRows(state.registryRows);
@@ -2726,18 +3480,10 @@ function withBuildingQuery(url, buildingId, extra = "") {
 }
 
 function findConfiguredMeter(utilityType, buildingId, houseNumber) {
-  const normalizedHouse = normalizeHouse(houseNumber);
-  if (!normalizedHouse) {
-    return null;
-  }
-
   return (
-    state.meters.find(
-      (item) =>
-        item.utilityType === utilityType &&
-        (!buildingId || !item.buildingId || item.buildingId === buildingId) &&
-        normalizeHouse(item.houseNumber) === normalizedHouse
-    ) ?? null
+    state.meterByKey.get(utilityBuildingHouseLookupKey(utilityType, buildingId, houseNumber)) ??
+    state.meterByKey.get(utilityBuildingHouseLookupKey(utilityType, "", houseNumber)) ??
+    null
   );
 }
 
@@ -2762,6 +3508,12 @@ function syncUtilityBillInputMode() {
     utilityBillCurrentReadingEl.placeholder = "Not required for fixed charge";
     utilityBillRateEl.placeholder = "Not required for fixed charge";
     utilityBillFixedEl.min = "1";
+    const defaultFixedCharge = getRoomUtilityFixedChargeDefault(
+      utilityType,
+      buildingId,
+      houseNumber
+    );
+    utilityBillFixedEl.value = numberToInputString(defaultFixedCharge);
     if (utilityBillInputGuidanceEl) {
       const houseLabel = houseNumber || "this house";
       utilityBillInputGuidanceEl.textContent = `${houseLabel} has no ${utilityType} meter. Post fixed charge only.`;
@@ -2828,9 +3580,7 @@ function replaceUploadPreview(container, gallery, emptyText) {
 }
 
 function getBuildingPhotoUrls(buildingId) {
-  const building = Array.isArray(state.buildings)
-    ? state.buildings.find((item) => item.id === buildingId)
-    : null;
+  const building = getBuildingRecord(buildingId);
   return Array.isArray(building?.media?.imageUrls)
     ? building.media.imageUrls.filter((item) => typeof item === "string" && item.trim())
     : [];
@@ -3150,10 +3900,7 @@ function syncRentPaymentBuildingOptions() {
 
   rentPaymentBuildingSelectEl.replaceChildren();
   const rentEnabledBuildings = (Array.isArray(state.buildings) ? state.buildings : []).filter(
-    (building) =>
-      (Array.isArray(state.paymentAccess)
-        ? state.paymentAccess.find((item) => item.buildingId === building.id)?.rentEnabled
-        : true) !== false
+    (building) => getPaymentAccessRecord(building.id)?.rentEnabled !== false
   );
 
   if (rentEnabledBuildings.length === 0) {
@@ -3200,7 +3947,7 @@ function renderRegistryBuildingOptions() {
 
   if (!Array.isArray(state.buildings) || state.buildings.length === 0) {
     state.selectedRegistryBuildingId = "";
-    state.registryRows = [];
+    setRegistryRows([]);
     registryBuildingSelectEl.disabled = true;
     registryLoadBtnEl.disabled = true;
     registrySaveBtnEl.disabled = true;
@@ -3253,6 +4000,7 @@ function renderResidentsBuildingOptions() {
 
   if (!Array.isArray(state.buildings) || state.buildings.length === 0) {
     state.selectedResidentsBuildingId = "";
+    setResidentDirectory([]);
     residentsBuildingSelectEl.disabled = true;
     const option = document.createElement("option");
     option.value = "";
@@ -3606,14 +4354,11 @@ function renderExpenditures(rows) {
     return;
   }
 
-  const buildingNameMap = new Map(
-    (Array.isArray(state.buildings) ? state.buildings : []).map((item) => [item.id, item.name])
-  );
   const canDelete = !isCaretakerRole();
 
   rows.forEach((item) => {
     const row = document.createElement("tr");
-    const buildingLabel = buildingNameMap.get(item.buildingId) ?? item.buildingId ?? "-";
+    const buildingLabel = getBuildingNameById(item.buildingId) || item.buildingId || "-";
     const actorLabel = item.createdByName
       ? `${item.createdByName} (${formatRoleLabel(item.createdByRole)})`
       : formatRoleLabel(item.createdByRole);
@@ -3683,16 +4428,35 @@ function renderRegistryRows(rows) {
 
   if (!Array.isArray(rows) || rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="10">No houses found for this building.</td>';
+    row.innerHTML = '<td colspan="13">No houses found for this building.</td>';
     registryBodyEl.append(row);
     return;
   }
 
+  syncRegistryReadingMonthInput();
+  const buildingId = getSelectedUtilityBuildingId();
+  const billingMonth = getSelectedRegistryReadingMonth();
   rows.forEach((item) => {
     const houseNumber = normalizeHouse(item.houseNumber);
+    const waterReadingBill = getUtilityBillForMonth(
+      "water",
+      buildingId,
+      houseNumber,
+      billingMonth
+    );
+    const electricityReadingBill = getUtilityBillForMonth(
+      "electricity",
+      buildingId,
+      houseNumber,
+      billingMonth
+    );
     const hasBothMeters =
       hasUsableMeterNumber(item.waterMeterNumber) &&
       hasUsableMeterNumber(item.electricityMeterNumber);
+    const waterMeterNumber = normalizeUtilityMeterNumber(item.waterMeterNumber);
+    const electricityMeterNumber = normalizeUtilityMeterNumber(
+      item.electricityMeterNumber
+    );
     const row = document.createElement("tr");
     row.dataset.houseNumber = houseNumber;
     row.dataset.hasBothMeters = hasBothMeters ? "true" : "false";
@@ -3718,7 +4482,7 @@ function renderRegistryRows(rows) {
           data-field="waterMeterNumber"
           maxlength="80"
           placeholder="WTR-0001"
-          value="${escapeHtml(item.waterMeterNumber ?? "")}"
+          value="${escapeHtml(waterMeterNumber)}"
         />
       </td>
       <td>
@@ -3728,9 +4492,11 @@ function renderRegistryRows(rows) {
           data-field="electricityMeterNumber"
           maxlength="80"
           placeholder="ELEC-0001"
-          value="${escapeHtml(item.electricityMeterNumber ?? "")}"
+          value="${escapeHtml(electricityMeterNumber)}"
         />
       </td>
+      <td>${formatRegistryReadingMarkup(waterReadingBill, billingMonth)}</td>
+      <td>${formatRegistryReadingMarkup(electricityReadingBill, billingMonth)}</td>
       <td>
         <input
           type="number"
@@ -3866,8 +4632,9 @@ function buildRegistrySavePayload() {
     rows.push({
       houseNumber,
       householdMembers: members,
-      waterMeterNumber: waterMeterNumber || undefined,
-      electricityMeterNumber: electricityMeterNumber || undefined,
+      waterMeterNumber: normalizeUtilityMeterNumber(waterMeterNumber) || undefined,
+      electricityMeterNumber:
+        normalizeUtilityMeterNumber(electricityMeterNumber) || undefined,
       waterFixedChargeKsh,
       electricityFixedChargeKsh,
       combinedUtilityChargeKsh
@@ -3931,13 +4698,9 @@ function renderRentStatus(rows) {
     return;
   }
 
-  const buildingNameMap = new Map(
-    (Array.isArray(state.buildings) ? state.buildings : []).map((item) => [item.id, item.name])
-  );
-
   rows.forEach((item) => {
     const row = document.createElement("tr");
-    const buildingLabel = buildingNameMap.get(item.buildingId) ?? item.buildingId ?? "-";
+    const buildingLabel = getBuildingNameById(item.buildingId) || item.buildingId || "-";
     row.innerHTML = `
       <td>${escapeHtml(buildingLabel)}</td>
       <td>${item.houseNumber}</td>
@@ -3965,10 +4728,6 @@ function renderOverviewCollections(rows) {
     return;
   }
 
-  const buildingNameMap = new Map(
-    (Array.isArray(state.buildings) ? state.buildings : []).map((item) => [item.id, item.name])
-  );
-
   const rankedRows = [...rows].sort((a, b) => {
     const balanceDelta = Number(b.balanceKsh ?? 0) - Number(a.balanceKsh ?? 0);
     if (balanceDelta !== 0) {
@@ -3980,7 +4739,7 @@ function renderOverviewCollections(rows) {
 
   rankedRows.forEach((item) => {
     const row = document.createElement("tr");
-    const buildingLabel = buildingNameMap.get(item.buildingId) ?? item.buildingId ?? "-";
+    const buildingLabel = getBuildingNameById(item.buildingId) || item.buildingId || "-";
     const latestPayment = Number(item.latestPaymentAmountKsh ?? 0) > 0
       ? `${formatCurrency(item.latestPaymentAmountKsh)} • ${formatDateTime(item.latestPaymentAt)}`
       : "-";
@@ -3996,18 +4755,6 @@ function renderOverviewCollections(rows) {
     `;
     overviewCollectionsBodyEl.append(row);
   });
-}
-
-function getRentStatusByHouse() {
-  const map = new Map();
-  if (!Array.isArray(state.rentStatus)) {
-    return map;
-  }
-
-  state.rentStatus.forEach((item) => {
-    map.set(normalizeHouse(item.houseNumber), item);
-  });
-  return map;
 }
 
 function renderResidentDirectory(rows) {
@@ -4153,8 +4900,9 @@ function renderResidentDrawer(resident) {
     hasResident && resident.latestRentPaymentAt
       ? formatDateTime(resident.latestRentPaymentAt)
       : "-";
-  const waterMeter = resident.waterMeterNumber || "Missing";
-  const electricityMeter = resident.electricityMeterNumber || "Missing";
+  const waterMeter = normalizeUtilityMeterNumber(resident.waterMeterNumber) || "Missing";
+  const electricityMeter =
+    normalizeUtilityMeterNumber(resident.electricityMeterNumber) || "Missing";
   const members = Number(resident.householdMembers ?? 0);
   const buildingLabel = resident.buildingName ?? resident.buildingId ?? "-";
   const residentName = hasResident ? resident.residentName ?? "Resident" : "Vacant";
@@ -4999,16 +5747,22 @@ function renderMetrics() {
   const meters = state.meters.length;
   const residentUsers = Number(state.residentUsersCount ?? 0);
   const bills = actionableBills.length;
-  const unpaid = actionableBills.filter((item) => utilityAmount(item.balanceKsh) > 0).length;
-  const overdue = actionableBills.filter((item) => String(item.status) === "overdue").length;
-  const paidTotal = actionableBills.reduce(
-    (sum, item) => sum + getUtilityPaidAmount(item),
-    0
-  );
-  const outstanding = actionableBills.reduce(
-    (sum, item) => sum + utilityAmount(item.balanceKsh),
-    0
-  );
+  let unpaid = 0;
+  let overdue = 0;
+  let paidTotal = 0;
+  let outstanding = 0;
+
+  actionableBills.forEach((item) => {
+    const balanceKsh = utilityAmount(item.balanceKsh);
+    if (balanceKsh > 0) {
+      unpaid += 1;
+    }
+    if (String(item.status) === "overdue") {
+      overdue += 1;
+    }
+    paidTotal += getUtilityPaidAmount(item);
+    outstanding += balanceKsh;
+  });
 
   metricMetersEl.textContent = String(meters);
   metricUsersEl.textContent = String(residentUsers);
@@ -5040,7 +5794,7 @@ function createUtilityBillPayload() {
       previousReading,
       currentReading,
       ratePerUnitKsh,
-      fixedChargeKsh: fixedChargeKsh ?? 0,
+      fixedChargeKsh,
       dueDate: toIsoFromDateTimeLocal(utilityBillDueDateEl.value),
       note: utilityBillNoteEl.value.trim() || undefined
     }
@@ -5065,54 +5819,6 @@ function createUtilityPaymentPayload() {
   };
 }
 
-async function prefillUtilityPaymentAction(action) {
-  const buildingId = String(action?.buildingId ?? "").trim();
-  const houseNumber = normalizeHouse(action?.houseNumber);
-  const utilityType = String(action?.utilityType ?? "").trim();
-  const billingMonth = String(action?.billingMonth ?? "").trim();
-  const amountKsh = Number(action?.amountKsh ?? 0);
-  const statusLabel = String(action?.statusLabel ?? "Actionable").trim() || "Actionable";
-
-  if (!buildingId || !houseNumber || !utilityType || !billingMonth || !Number.isFinite(amountKsh)) {
-    showError("Utility payment shortcut is missing bill details. Refresh and try again.");
-    return;
-  }
-
-  await activateBuilding(buildingId, { view: "utilities" });
-
-  if (utilityPaymentTypeEl instanceof HTMLSelectElement) {
-    utilityPaymentTypeEl.value = utilityType;
-  }
-  if (utilityPaymentHouseEl instanceof HTMLInputElement) {
-    utilityPaymentHouseEl.value = houseNumber;
-  }
-  if (utilityPaymentMonthEl instanceof HTMLInputElement) {
-    utilityPaymentMonthEl.value = billingMonth;
-  }
-  if (utilityPaymentAmountEl instanceof HTMLInputElement) {
-    utilityPaymentAmountEl.value = String(Math.round(amountKsh));
-  }
-  if (utilityPaymentProviderEl instanceof HTMLSelectElement) {
-    utilityPaymentProviderEl.value = "cash";
-  }
-  if (utilityPaymentReferenceEl instanceof HTMLInputElement) {
-    utilityPaymentReferenceEl.value = "";
-  }
-  if (utilityPaymentNoteEl instanceof HTMLInputElement) {
-    utilityPaymentNoteEl.value = `${statusLabel} utility bill loaded from room summary.`;
-  }
-
-  if (utilityPaymentHelpEl instanceof HTMLElement) {
-    utilityPaymentHelpEl.textContent =
-      `Loaded ${utilityType} ${billingMonth} for house ${houseNumber}. Adjust the amount if you are recording a partial payment or a different receipt.`;
-  }
-
-  setStatus(
-    `${statusLabel} ${utilityType} bill for house ${houseNumber} loaded into manual utility payment form.`
-  );
-  scrollToLandlordSection("utilities-payments-section");
-}
-
 function openOverviewUtilityPaymentModal(action) {
   const buildingId = String(action?.buildingId ?? "").trim();
   const houseNumber = normalizeHouse(action?.houseNumber);
@@ -5126,8 +5832,7 @@ function openOverviewUtilityPaymentModal(action) {
     return;
   }
 
-  const buildingLabel =
-    state.buildings.find((item) => item.id === buildingId)?.name ?? buildingId;
+  const buildingLabel = getBuildingNameById(buildingId) || buildingId;
 
   if (overviewUtilityPaymentFormEl instanceof HTMLFormElement) {
     overviewUtilityPaymentFormEl.dataset.buildingId = buildingId;
@@ -5193,7 +5898,7 @@ function createRentPaymentPayload() {
 
 async function loadBuildings() {
   const payload = await requestJson("/api/landlord/buildings");
-  state.buildings = payload.data ?? [];
+  setBuildings(payload.data ?? []);
   state.residentUsersCount = state.buildings.reduce(
     (sum, item) => sum + Number(item.residentUsers ?? 0),
     0
@@ -5273,46 +5978,27 @@ async function loadResidents() {
         : [];
 
   if (buildingIds.length === 0) {
-    state.residentDirectory = [];
+    setResidentDirectory([]);
     renderResidentDirectory([]);
     return;
   }
 
-  const buildingNameMap = new Map(
-    state.buildings.map((building) => [building.id, building.name])
+  const query = new URLSearchParams();
+  if (buildingIds.length === 1) {
+    query.set("buildingId", buildingIds[0]);
+  }
+
+  const payload = await requestJson(
+    `/api/landlord/resident-directory${query.size > 0 ? `?${query.toString()}` : ""}`
   );
-
-  const payloads = await Promise.all(
-    buildingIds.map((buildingId) =>
-      requestJson(
-        `/api/landlord/buildings/${encodeURIComponent(buildingId)}/utility-registry`
-      )
-    )
-  );
-
-  const residents = [];
-
-  payloads.forEach((payload, index) => {
-    const buildingId = buildingIds[index];
-    const buildingName = buildingNameMap.get(buildingId) ?? buildingId;
-    const rows = payload.data ?? [];
-
-    rows.forEach((row) => {
-      residents.push({
-        ...row,
-        buildingId,
-        buildingName
-      });
-    });
-  });
-
-  state.residentDirectory = dedupeResidentDirectoryRows(residents);
+  const residents = Array.isArray(payload.data) ? payload.data : [];
+  setResidentDirectory(dedupeResidentDirectoryRows(residents));
   renderResidentDirectory(state.residentDirectory);
 }
 
 async function loadPaymentAccess() {
   const payload = await requestJson("/api/landlord/payment-access-controls");
-  state.paymentAccess = payload.data ?? [];
+  setPaymentAccess(payload.data ?? []);
   renderPaymentAccess(state.paymentAccess);
   syncRentPaymentBuildingOptions();
 }
@@ -5423,9 +6109,12 @@ async function loadRegistryRows() {
 
   state.selectedRegistryBuildingId = buildingId;
   if (!buildingId) {
-    state.registryRows = [];
-    state.utilityRateDefaults = null;
+    setRegistryRows([]);
+    setRegistryReadingBills([]);
+    setUtilityPricingState(null, null, "");
     syncUtilitySheetRateDefaults();
+    syncUtilitySheetBuildingFixedDefaults();
+    syncUtilitySheetBuildingCombinedCharge();
     renderRegistryRows(state.registryRows);
     renderUtilitySheetRows(state.registryRows);
     return;
@@ -5434,13 +6123,14 @@ async function loadRegistryRows() {
   const payload = await requestJson(
     `/api/landlord/buildings/${encodeURIComponent(buildingId)}/utility-registry`
   );
-  state.registryRows = payload.data ?? [];
-  const rateDefaults = payload.rateDefaults ?? { buildingId };
-  if (rateDefaults && !rateDefaults.buildingId) {
-    rateDefaults.buildingId = buildingId;
-  }
-  state.utilityRateDefaults = rateDefaults;
+  setRegistryRows(payload.data ?? []);
+  setUtilityPricingState(
+    payload.buildingConfiguration ?? null,
+    payload.rateDefaults ?? { buildingId },
+    buildingId
+  );
   syncUtilitySheetRateDefaults();
+  syncUtilitySheetBuildingFixedDefaults();
   syncUtilityBillInputMode();
   renderRegistryRows(state.registryRows);
   if (
@@ -5456,7 +6146,7 @@ async function loadMeters() {
   const payload = await requestJson(
     withBuildingQuery("/api/landlord/utilities/meters", buildingId)
   );
-  state.meters = payload.data ?? [];
+  setMeters(payload.data ?? []);
   renderMeters(state.meters);
   if (
     utilitySheetModalEl instanceof HTMLElement &&
@@ -5473,9 +6163,11 @@ async function loadBills() {
   const payload = await requestJson(
     withBuildingQuery("/api/landlord/utilities/bills", buildingId, "limit=600")
   );
-  state.bills = payload.data ?? [];
+  setBills(payload.data ?? []);
+  syncRegistryReadingMonthInput();
   renderUtilityRoomSummary(state.bills);
   renderUtilityBills(state.bills);
+  renderRegistryRows(state.registryRows);
   if (
     utilitySheetModalEl instanceof HTMLElement &&
     !utilitySheetModalEl.classList.contains("hidden")
@@ -5483,6 +6175,31 @@ async function loadBills() {
     renderUtilitySheetRows(state.registryRows);
   }
   renderMetrics();
+}
+
+async function loadRegistryReadingBills() {
+  const buildingId = getSelectedUtilityBuildingId();
+  syncRegistryReadingMonthInput();
+  const billingMonth = getSelectedRegistryReadingMonth();
+
+  if (!buildingId || !billingMonth) {
+    setRegistryReadingBills([]);
+    renderRegistryRows(state.registryRows);
+    return;
+  }
+
+  const payload = await requestJson(
+    withBuildingQuery(
+      "/api/landlord/utilities/bills",
+      buildingId,
+      new URLSearchParams({
+        billingMonth,
+        limit: "600"
+      }).toString()
+    )
+  );
+  setRegistryReadingBills(payload.data ?? []);
+  renderRegistryRows(state.registryRows);
 }
 
 async function loadPayments() {
@@ -5531,7 +6248,110 @@ async function activateBuilding(buildingId, options = {}) {
   ]);
 }
 
-async function loadData() {
+function applyLandlordStartupData(startup) {
+  const selection = startup?.selection ?? {};
+  setBuildings(startup?.buildings ?? []);
+  setPaymentAccess(startup?.paymentAccess ?? []);
+
+  state.selectedRoomBuildingId = String(
+    selection.roomBuildingId || state.buildings[0]?.id || ""
+  ).trim();
+  state.selectedRegistryBuildingId = String(
+    selection.registryBuildingId || state.buildings[0]?.id || ""
+  ).trim();
+  state.selectedCaretakerBuildingId = String(
+    selection.caretakerBuildingId || state.selectedRegistryBuildingId || ""
+  ).trim();
+  state.selectedResidentsBuildingId = state.buildings.length
+    ? String(selection.residentsBuildingId || "all").trim() || "all"
+    : "";
+  state.selectedOverviewRoomBuildingId =
+    String(selection.overviewRoomBuildingId || "all").trim() || "all";
+  state.selectedTicketBuildingId = String(selection.ticketBuildingId || "").trim();
+  state.selectedWifiPackageBuildingId = String(
+    selection.wifiPackageBuildingId || ""
+  ).trim();
+  state.selectedRentPaymentBuildingId = String(
+    selection.rentPaymentBuildingId || ""
+  ).trim();
+
+  state.residentUsersCount = state.buildings.reduce(
+    (sum, item) => sum + Number(item.residentUsers ?? 0),
+    0
+  );
+  state.applications = Array.isArray(startup?.applications) ? startup.applications : [];
+  state.pendingApplicationsCount = Number.isFinite(Number(startup?.pendingApplicationsCount))
+    ? Number(startup.pendingApplicationsCount)
+    : String(applicationStatusFilterEl?.value || "pending") === "pending"
+      ? state.applications.length
+      : 0;
+  state.rentStatus = Array.isArray(startup?.rentStatus) ? startup.rentStatus : [];
+  setRegistryRows(Array.isArray(startup?.registryRows) ? startup.registryRows : []);
+  setUtilityPricingState(
+    startup?.utilityBuildingConfiguration ?? null,
+    startup?.utilityRateDefaults ?? null,
+    state.selectedRegistryBuildingId
+  );
+  state.utilitySheetMonthlyCombinedCharge = null;
+  state.caretakerRequests = Array.isArray(startup?.caretakerRequests)
+    ? startup.caretakerRequests
+    : [];
+  state.caretakers = Array.isArray(startup?.caretakers) ? startup.caretakers : [];
+  state.tickets = Array.isArray(startup?.tickets) ? startup.tickets : [];
+  setResidentDirectory(
+    dedupeResidentDirectoryRows(
+      Array.isArray(startup?.residentDirectory) ? startup.residentDirectory : []
+    )
+  );
+  setMeters(Array.isArray(startup?.meters) ? startup.meters : []);
+  setBills(Array.isArray(startup?.bills) ? startup.bills : []);
+  state.payments = Array.isArray(startup?.payments) ? startup.payments : [];
+  state.expenditures = Array.isArray(startup?.expenditures) ? startup.expenditures : [];
+  state.wifiPackages = Array.isArray(startup?.wifiPackages) ? startup.wifiPackages : [];
+  state.wifiPackagesUnavailableReason =
+    typeof startup?.wifiPackagesUnavailableReason === "string"
+      ? startup.wifiPackagesUnavailableReason
+      : "";
+
+  renderBuildings(state.buildings);
+  renderRoomBuildingOptions();
+  renderBuildingPhotoOptions();
+  renderWifiPackageBuildingOptions(state.buildings);
+  renderGlobalSearchBuildingOptions();
+  renderRegistryBuildingOptions();
+  renderResidentsBuildingOptions();
+  renderPaymentAccess(state.paymentAccess);
+  renderApplications(state.applications);
+  updateApplicationsIndicator();
+  renderRentStatus(state.rentStatus);
+  renderOverviewCollections(state.rentStatus);
+  syncUtilitySheetRateDefaults();
+  syncUtilitySheetBuildingFixedDefaults();
+  syncUtilitySheetBuildingCombinedCharge();
+  syncUtilityBillInputMode();
+  renderRegistryRows(state.registryRows);
+  renderResidentDirectory(state.residentDirectory);
+  renderWifiPackages(state.wifiPackages);
+  renderCaretakerRequests(state.caretakerRequests);
+  renderCaretakers(state.caretakers);
+  renderLandlordTickets(state.tickets);
+  renderMeters(state.meters);
+  renderUtilityRoomSummary(state.bills);
+  renderUtilityBills(state.bills);
+  renderUtilityPayments(state.payments);
+  renderExpenditures(state.expenditures);
+  renderMetrics();
+  updateLandlordBranding();
+
+  if (
+    utilitySheetModalEl instanceof HTMLElement &&
+    !utilitySheetModalEl.classList.contains("hidden")
+  ) {
+    renderUtilitySheetRows(state.registryRows);
+  }
+}
+
+async function loadDataLegacy() {
   clearError();
 
   try {
@@ -5553,6 +6373,24 @@ async function loadData() {
     await loadResidents();
     setStatus(`Signed in as ${formatRoleLabel(state.role)}. Data refreshed.`);
   } catch (error) {
+    handleLandlordError(error, "Unable to load landlord data.");
+    setStatus("Landlord data load failed.");
+  }
+}
+
+async function loadData() {
+  clearError();
+
+  try {
+    const payload = await requestJson("/api/landlord/startup");
+    applyLandlordStartupData(payload.data ?? {});
+    setStatus(`Signed in as ${formatRoleLabel(state.role)}. Data refreshed.`);
+  } catch (error) {
+    if (isMissingRouteError(error)) {
+      await loadDataLegacy();
+      return;
+    }
+
     handleLandlordError(error, "Unable to load landlord data.");
     setStatus("Landlord data load failed.");
   }
@@ -5873,7 +6711,7 @@ paymentAccessBodyEl.addEventListener("click", (event) => {
     return;
   }
 
-  const current = state.paymentAccess.find((item) => item.buildingId === buildingId);
+  const current = getPaymentAccessRecord(buildingId);
   if (!current) {
     showError("Current payment access settings not found. Refresh and retry.");
     return;
@@ -6548,7 +7386,9 @@ utilitySheetBuildingSelectEl?.addEventListener("change", () => {
     loadRegistryRows(),
     loadMeters(),
     loadBills(),
+    loadRegistryReadingBills(),
     loadPayments(),
+    loadUtilitySheetBuildingConfiguration(),
     loadUtilitySheetMonthlyCombinedCharge()
   ]).catch((error) => {
     handleLandlordError(error, "Failed to load selected building in utility sheet.");
@@ -6561,12 +7401,20 @@ utilitySheetBillingMonthEl?.addEventListener("change", () => {
   });
 });
 
+registryReadingMonthEl?.addEventListener("change", () => {
+  state.registryReadingMonth = toBillingMonth(registryReadingMonthEl.value);
+  void loadRegistryReadingBills().catch((error) => {
+    handleLandlordError(error, "Failed to load monthly utility readings.");
+  });
+});
+
 registryBuildingSelectEl.addEventListener("change", () => {
   setPreferredBuildingSelection(String(registryBuildingSelectEl.value || ""));
   void Promise.all([
     loadRegistryRows(),
     loadMeters(),
     loadBills(),
+    loadRegistryReadingBills(),
     loadPayments(),
     loadExpenditures(),
     loadCaretakerAccessRequests(),
@@ -6585,6 +7433,7 @@ registryLoadBtnEl.addEventListener("click", () => {
     loadRegistryRows(),
     loadMeters(),
     loadBills(),
+    loadRegistryReadingBills(),
     loadPayments(),
     loadExpenditures(),
     loadCaretakerAccessRequests(),
@@ -6665,19 +7514,86 @@ utilitySheetFormEl?.addEventListener("submit", (event) => {
   }
 
   let registryRows;
+  let auditRows;
   let billRequests;
+  let auditId = "";
+  let postedCount = 0;
+  const failures = [];
   const combinedUtilityChargeKsh = toOptionalNumber(utilitySheetCombinedChargeEl?.value);
+  const buildingDefaultWaterFixedChargeKsh = toOptionalNumber(
+    utilitySheetWaterFixedDefaultEl?.value
+  );
+  const buildingDefaultElectricityFixedChargeKsh = toOptionalNumber(
+    utilitySheetElectricFixedDefaultEl?.value
+  );
+  const buildingDefaultCombinedUtilityChargeKsh = toOptionalNumber(
+    utilitySheetBuildingCombinedChargeEl?.value
+  );
+  const normalizedBuildingDefaultWaterFixedChargeKsh =
+    buildingDefaultWaterFixedChargeKsh == null
+      ? null
+      : Math.max(0, buildingDefaultWaterFixedChargeKsh);
+  const normalizedBuildingDefaultElectricityFixedChargeKsh =
+    buildingDefaultElectricityFixedChargeKsh == null
+      ? null
+      : Math.max(0, buildingDefaultElectricityFixedChargeKsh);
+  const normalizedBuildingDefaultCombinedUtilityChargeKsh =
+    buildingDefaultCombinedUtilityChargeKsh == null
+      ? null
+      : Math.max(0, Math.round(buildingDefaultCombinedUtilityChargeKsh));
+  const normalizedWaterRatePerUnitKsh =
+    toOptionalNumber(utilitySheetWaterRateEl?.value) == null
+      ? null
+      : Math.max(0, Number(toOptionalNumber(utilitySheetWaterRateEl?.value)));
+  const normalizedElectricityRatePerUnitKsh =
+    toOptionalNumber(utilitySheetElectricRateEl?.value) == null
+      ? null
+      : Math.max(0, Number(toOptionalNumber(utilitySheetElectricRateEl?.value)));
+  const currentBuildingDefaultWaterFixedChargeKsh =
+    state.utilitySheetBuildingConfiguration?.defaultWaterFixedChargeKsh == null
+      ? null
+      : Math.max(0, Number(state.utilitySheetBuildingConfiguration.defaultWaterFixedChargeKsh));
+  const currentBuildingDefaultElectricityFixedChargeKsh =
+    state.utilitySheetBuildingConfiguration?.defaultElectricityFixedChargeKsh == null
+      ? null
+      : Math.max(
+          0,
+          Number(state.utilitySheetBuildingConfiguration.defaultElectricityFixedChargeKsh)
+        );
+  const currentWaterRatePerUnitKsh =
+    state.utilitySheetBuildingConfiguration?.defaultWaterRatePerUnitKsh == null
+      ? null
+      : Math.max(0, Number(state.utilitySheetBuildingConfiguration.defaultWaterRatePerUnitKsh));
+  const currentElectricityRatePerUnitKsh =
+    state.utilitySheetBuildingConfiguration?.defaultElectricityRatePerUnitKsh == null
+      ? null
+      : Math.max(
+          0,
+          Number(state.utilitySheetBuildingConfiguration.defaultElectricityRatePerUnitKsh)
+        );
+  const currentBuildingDefaultCombinedUtilityChargeKsh =
+    state.utilitySheetBuildingConfiguration?.defaultCombinedUtilityChargeKsh == null
+      ? null
+      : Math.max(
+          0,
+          Math.round(state.utilitySheetBuildingConfiguration.defaultCombinedUtilityChargeKsh)
+        );
+  const normalizedMonthlyCombinedUtilityChargeKsh =
+    combinedUtilityChargeKsh == null ? null : Math.max(0, Math.round(combinedUtilityChargeKsh));
   const rateDefaults = {
-    waterRatePerUnitKsh: toOptionalNumber(utilitySheetWaterRateEl?.value),
-    electricityRatePerUnitKsh: toOptionalNumber(utilitySheetElectricRateEl?.value)
+    waterRatePerUnitKsh: normalizedWaterRatePerUnitKsh ?? undefined,
+    electricityRatePerUnitKsh: normalizedElectricityRatePerUnitKsh ?? undefined
   };
+  const bulkNote = utilitySheetNoteEl?.value.trim() || undefined;
+  const selectedBuilding = getBuildingRecord(buildingId);
   try {
+    auditRows = buildUtilitySheetAuditRows();
     registryRows = buildUtilitySheetRegistryPayload();
     billRequests = buildUtilitySheetBillRequests(
       buildingId,
       billingMonth,
       dueDate,
-      utilitySheetNoteEl?.value.trim() || undefined,
+      bulkNote,
       combinedUtilityChargeKsh
     );
   } catch (error) {
@@ -6690,12 +7606,122 @@ utilitySheetFormEl?.addEventListener("submit", (event) => {
     return;
   }
 
+  if (!Array.isArray(auditRows) || auditRows.length === 0) {
+    showError("No utility sheet snapshot available to audit.");
+    return;
+  }
+
   if (utilitySheetSubmitBtnEl instanceof HTMLButtonElement) {
     utilitySheetSubmitBtnEl.disabled = true;
   }
 
   void (async () => {
     try {
+      const auditPayload = await requestJson(
+        `/api/landlord/buildings/${encodeURIComponent(buildingId)}/utility-bulk-audits`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            billingMonth,
+            dueDate,
+            note: bulkNote,
+            defaultWaterFixedChargeKsh:
+              normalizedBuildingDefaultWaterFixedChargeKsh,
+            defaultElectricityFixedChargeKsh:
+              normalizedBuildingDefaultElectricityFixedChargeKsh,
+            defaultCombinedUtilityChargeKsh:
+              normalizedBuildingDefaultCombinedUtilityChargeKsh,
+            monthlyCombinedUtilityChargeKsh: normalizedMonthlyCombinedUtilityChargeKsh,
+            rateDefaults,
+            rows: auditRows
+          })
+        }
+      );
+      auditId = String(auditPayload?.data?.id ?? "").trim();
+      if (!auditId) {
+        throw new Error("Bulk utility audit could not be created.");
+      }
+      try {
+        downloadUtilityBulkAuditCsv(
+          auditPayload?.data ?? {
+            id: auditId,
+            createdAt: new Date().toISOString(),
+            buildingId,
+            buildingName: selectedBuilding?.name || buildingId,
+            billingMonth,
+            dueDate,
+            note: bulkNote,
+            defaultWaterFixedChargeKsh:
+              normalizedBuildingDefaultWaterFixedChargeKsh,
+            defaultElectricityFixedChargeKsh:
+              normalizedBuildingDefaultElectricityFixedChargeKsh,
+            defaultCombinedUtilityChargeKsh:
+              normalizedBuildingDefaultCombinedUtilityChargeKsh,
+            monthlyCombinedUtilityChargeKsh: normalizedMonthlyCombinedUtilityChargeKsh,
+            rateDefaults,
+            rows: auditRows,
+            result: {
+              status: "pending",
+              postedCount: 0,
+              requestedCount: billRequests.length,
+              failures: []
+            }
+          }
+        );
+      } catch (downloadError) {
+        console.error("Failed to download utility bulk audit CSV", downloadError);
+      }
+
+      if (
+        !utilityPricingNumbersEqual(
+          normalizedWaterRatePerUnitKsh,
+          currentWaterRatePerUnitKsh
+        ) ||
+        !utilityPricingNumbersEqual(
+          normalizedElectricityRatePerUnitKsh,
+          currentElectricityRatePerUnitKsh
+        ) ||
+        !utilityPricingNumbersEqual(
+          normalizedBuildingDefaultWaterFixedChargeKsh,
+          currentBuildingDefaultWaterFixedChargeKsh
+        ) ||
+        !utilityPricingNumbersEqual(
+          normalizedBuildingDefaultElectricityFixedChargeKsh,
+          currentBuildingDefaultElectricityFixedChargeKsh
+        ) ||
+        normalizedBuildingDefaultCombinedUtilityChargeKsh !==
+          currentBuildingDefaultCombinedUtilityChargeKsh
+      ) {
+        const configurationPayload = await requestJson(
+          `/api/landlord/buildings/${encodeURIComponent(buildingId)}/configuration`,
+          {
+            method: "PATCH",
+            headers: {
+              "content-type": "application/json"
+            },
+            body: JSON.stringify({
+              defaultWaterRatePerUnitKsh: normalizedWaterRatePerUnitKsh,
+              defaultElectricityRatePerUnitKsh:
+                normalizedElectricityRatePerUnitKsh,
+              defaultWaterFixedChargeKsh:
+                normalizedBuildingDefaultWaterFixedChargeKsh,
+              defaultElectricityFixedChargeKsh:
+                normalizedBuildingDefaultElectricityFixedChargeKsh,
+              defaultCombinedUtilityChargeKsh:
+                normalizedBuildingDefaultCombinedUtilityChargeKsh,
+              acknowledgeImpact: true
+            })
+          }
+        );
+        setUtilityPricingState(configurationPayload.data ?? null, null, buildingId);
+        syncUtilitySheetRateDefaults();
+        syncUtilitySheetBuildingFixedDefaults();
+        syncUtilitySheetBuildingCombinedCharge();
+      }
+
       if (combinedUtilityChargeKsh != null && combinedUtilityChargeKsh > 0) {
         await requestJson(
           `/api/landlord/buildings/${encodeURIComponent(buildingId)}/monthly-combined-utility-charge`,
@@ -6720,12 +7746,9 @@ utilitySheetFormEl?.addEventListener("submit", (event) => {
           headers: {
             "content-type": "application/json"
           },
-          body: JSON.stringify({ rows: registryRows, rateDefaults })
+          body: JSON.stringify({ rows: registryRows })
         }
       );
-
-      let postedCount = 0;
-      const failures = [];
 
       for (const billRequest of billRequests) {
         try {
@@ -6756,8 +7779,20 @@ utilitySheetFormEl?.addEventListener("submit", (event) => {
         loadBills(),
         loadPayments(),
         loadResidents(),
+        loadUtilitySheetBuildingConfiguration(),
         loadUtilitySheetMonthlyCombinedCharge()
       ]);
+      try {
+        await finalizeUtilityBulkAudit(buildingId, auditId, {
+          status: failures.length > 0 ? "partial_failed" : "completed",
+          postedCount,
+          requestedCount: billRequests.length,
+          failures,
+          completedAt: new Date().toISOString()
+        });
+      } catch (auditFinalizeError) {
+        console.error("Failed to finalize utility bulk audit", auditFinalizeError);
+      }
       if (failures.length > 0) {
         const preview = failures.slice(0, 3).join(" | ");
         showError(
@@ -6773,6 +7808,20 @@ utilitySheetFormEl?.addEventListener("submit", (event) => {
         closeUtilitySheetModal();
       }
     } catch (error) {
+      if (auditId) {
+        try {
+          const errorMessage = error instanceof Error ? error.message : "failed";
+          await finalizeUtilityBulkAudit(buildingId, auditId, {
+            status: "failed",
+            postedCount,
+            requestedCount: Array.isArray(billRequests) ? billRequests.length : 0,
+            failures: [...failures, errorMessage],
+            completedAt: new Date().toISOString()
+          });
+        } catch (auditFinalizeError) {
+          console.error("Failed to finalize utility bulk audit", auditFinalizeError);
+        }
+      }
       handleLandlordError(error, "Failed to save bulk utility sheet.");
     } finally {
       if (utilitySheetSubmitBtnEl instanceof HTMLButtonElement) {
@@ -7435,6 +8484,10 @@ void (async () => {
 
   const now = new Date();
   utilityBillMonthEl.value = toMonthInputValue(now);
+  if (registryReadingMonthEl instanceof HTMLInputElement) {
+    registryReadingMonthEl.value = toMonthInputValue(previousBillingMonth(now));
+    state.registryReadingMonth = toBillingMonth(registryReadingMonthEl.value);
+  }
   if (utilitySheetBillingMonthEl instanceof HTMLInputElement) {
     utilitySheetBillingMonthEl.value = toMonthInputValue(now);
   }

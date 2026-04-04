@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=20260322b" />
-    <link rel="stylesheet" href="/landlord.css?v=20260403a" />
+    <link rel="stylesheet" href="/landlord.css?v=20260404d" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -652,6 +652,10 @@
                 Building
                 <select id="registry-building-select"></select>
               </label>
+              <label>
+                Readings Month
+                <input id="registry-reading-month" type="month" />
+              </label>
               <button id="registry-load-btn" type="button">Load</button>
               <button id="open-utility-sheet-btn" type="button">Bulk Utility Sheet</button>
               <button id="registry-save-btn" type="button">Save All</button>
@@ -661,7 +665,8 @@
             Enter water/electricity meter numbers and number of members for every house in
             the selected building, then save in one action. Set fixed charges for houses with
             faulty or missing meters, and set a room utility amount for combined-charge
-            buildings like Village Inn.
+            buildings like Village Inn. Use Readings Month to inspect saved room readings
+            for a specific billing month.
           </p>
           <div class="table-wrap">
             <table>
@@ -673,6 +678,8 @@
                   <th>Members</th>
                   <th>Water Meter</th>
                   <th>Electricity Meter</th>
+                  <th>Water Reading</th>
+                  <th>Electricity Reading</th>
                   <th>Water Fixed (KSh)</th>
                   <th>Electric Fixed (KSh)</th>
                   <th>Room Utility Amount (KSh)</th>
@@ -1048,21 +1055,57 @@
 
           <div class="inline-fields compact-fields">
             <label>
-              Water Rate (KSh/unit)
+              Building Default Water Rate (KSh/unit)
               <input id="utility-sheet-water-rate" type="number" min="0" step="0.01" />
             </label>
             <label>
-              Electricity Rate (KSh/unit)
+              Building Default Electricity Rate (KSh/unit)
               <input id="utility-sheet-electric-rate" type="number" min="0" step="0.01" />
             </label>
             <label>
-              Vacant Room Combined Charge (KSh)
+              Building Default Water Fixed Charge (KSh)
+              <input
+                id="utility-sheet-water-fixed-default"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Leave blank to use room/default entry only"
+              />
+            </label>
+          </div>
+
+          <div class="inline-fields compact-fields">
+            <label>
+              Building Default Electricity Fixed Charge (KSh)
+              <input
+                id="utility-sheet-electric-fixed-default"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Leave blank to use room/default entry only"
+              />
+            </label>
+            <label>
+              Building Default Combined Charge (KSh)
+              <input
+                id="utility-sheet-building-combined-charge"
+                type="number"
+                min="0"
+                step="1"
+                placeholder="Leave blank to disable"
+              />
+            </label>
+          </div>
+
+          <div class="inline-fields compact-fields">
+            <label>
+              Monthly Combined Charge Override (KSh)
               <input
                 id="utility-sheet-combined-charge"
                 type="number"
                 min="0"
                 step="1"
-                placeholder="e.g. 350"
+                placeholder="Leave blank to use building default"
               />
             </label>
           </div>
@@ -1338,6 +1381,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=20260403a"></script>
+    <script type="module" src="/landlord.js?v=20260404d"></script>
   </body>
 </html>

@@ -318,6 +318,11 @@ model BuildingConfiguration {
   caretakerEnabled           Boolean            @default(false)
   expenditureTrackingEnabled Boolean            @default(false)
   utilityBillingMode         UtilityBillingMode @default(metered)
+  defaultWaterRatePerUnitKsh Float?
+  defaultElectricityRatePerUnitKsh Float?
+  defaultWaterFixedChargeKsh Float?
+  defaultElectricityFixedChargeKsh Float?
+  defaultCombinedUtilityChargeKsh Int?
   utilityBalanceVisibleDays  Int                @default(7)
   rentGraceDays              Int                @default(0)
   allowManualRentPosting     Boolean            @default(true)

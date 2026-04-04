@@ -268,8 +268,8 @@ function renderLandlordAccessRequests(requests) {
         <td>${escapeHtml(request.user.phone)}</td>
         <td><strong>${escapeHtml(request.status)}</strong></td>
         <td>${escapeHtml(reason)}</td>
-        <td>
-          <div class="inline-fields compact-fields" style="grid-template-columns: 1fr 1fr 1fr;">
+        <td class="admin-review-cell">
+          <div class="admin-review-layout admin-review-layout-single">
             <input data-action="note" type="text" maxlength="500" placeholder="Optional review note" />
             <button data-action="approve" type="button">Approve</button>
             <button data-action="reject" type="button">Reject</button>
@@ -463,8 +463,8 @@ function renderPasswordRecoveryRequests(requests) {
         <td>${escapeHtml(request.phoneMask ?? request.phoneNumber)}</td>
         <td><strong>${escapeHtml(request.status)}</strong></td>
         <td>${escapeHtml(residentNote)}</td>
-        <td>
-          <div class="inline-fields compact-fields" style="grid-template-columns: 1fr 1fr 1fr;">
+        <td class="admin-review-cell">
+          <div class="admin-review-layout admin-review-layout-reset">
             <input data-action="temporary-password" type="password" minlength="8" maxlength="128" placeholder="Temp password" />
             <input data-action="note" type="text" maxlength="500" placeholder="Admin note (optional)" />
             <div class="decision-actions">
@@ -578,8 +578,8 @@ function renderAccountPasswordRecoveryRequests(requests) {
         <td>${escapeHtml(identifier)}</td>
         <td><strong>${escapeHtml(request.status)}</strong></td>
         <td>${escapeHtml(accountNote)}</td>
-        <td>
-          <div class="inline-fields compact-fields" style="grid-template-columns: 1fr 1fr 1fr;">
+        <td class="admin-review-cell">
+          <div class="admin-review-layout admin-review-layout-reset">
             <input data-action="temporary-password" type="password" minlength="8" maxlength="128" placeholder="Temp password" />
             <input data-action="note" type="text" maxlength="500" placeholder="Admin note (optional)" />
             <div class="decision-actions">

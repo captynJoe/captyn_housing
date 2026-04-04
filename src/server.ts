@@ -31,6 +31,7 @@ import {
 } from "./services/rentLedgerService.js";
 import {
   UtilityBillingService,
+  type CombinedUtilityChargeBuildingAmount,
   type CombinedUtilityChargeMonthlyAmount,
   type CombinedUtilityChargeRoomAmount,
   type UtilityBillingPersistedState
@@ -51,6 +52,7 @@ import {
 } from "./services/buildingWifiPackageService.js";
 import {
   BuildingConfigurationService,
+  type BuildingConfigurationRecord,
   toPaymentAccessRecord
 } from "./services/buildingConfigurationService.js";
 import {
@@ -109,6 +111,8 @@ import {
   landlordBuildingConfigurationUpdateSchema,
   landlordPaymentAccessUpdateSchema,
   landlordExpenditureCreateSchema,
+  landlordUtilityBulkSubmissionAuditCreateSchema,
+  landlordUtilityBulkSubmissionAuditFinalizeSchema,
   landlordUtilityRegistryUpsertSchema,
   landlordAssignCaretakerSchema,
   caretakerAccessResolveSchema,
@@ -126,6 +130,8 @@ import {
   landlordDecisionSchema,
   tenantAgreementUpsertSchema,
   tenantApplicationSchema,
+  type LandlordUtilityBulkSubmissionAuditCreateInput,
+  type LandlordUtilityBulkSubmissionAuditFinalizeInput,
   userLoginSchema,
   userRegisterSchema
 } from "./validation/schemas.js";
@@ -203,6 +209,7 @@ const pushVapidSubject = String(
 const ADMIN_AUTH_STATE_KEY = "admin_auth_v1";
 const RENT_LEDGER_STATE_KEY = "rent_ledger_v1";
 const UTILITY_BILLING_STATE_KEY = "utility_billing_v1";
+const UTILITY_BULK_SUBMISSION_AUDIT_STATE_KEY = "utility_bulk_submission_audit_v1";
 const USER_SUPPORT_STATE_KEY = "user_support_v1";
 const WIFI_ACCESS_STATE_KEY = "wifi_access_v1";
 const PAYMENT_ACCESS_STATE_KEY = "payment_access_v1";
@@ -310,6 +317,13 @@ interface UtilityRateDefaultRecord {
   updatedAt: string;
 }
 
+interface UtilityFixedChargeDefaultRecord {
+  buildingId: string;
+  waterFixedChargeKsh: number;
+  electricityFixedChargeKsh: number;
+  updatedAt: string;
+}
+
 const DEFAULT_WATER_RATE_PER_UNIT_KSH = 150;
 const compareHouseNumbers = (left: string, right: string) =>
   String(left ?? "").localeCompare(String(right ?? ""), undefined, {
@@ -404,6 +418,54 @@ interface LandlordUtilityRegistryRow {
   electricityMeterNumber?: string;
   waterMeterUpdatedAt?: string;
   electricityMeterUpdatedAt?: string;
+}
+
+interface UtilityBulkSubmissionAuditRow {
+  houseNumber: string;
+  householdMembers?: number;
+  hasActiveResident?: boolean;
+  waterMeterNumber?: string;
+  waterPreviousReading?: number;
+  waterCurrentReading?: number;
+  waterFixedChargeKsh?: number;
+  electricityMeterNumber?: string;
+  electricityPreviousReading?: number;
+  electricityCurrentReading?: number;
+  electricityFixedChargeKsh?: number;
+}
+
+interface UtilityBulkSubmissionAuditResult {
+  status: "pending" | "completed" | "partial_failed" | "failed";
+  postedCount: number;
+  requestedCount: number;
+  failures: string[];
+  completedAt?: string;
+}
+
+interface UtilityBulkSubmissionAuditRecord {
+  id: string;
+  createdAt: string;
+  createdByRole: "landlord" | "caretaker" | "admin" | "root_admin";
+  createdByUserId?: string;
+  buildingId: string;
+  buildingName: string;
+  billingMonth: string;
+  dueDate: string;
+  note?: string;
+  defaultWaterFixedChargeKsh?: number | null;
+  defaultElectricityFixedChargeKsh?: number | null;
+  defaultCombinedUtilityChargeKsh?: number | null;
+  monthlyCombinedUtilityChargeKsh?: number | null;
+  rateDefaults?: {
+    waterRatePerUnitKsh?: number;
+    electricityRatePerUnitKsh?: number;
+  };
+  rows: UtilityBulkSubmissionAuditRow[];
+  result: UtilityBulkSubmissionAuditResult;
+}
+
+interface UtilityBulkSubmissionAuditState {
+  submissions: UtilityBulkSubmissionAuditRecord[];
 }
 
 interface CaretakerAccessRecord {
@@ -606,6 +668,32 @@ function normalizeHouseNumber(value: string): string {
 function normalizeBuildingId(value: string | undefined): string {
   const normalized = String(value ?? "").trim();
   return normalized || "__unknown_building__";
+}
+
+function buildAgreementFallbackRentDueDate(
+  paymentDueDay?: number,
+  leaseStartDate?: string | Date | null
+): string {
+  const now = new Date();
+  const parsedLeaseStart =
+    typeof leaseStartDate === "string"
+      ? new Date(`${leaseStartDate}T00:00:00.000Z`)
+      : leaseStartDate instanceof Date
+        ? leaseStartDate
+        : null;
+  const fallbackDay = Number.isFinite(paymentDueDay)
+    ? Number(paymentDueDay)
+    : parsedLeaseStart && !Number.isNaN(parsedLeaseStart.getTime())
+      ? parsedLeaseStart.getUTCDate()
+      : now.getUTCDate();
+  const lastDayOfMonth = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)
+  ).getUTCDate();
+  const dueDay = Math.min(Math.max(Math.trunc(fallbackDay), 1), lastDayOfMonth);
+
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), dueDay, 0, 0, 0, 0)
+  ).toISOString();
 }
 
 function buildManualRentPaymentReference(
@@ -950,6 +1038,10 @@ async function bootstrap() {
   const householdMembersByUnit = new Map<string, HouseholdMemberRegistryRecord>();
   const utilityChargeDefaultsByUnit = new Map<string, UtilityChargeDefaultRecord>();
   const utilityRateDefaultsByBuilding = new Map<string, UtilityRateDefaultRecord>();
+  const utilityFixedChargeDefaultsByBuilding = new Map<
+    string,
+    UtilityFixedChargeDefaultRecord
+  >();
   const monthlyCombinedUtilityChargesByMonth = new Map<
     string,
     MonthlyCombinedUtilityChargeRecord
@@ -1851,6 +1943,94 @@ async function bootstrap() {
     persistRuntimeQueuesState();
   };
 
+  const toUtilityRateDefaultsRecord = (
+    config: Pick<
+      BuildingConfigurationRecord,
+      | "buildingId"
+      | "defaultWaterRatePerUnitKsh"
+      | "defaultElectricityRatePerUnitKsh"
+      | "updatedAt"
+    >
+  ): UtilityRateDefaultRecord | null => {
+    if (
+      config.defaultWaterRatePerUnitKsh == null &&
+      config.defaultElectricityRatePerUnitKsh == null
+    ) {
+      return null;
+    }
+
+    return {
+      buildingId: normalizeBuildingId(config.buildingId),
+      waterRatePerUnitKsh:
+        config.defaultWaterRatePerUnitKsh == null
+          ? 0
+          : Math.max(0, Number(config.defaultWaterRatePerUnitKsh)),
+      electricityRatePerUnitKsh:
+        config.defaultElectricityRatePerUnitKsh == null
+          ? 0
+          : Math.max(0, Number(config.defaultElectricityRatePerUnitKsh)),
+      updatedAt: config.updatedAt
+    };
+  };
+
+  const toUtilityFixedChargeDefaultsRecord = (
+    config: Pick<
+      BuildingConfigurationRecord,
+      | "buildingId"
+      | "defaultWaterFixedChargeKsh"
+      | "defaultElectricityFixedChargeKsh"
+      | "updatedAt"
+    >
+  ): UtilityFixedChargeDefaultRecord | null => {
+    if (
+      config.defaultWaterFixedChargeKsh == null &&
+      config.defaultElectricityFixedChargeKsh == null
+    ) {
+      return null;
+    }
+
+    return {
+      buildingId: normalizeBuildingId(config.buildingId),
+      waterFixedChargeKsh:
+        config.defaultWaterFixedChargeKsh == null
+          ? 0
+          : Math.max(0, Number(config.defaultWaterFixedChargeKsh)),
+      electricityFixedChargeKsh:
+        config.defaultElectricityFixedChargeKsh == null
+          ? 0
+          : Math.max(0, Number(config.defaultElectricityFixedChargeKsh)),
+      updatedAt: config.updatedAt
+    };
+  };
+
+  const syncUtilityPricingDefaultsForBuilding = (
+    config: Pick<
+      BuildingConfigurationRecord,
+      | "buildingId"
+      | "defaultWaterRatePerUnitKsh"
+      | "defaultElectricityRatePerUnitKsh"
+      | "defaultWaterFixedChargeKsh"
+      | "defaultElectricityFixedChargeKsh"
+      | "updatedAt"
+    >
+  ) => {
+    const normalizedBuildingId = normalizeBuildingId(config.buildingId);
+    const rateRecord = toUtilityRateDefaultsRecord(config);
+    const fixedChargeRecord = toUtilityFixedChargeDefaultsRecord(config);
+
+    if (rateRecord) {
+      utilityRateDefaultsByBuilding.set(normalizedBuildingId, rateRecord);
+    } else {
+      utilityRateDefaultsByBuilding.delete(normalizedBuildingId);
+    }
+
+    if (fixedChargeRecord) {
+      utilityFixedChargeDefaultsByBuilding.set(normalizedBuildingId, fixedChargeRecord);
+    } else {
+      utilityFixedChargeDefaultsByBuilding.delete(normalizedBuildingId);
+    }
+  };
+
   const getUtilityRateDefaultsForBuilding = (buildingId: string) => {
     const normalizedBuildingId = normalizeBuildingId(buildingId);
     const record = utilityRateDefaultsByBuilding.get(normalizedBuildingId);
@@ -1864,7 +2044,52 @@ async function bootstrap() {
     };
   };
 
-  const upsertUtilityRateDefaultsForBuilding = (
+  const getUtilityFixedChargeDefaultsForBuilding = (buildingId: string) => {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const record = utilityFixedChargeDefaultsByBuilding.get(normalizedBuildingId);
+    if (!record) {
+      return null;
+    }
+
+    return {
+      ...record,
+      buildingId: normalizedBuildingId
+    };
+  };
+
+  const getUtilityFixedChargeDefaultForHouse = (
+    utilityType: "water" | "electricity",
+    buildingId: string,
+    houseNumber: string
+  ) => {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const normalizedHouseNumber = normalizeHouseNumber(houseNumber);
+    const roomDefaults = utilityChargeDefaultsByUnit.get(
+      memberRegistryKey(normalizedBuildingId, normalizedHouseNumber)
+    );
+    const roomValue =
+      utilityType === "water"
+        ? roomDefaults?.waterFixedChargeKsh
+        : roomDefaults?.electricityFixedChargeKsh;
+
+    if (Number.isFinite(Number(roomValue)) && Number(roomValue) > 0) {
+      return Math.max(0, Number(roomValue));
+    }
+
+    const buildingDefaults = getUtilityFixedChargeDefaultsForBuilding(normalizedBuildingId);
+    const buildingValue =
+      utilityType === "water"
+        ? buildingDefaults?.waterFixedChargeKsh
+        : buildingDefaults?.electricityFixedChargeKsh;
+
+    if (!Number.isFinite(Number(buildingValue))) {
+      return undefined;
+    }
+
+    return Math.max(0, Number(buildingValue));
+  };
+
+  const upsertUtilityRateDefaultsForBuilding = async (
     buildingId: string,
     input: {
       waterRatePerUnitKsh?: number;
@@ -1887,6 +2112,26 @@ async function bootstrap() {
 
     const waterRatePerUnitKsh = Number(input.waterRatePerUnitKsh);
     const electricityRatePerUnitKsh = Number(input.electricityRatePerUnitKsh);
+
+    if (buildingConfigurationService) {
+      const updated = await buildingConfigurationService.updateForBuilding(
+        normalizedBuildingId,
+        {
+          defaultWaterRatePerUnitKsh: hasWaterRate
+            ? Number.isFinite(waterRatePerUnitKsh)
+              ? Math.max(0, waterRatePerUnitKsh)
+              : 0
+            : undefined,
+          defaultElectricityRatePerUnitKsh: hasElectricityRate
+            ? Number.isFinite(electricityRatePerUnitKsh)
+              ? Math.max(0, electricityRatePerUnitKsh)
+              : 0
+            : undefined
+        }
+      );
+      syncUtilityPricingDefaultsForBuilding(updated);
+      return;
+    }
 
     utilityRateDefaultsByBuilding.set(normalizedBuildingId, {
       buildingId: normalizedBuildingId,
@@ -1959,34 +2204,48 @@ async function bootstrap() {
     return { ...record };
   };
 
-  const applyUtilityRateDefaults = (
+  const applyUtilityBillDefaults = (
     utilityType: "water" | "electricity",
     buildingId: string,
     houseNumber: string,
-    input: CreateUtilityBillInput
-  ): CreateUtilityBillInput => {
-    if (input.ratePerUnitKsh != null || input.currentReading == null) {
-      return input;
+    input: Partial<CreateUtilityBillInput>
+  ): Partial<CreateUtilityBillInput> => {
+    const resolved = { ...input };
+
+    if (resolved.ratePerUnitKsh == null && resolved.currentReading != null) {
+      const defaults = getUtilityRateDefaultsForBuilding(buildingId);
+      const fallbackRaw =
+        utilityType === "water"
+          ? defaults?.waterRatePerUnitKsh ?? DEFAULT_WATER_RATE_PER_UNIT_KSH
+          : defaults?.electricityRatePerUnitKsh;
+      const fallback = Number(fallbackRaw);
+
+      if (!Number.isFinite(fallback)) {
+        const normalizedHouse = normalizeHouseNumber(houseNumber);
+        throw new Error(
+          `Current reading and rate per unit are required for metered ${utilityType} billing (${normalizedHouse}).`
+        );
+      }
+
+      resolved.ratePerUnitKsh = fallback;
     }
 
-    const defaults = getUtilityRateDefaultsForBuilding(buildingId);
-    const fallbackRaw =
-      utilityType === "water"
-        ? defaults?.waterRatePerUnitKsh ?? DEFAULT_WATER_RATE_PER_UNIT_KSH
-        : defaults?.electricityRatePerUnitKsh;
-    const fallback = Number(fallbackRaw);
-
-    if (!Number.isFinite(fallback)) {
-      const normalizedHouse = normalizeHouseNumber(houseNumber);
-      throw new Error(
-        `Current reading and rate per unit are required for metered ${utilityType} billing (${normalizedHouse}).`
+    const hasMeteredFields =
+      resolved.previousReading != null ||
+      resolved.currentReading != null ||
+      resolved.ratePerUnitKsh != null;
+    if (!hasMeteredFields && resolved.fixedChargeKsh == null) {
+      const defaultFixedChargeKsh = getUtilityFixedChargeDefaultForHouse(
+        utilityType,
+        buildingId,
+        houseNumber
       );
+      if (defaultFixedChargeKsh != null) {
+        resolved.fixedChargeKsh = defaultFixedChargeKsh;
+      }
     }
 
-    return {
-      ...input,
-      ratePerUnitKsh: fallback
-    };
+    return resolved;
   };
 
   const purgeRuntimeStateForBuilding = (buildingId: string) => {
@@ -2011,6 +2270,8 @@ async function bootstrap() {
     if (utilityRateDefaultsByBuilding.delete(normalizedBuildingId)) {
       runtimeQueuesChanged = true;
     }
+
+    utilityFixedChargeDefaultsByBuilding.delete(normalizedBuildingId);
 
     for (const key of monthlyCombinedUtilityChargesByMonth.keys()) {
       if (!key.startsWith(`${normalizedBuildingId}::`)) {
@@ -2335,13 +2596,283 @@ async function bootstrap() {
     );
   }
 
+  const serializeCsvCell = (value: unknown): string => {
+    const stringValue = String(value ?? "");
+    if (!/[",\n]/.test(stringValue)) {
+      return stringValue;
+    }
+
+    return `"${stringValue.replace(/"/g, '""')}"`;
+  };
+
+  const buildUtilityBulkSubmissionAuditCsv = (
+    record: UtilityBulkSubmissionAuditRecord
+  ): string => {
+    const lines = [
+      ["Audit ID", record.id],
+      ["Created At", record.createdAt],
+      ["Building ID", record.buildingId],
+      ["Building Name", record.buildingName],
+      ["Billing Month", record.billingMonth],
+      ["Due Date", record.dueDate],
+      ["Default Water Fixed Charge KSh", record.defaultWaterFixedChargeKsh ?? ""],
+      [
+        "Default Electricity Fixed Charge KSh",
+        record.defaultElectricityFixedChargeKsh ?? ""
+      ],
+      ["Default Combined Charge KSh", record.defaultCombinedUtilityChargeKsh ?? ""],
+      ["Monthly Combined Charge KSh", record.monthlyCombinedUtilityChargeKsh ?? ""],
+      ["Water Rate Per Unit KSh", record.rateDefaults?.waterRatePerUnitKsh ?? ""],
+      [
+        "Electricity Rate Per Unit KSh",
+        record.rateDefaults?.electricityRatePerUnitKsh ?? ""
+      ],
+      ["Note", record.note ?? ""],
+      ["Status", record.result.status],
+      ["Posted Count", record.result.postedCount],
+      ["Requested Count", record.result.requestedCount],
+      ["Completed At", record.result.completedAt ?? ""]
+    ].map((row) => row.map(serializeCsvCell).join(","));
+
+    lines.push("");
+    lines.push(
+      [
+        "House",
+        "Household Members",
+        "Has Active Resident",
+        "Water Meter",
+        "Water Previous",
+        "Water Current",
+        "Water Fixed KSh",
+        "Electricity Meter",
+        "Electricity Previous",
+        "Electricity Current",
+        "Electricity Fixed KSh"
+      ]
+        .map(serializeCsvCell)
+        .join(",")
+    );
+
+    for (const row of record.rows) {
+      lines.push(
+        [
+          row.houseNumber,
+          row.householdMembers ?? "",
+          row.hasActiveResident ?? "",
+          row.waterMeterNumber ?? "",
+          row.waterPreviousReading ?? "",
+          row.waterCurrentReading ?? "",
+          row.waterFixedChargeKsh ?? "",
+          row.electricityMeterNumber ?? "",
+          row.electricityPreviousReading ?? "",
+          row.electricityCurrentReading ?? "",
+          row.electricityFixedChargeKsh ?? ""
+        ]
+          .map(serializeCsvCell)
+          .join(",")
+      );
+    }
+
+    if (record.result.failures.length > 0) {
+      lines.push("");
+      lines.push(serializeCsvCell("Failures"));
+      for (const failure of record.result.failures) {
+        lines.push(serializeCsvCell(failure));
+      }
+    }
+
+    return lines.join("\n");
+  };
+
+  const listUtilityBulkSubmissionAudits = async (
+    buildingId: string,
+    limit = 20
+  ): Promise<UtilityBulkSubmissionAuditRecord[]> => {
+    if (!appStateService) {
+      return [];
+    }
+
+    const state = await appStateService.getJson<UtilityBulkSubmissionAuditState>(
+      UTILITY_BULK_SUBMISSION_AUDIT_STATE_KEY
+    );
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const boundedLimit = Math.min(Math.max(Math.trunc(limit), 1), 100);
+
+    return (state?.submissions ?? [])
+      .filter((item) => normalizeBuildingId(item.buildingId) === normalizedBuildingId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, boundedLimit);
+  };
+
+  const getUtilityBulkSubmissionAudit = async (
+    buildingId: string,
+    auditId: string
+  ): Promise<UtilityBulkSubmissionAuditRecord | null> => {
+    if (!appStateService) {
+      return null;
+    }
+
+    const state = await appStateService.getJson<UtilityBulkSubmissionAuditState>(
+      UTILITY_BULK_SUBMISSION_AUDIT_STATE_KEY
+    );
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+
+    return (
+      (state?.submissions ?? []).find(
+        (item) =>
+          normalizeBuildingId(item.buildingId) === normalizedBuildingId && item.id === auditId
+      ) ?? null
+    );
+  };
+
+  const createUtilityBulkSubmissionAudit = async (
+    building: { id: string; name: string },
+    input: LandlordUtilityBulkSubmissionAuditCreateInput,
+    actor: { role?: string; userId?: string }
+  ): Promise<UtilityBulkSubmissionAuditRecord> => {
+    if (!appStateService) {
+      throw new Error("Bulk utility audit requires database connection.");
+    }
+
+    const createdByRole: UtilityBulkSubmissionAuditRecord["createdByRole"] =
+      actor.role === "caretaker" ||
+      actor.role === "admin" ||
+      actor.role === "root_admin"
+        ? actor.role
+        : "landlord";
+
+    const record: UtilityBulkSubmissionAuditRecord = {
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      createdByRole,
+      createdByUserId: actor.userId,
+      buildingId: building.id,
+      buildingName: building.name,
+      billingMonth: input.billingMonth,
+      dueDate: input.dueDate,
+      note: input.note?.trim() || undefined,
+      defaultWaterFixedChargeKsh:
+        input.defaultWaterFixedChargeKsh == null
+          ? null
+          : Math.max(0, Number(input.defaultWaterFixedChargeKsh)),
+      defaultElectricityFixedChargeKsh:
+        input.defaultElectricityFixedChargeKsh == null
+          ? null
+          : Math.max(0, Number(input.defaultElectricityFixedChargeKsh)),
+      defaultCombinedUtilityChargeKsh:
+        input.defaultCombinedUtilityChargeKsh == null
+          ? null
+          : Math.max(0, Math.round(input.defaultCombinedUtilityChargeKsh)),
+      monthlyCombinedUtilityChargeKsh:
+        input.monthlyCombinedUtilityChargeKsh == null
+          ? null
+          : Math.max(0, Math.round(input.monthlyCombinedUtilityChargeKsh)),
+      rateDefaults: input.rateDefaults
+        ? {
+            waterRatePerUnitKsh:
+              input.rateDefaults.waterRatePerUnitKsh == null
+                ? undefined
+                : Math.max(0, Number(input.rateDefaults.waterRatePerUnitKsh)),
+            electricityRatePerUnitKsh:
+              input.rateDefaults.electricityRatePerUnitKsh == null
+                ? undefined
+                : Math.max(0, Number(input.rateDefaults.electricityRatePerUnitKsh))
+          }
+        : undefined,
+      rows: input.rows.map((row) => ({
+        houseNumber: normalizeHouseNumber(row.houseNumber),
+        householdMembers:
+          typeof row.householdMembers === "number" ? Math.max(0, row.householdMembers) : undefined,
+        hasActiveResident:
+          typeof row.hasActiveResident === "boolean" ? row.hasActiveResident : undefined,
+        waterMeterNumber: row.waterMeterNumber?.trim() || undefined,
+        waterPreviousReading:
+          row.waterPreviousReading == null ? undefined : Number(row.waterPreviousReading),
+        waterCurrentReading:
+          row.waterCurrentReading == null ? undefined : Number(row.waterCurrentReading),
+        waterFixedChargeKsh:
+          row.waterFixedChargeKsh == null ? undefined : Number(row.waterFixedChargeKsh),
+        electricityMeterNumber: row.electricityMeterNumber?.trim() || undefined,
+        electricityPreviousReading:
+          row.electricityPreviousReading == null
+            ? undefined
+            : Number(row.electricityPreviousReading),
+        electricityCurrentReading:
+          row.electricityCurrentReading == null
+            ? undefined
+            : Number(row.electricityCurrentReading),
+        electricityFixedChargeKsh:
+          row.electricityFixedChargeKsh == null
+            ? undefined
+            : Number(row.electricityFixedChargeKsh)
+      })),
+      result: {
+        status: "pending",
+        postedCount: 0,
+        requestedCount: 0,
+        failures: []
+      }
+    };
+
+    await appStateService.queueUpdateJson<UtilityBulkSubmissionAuditState>(
+      UTILITY_BULK_SUBMISSION_AUDIT_STATE_KEY,
+      (current) => ({
+        submissions: [record, ...(current?.submissions ?? [])].slice(0, 200)
+      })
+    );
+
+    return record;
+  };
+
+  const finalizeUtilityBulkSubmissionAudit = async (
+    buildingId: string,
+    auditId: string,
+    input: LandlordUtilityBulkSubmissionAuditFinalizeInput
+  ): Promise<UtilityBulkSubmissionAuditRecord | null> => {
+    if (!appStateService) {
+      return null;
+    }
+
+    let updatedRecord: UtilityBulkSubmissionAuditRecord | null = null;
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    await appStateService.queueUpdateJson<UtilityBulkSubmissionAuditState>(
+      UTILITY_BULK_SUBMISSION_AUDIT_STATE_KEY,
+      (current) => {
+        const submissions = (current?.submissions ?? []).map((item) => {
+          if (
+            item.id !== auditId ||
+            normalizeBuildingId(item.buildingId) !== normalizedBuildingId
+          ) {
+            return item;
+          }
+
+          updatedRecord = {
+            ...item,
+            result: {
+              status: input.status,
+              postedCount: input.postedCount,
+              requestedCount: input.requestedCount,
+              failures: [...input.failures],
+              completedAt: input.completedAt ?? new Date().toISOString()
+            }
+          };
+          return updatedRecord;
+        });
+
+        return { submissions };
+      }
+    );
+
+    return updatedRecord;
+  };
+
   const syncDerivedBuildingConfigurationState = async () => {
     const buildings = await store.listBuildings();
     if (!buildingConfigurationService) {
-      const villageInnBuildingIds = buildings
-        .filter((item) => String(item.name ?? "").trim().toLowerCase() === "village inn")
-        .map((item) => item.id);
-      utilityBillingService.setCombinedChargeBuildingIds(villageInnBuildingIds);
+      utilityBillingService.setCombinedChargeBuildingIds([]);
+      utilityBillingService.setCombinedChargeBuildingAmounts([]);
+      utilityRateDefaultsByBuilding.clear();
+      utilityFixedChargeDefaultsByBuilding.clear();
       return;
     }
 
@@ -2367,11 +2898,93 @@ async function bootstrap() {
       });
     }
 
+    utilityRateDefaultsByBuilding.clear();
+    utilityFixedChargeDefaultsByBuilding.clear();
+    for (const item of configs) {
+      syncUtilityPricingDefaultsForBuilding(item);
+    }
+
     utilityBillingService.setCombinedChargeBuildingIds(
       configs
         .filter((item) => item.utilityBillingMode === "combined_charge")
         .map((item) => item.buildingId)
     );
+    utilityBillingService.setCombinedChargeBuildingAmounts(
+      configs
+        .filter((item) => item.defaultCombinedUtilityChargeKsh != null)
+        .map(
+          (item): CombinedUtilityChargeBuildingAmount => ({
+            buildingId: item.buildingId,
+            amountKsh: Number(item.defaultCombinedUtilityChargeKsh)
+          })
+        )
+    );
+  };
+
+  const migrateLegacyUtilityRateDefaultsToBuildingConfiguration = async () => {
+    if (!buildingConfigurationService || utilityRateDefaultsByBuilding.size === 0) {
+      return false;
+    }
+
+    const buildings = await store.listBuildings();
+    if (buildings.length === 0) {
+      utilityRateDefaultsByBuilding.clear();
+      return true;
+    }
+
+    await buildingConfigurationService.ensureDefaultsForBuildings(buildings);
+    const configs = await buildingConfigurationService.listForBuildings(
+      buildings.map((item) => item.id)
+    );
+    const configByBuildingId = new Map(
+      configs.map((item) => [normalizeBuildingId(item.buildingId), item])
+    );
+
+    let updated = false;
+    for (const [buildingId, legacyDefaults] of utilityRateDefaultsByBuilding.entries()) {
+      const config = configByBuildingId.get(buildingId);
+      if (!config) {
+        continue;
+      }
+
+      const nextWaterRate =
+        Number.isFinite(Number(legacyDefaults.waterRatePerUnitKsh)) &&
+        Number(legacyDefaults.waterRatePerUnitKsh) >= 0
+          ? Math.max(0, Number(legacyDefaults.waterRatePerUnitKsh))
+          : undefined;
+      const nextElectricityRate =
+        Number.isFinite(Number(legacyDefaults.electricityRatePerUnitKsh)) &&
+        Number(legacyDefaults.electricityRatePerUnitKsh) >= 0
+          ? Math.max(0, Number(legacyDefaults.electricityRatePerUnitKsh))
+          : undefined;
+
+      const shouldUpdateWaterRate =
+        nextWaterRate != null &&
+        (config.defaultWaterRatePerUnitKsh == null ||
+          Number(config.defaultWaterRatePerUnitKsh) === DEFAULT_WATER_RATE_PER_UNIT_KSH);
+      const shouldUpdateElectricityRate =
+        nextElectricityRate != null && config.defaultElectricityRatePerUnitKsh == null;
+
+      if (!shouldUpdateWaterRate && !shouldUpdateElectricityRate) {
+        continue;
+      }
+
+      const migrated = await buildingConfigurationService.updateForBuilding(buildingId, {
+        defaultWaterRatePerUnitKsh: shouldUpdateWaterRate ? nextWaterRate : undefined,
+        defaultElectricityRatePerUnitKsh: shouldUpdateElectricityRate
+          ? nextElectricityRate
+          : undefined
+      });
+      configByBuildingId.set(buildingId, migrated);
+      updated = true;
+    }
+
+    if (utilityRateDefaultsByBuilding.size > 0) {
+      utilityRateDefaultsByBuilding.clear();
+      updated = true;
+    }
+
+    return updated;
   };
 
   if (appStateService) {
@@ -2412,7 +3025,7 @@ async function bootstrap() {
 
       adminAuthService.importState(adminAuthState);
       rentLedgerService.importState(rentState);
-      utilityBillingService.importState(utilityState);
+      const utilityStateNormalized = utilityBillingService.importState(utilityState);
       userSupportService.importState(userSupportState);
       wifiService.importState(wifiState);
       paymentAccessService.importState(paymentAccessState);
@@ -2544,6 +3157,10 @@ async function bootstrap() {
         }
       }
 
+      if (await migrateLegacyUtilityRateDefaultsToBuildingConfiguration()) {
+        await syncDerivedBuildingConfigurationState();
+      }
+
       syncCombinedUtilityChargeDefaultsToService();
 
       const queuePersist = (key: string, state: unknown) =>
@@ -2570,6 +3187,13 @@ async function bootstrap() {
       pushNotificationService.setStateChangeHandler((state) =>
         queuePersist(PUSH_SUBSCRIPTIONS_STATE_KEY, state)
       );
+
+      if (utilityStateNormalized) {
+        await appStateService.queueSetJson(
+          UTILITY_BILLING_STATE_KEY,
+          utilityBillingService.exportState()
+        );
+      }
       persistCaretakerAccessState = () => {
         void queuePersist(
           CARETAKER_ACCESS_STATE_KEY,
@@ -2923,11 +3547,9 @@ async function bootstrap() {
     return rawBuildings.filter((item) => visibleIds.has(item.id));
   };
 
-  const listVisibleHouseNumbersForLandlordContext = async (context: {
-    role: string;
-    userSession: Awaited<ReturnType<typeof resolveOptionalUserSession>>;
-  }) => {
-    const buildings = await listVisibleBuildingsForLandlordContext(context);
+  const listVisibleHouseNumbersForBuildings = async (
+    buildings: Array<{ id: string; houseNumbers?: string[] }>
+  ) => {
     const visibleBuildingIds = new Set(buildings.map((item) => item.id));
     const houses = new Set<string>();
 
@@ -3005,6 +3627,14 @@ async function bootstrap() {
     }
 
     return houses;
+  };
+
+  const listVisibleHouseNumbersForLandlordContext = async (context: {
+    role: string;
+    userSession: Awaited<ReturnType<typeof resolveOptionalUserSession>>;
+  }) => {
+    const buildings = await listVisibleBuildingsForLandlordContext(context);
+    return listVisibleHouseNumbersForBuildings(buildings);
   };
 
   const requirePaymentChannelEnabled = (
@@ -3168,30 +3798,7 @@ async function bootstrap() {
     buildingId: string,
     houseNumbers: string[]
   ): Promise<LandlordUtilityRegistryRow[]> => {
-    const buildAgreementFallbackRentDueDate = (
-      paymentDueDay?: number,
-      leaseStartDate?: string
-    ) => {
-      const now = new Date();
-      const leaseStart = leaseStartDate ? new Date(`${leaseStartDate}T00:00:00.000Z`) : null;
-      const fallbackDay = Number.isFinite(paymentDueDay)
-        ? Number(paymentDueDay)
-        : leaseStart && !Number.isNaN(leaseStart.getTime())
-          ? leaseStart.getUTCDate()
-          : now.getUTCDate();
-      const lastDayOfMonth = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)
-      ).getUTCDate();
-      const dueDay = Math.min(Math.max(Math.trunc(fallbackDay), 1), lastDayOfMonth);
-
-      return new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), dueDay, 0, 0, 0, 0)
-      ).toISOString();
-    };
-
-    const houseSet = new Set(
-      new Set(houseNumbers.map((item) => normalizeHouseNumber(item)).filter(Boolean))
-    );
+    const houseSet = new Set(houseNumbers.map((item) => normalizeHouseNumber(item)).filter(Boolean));
     const meterMap = new Map<
       string,
       {
@@ -3516,6 +4123,414 @@ async function bootstrap() {
         electricityMeterUpdatedAt: meter?.electricityMeterUpdatedAt
       };
     });
+  };
+
+  const listLandlordBuildingSummaries = async (context: {
+    role: string;
+    userSession: Awaited<ReturnType<typeof resolveOptionalUserSession>>;
+  }) => {
+    const visibleBuildings = await listVisibleBuildingsForLandlordContext(context);
+    const residentCountByBuilding = new Map<string, number>();
+    const buildingConfigById = new Map<
+      string,
+      {
+        wifiEnabled?: boolean;
+        wifiAccessMode?: string;
+      }
+    >();
+
+    if (repositoryContext.prisma && visibleBuildings.length > 0) {
+      const buildingIds = visibleBuildings.map((item) => item.id);
+      const activeTenancies = await repositoryContext.prisma.tenancy.findMany({
+        where: {
+          active: true,
+          buildingId: {
+            in: buildingIds
+          }
+        },
+        select: {
+          buildingId: true,
+          userId: true
+        }
+      });
+
+      const userSetByBuilding = new Map<string, Set<string>>();
+      for (const tenancy of activeTenancies) {
+        const set = userSetByBuilding.get(tenancy.buildingId) ?? new Set<string>();
+        set.add(tenancy.userId);
+        userSetByBuilding.set(tenancy.buildingId, set);
+      }
+
+      userSetByBuilding.forEach((set, buildingId) => {
+        residentCountByBuilding.set(buildingId, set.size);
+      });
+
+      if (buildingConfigurationService) {
+        await buildingConfigurationService.ensureDefaultsForBuildings(visibleBuildings);
+        const configs = await buildingConfigurationService.listForBuildings(buildingIds);
+        configs.forEach((config) => {
+          buildingConfigById.set(config.buildingId, config);
+        });
+      }
+    }
+
+    return visibleBuildings
+      .map((item) => ({
+        wifiEnabled: buildingConfigById.get(item.id)?.wifiEnabled ?? false,
+        wifiAccessMode: buildingConfigById.get(item.id)?.wifiAccessMode ?? "disabled",
+        id: item.id,
+        name: item.name,
+        address: item.address,
+        county: item.county,
+        cctvStatus: item.cctvStatus,
+        units: item.units,
+        houseNumbers: item.houseNumbers ?? [],
+        media: item.media,
+        residentUsers: residentCountByBuilding.get(item.id) ?? 0,
+        updatedAt: item.updatedAt
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  };
+
+  const listLandlordResidentDirectoryRows = async (
+    buildings: Array<{ id: string; name: string; houseNumbers?: string[] }>
+  ) => {
+    if (buildings.length === 0) {
+      return [];
+    }
+
+    const rowsByBuilding = await Promise.all(
+      buildings.map(async (building) => ({
+        building,
+        rows: await buildLandlordUtilityRegistryRows(
+          building.id,
+          building.houseNumbers ?? []
+        )
+      }))
+    );
+
+    return rowsByBuilding.flatMap(({ building, rows }) =>
+      rows.map((row) => ({
+        ...row,
+        buildingId: building.id,
+        buildingName: building.name
+      }))
+    );
+  };
+
+  const listLandlordRentCollectionStatusRows = async (
+    visibleBuildingIds: Set<string>,
+    limit: number
+  ) => {
+    const ledgerRows: Array<{
+      buildingId: string;
+      houseNumber: string;
+      paymentStatus: string;
+      monthlyRentKsh: number;
+      balanceKsh: number;
+      paidAmountKsh: number;
+      totalPaidKsh: number;
+      dueDate: string;
+      latestPaymentReference?: string;
+      latestPaymentAt?: string;
+      latestPaymentAmountKsh?: number;
+    }> = rentLedgerService
+      .listCollectionStatus(limit)
+      .filter((item) => visibleBuildingIds.has(item.buildingId))
+      .filter((item) => paymentAccessService.isEnabled(item.buildingId, "rent"))
+      .map((item) => ({
+        buildingId: item.buildingId,
+        houseNumber: item.houseNumber,
+        paymentStatus: item.paymentStatus.toUpperCase(),
+        monthlyRentKsh: item.monthlyRentKsh,
+        balanceKsh: item.balanceKsh,
+        paidAmountKsh: item.paidAmountKsh,
+        totalPaidKsh: item.totalPaidKsh,
+        dueDate: item.dueDate,
+        latestPaymentReference: item.latestPaymentReference,
+        latestPaymentAt: item.latestPaymentAt,
+        latestPaymentAmountKsh: item.latestPaymentAmountKsh
+      }));
+    const collectionRowsByKey = new Map(
+      ledgerRows.map((item) => [
+        `${normalizeBuildingId(item.buildingId)}:${normalizeHouseNumber(item.houseNumber)}`,
+        item
+      ])
+    );
+
+    if (repositoryContext.prisma && visibleBuildingIds.size > 0) {
+      const agreementRows = await repositoryContext.prisma.tenantAgreement.findMany({
+        where: {
+          buildingId: {
+            in: [...visibleBuildingIds]
+          },
+          monthlyRentKsh: {
+            gt: 0
+          },
+          tenancy: {
+            active: true,
+            unit: {
+              isActive: true
+            }
+          }
+        },
+        select: {
+          buildingId: true,
+          houseNumber: true,
+          monthlyRentKsh: true,
+          paymentDueDay: true,
+          leaseStartDate: true,
+          updatedAt: true
+        },
+        orderBy: { updatedAt: "desc" }
+      });
+
+      for (const agreement of agreementRows) {
+        const key = `${normalizeBuildingId(agreement.buildingId)}:${normalizeHouseNumber(
+          agreement.houseNumber
+        )}`;
+        if (collectionRowsByKey.has(key)) {
+          continue;
+        }
+
+        const monthlyRentKsh = Math.max(0, Number(agreement.monthlyRentKsh ?? 0));
+        if (monthlyRentKsh <= 0) {
+          continue;
+        }
+
+        collectionRowsByKey.set(key, {
+          buildingId: agreement.buildingId,
+          houseNumber: normalizeHouseNumber(agreement.houseNumber),
+          paymentStatus: "NOT_PAID",
+          monthlyRentKsh,
+          balanceKsh: monthlyRentKsh,
+          paidAmountKsh: 0,
+          totalPaidKsh: 0,
+          dueDate: buildAgreementFallbackRentDueDate(
+            agreement.paymentDueDay ?? undefined,
+            agreement.leaseStartDate
+          ),
+          latestPaymentReference: undefined,
+          latestPaymentAt: undefined,
+          latestPaymentAmountKsh: undefined
+        });
+      }
+    }
+
+    return [...collectionRowsByKey.values()].slice(0, limit);
+  };
+
+  const buildLandlordStartupPayload = async (context: {
+    role: string;
+    userId?: string;
+    userSession: Awaited<ReturnType<typeof resolveOptionalUserSession>>;
+  }) => {
+    const buildings = await listLandlordBuildingSummaries(context);
+    const visibleBuildingIds = new Set(buildings.map((item) => item.id));
+    const applicationStatus: TenantApplicationStatus = "pending";
+    const registryBuildingId = buildings[0]?.id ?? "";
+    const roomBuildingId = buildings[0]?.id ?? "";
+
+    const applicationsPromise =
+      context.role === "caretaker"
+        ? Promise.resolve([])
+        : (async () => {
+            if (!context.userSession) {
+              throw new Error("Landlord authentication required");
+            }
+            if (!userAccountService) {
+              throw new Error(
+                "User account service unavailable. Database connection is required."
+              );
+            }
+            return userAccountService.listLandlordApplications(
+              context.userSession,
+              applicationStatus
+            );
+          })();
+
+    const residentDirectoryPromise = listLandlordResidentDirectoryRows(buildings);
+    const visibleHouseNumbersPromise = listVisibleHouseNumbersForBuildings(buildings);
+    const ticketsPromise = Promise.resolve(
+      userSupportService
+        .listAllReports({
+          limit: 300
+        })
+        .filter((item) => !visibleBuildingIds.size || visibleBuildingIds.has(item.buildingId))
+    );
+
+    const [applications, rentStatus, residentDirectory, visibleHouseNumbers, tickets] =
+      await Promise.all([
+        applicationsPromise,
+        listLandlordRentCollectionStatusRows(visibleBuildingIds, 1_200),
+        residentDirectoryPromise,
+        visibleHouseNumbersPromise,
+        ticketsPromise
+      ]);
+
+    const paymentAccess = buildings.map((building) => ({
+      ...paymentAccessService.getForBuilding(building.id),
+      buildingName: building.name
+    }));
+    const paymentAccessByBuildingId = new Map(
+      paymentAccess.map((item) => [item.buildingId, item])
+    );
+    const rentEnabledBuildings = buildings.filter(
+      (building) => paymentAccessByBuildingId.get(building.id)?.rentEnabled !== false
+    );
+    const rentPaymentBuildingId = rentEnabledBuildings.some(
+      (building) => building.id === registryBuildingId
+    )
+      ? registryBuildingId
+      : rentEnabledBuildings[0]?.id ?? "";
+    const wifiPackageBuildingId = buildings.find((building) => building.wifiEnabled)?.id ?? "";
+
+    let wifiPackages: unknown[] = [];
+    let wifiPackagesUnavailableReason = "";
+    if (wifiPackageBuildingId) {
+      if (!buildingWifiPackageService) {
+        throw new Error("Wi-Fi package management requires database connection.");
+      }
+
+      await buildingWifiPackageService.ensureDefaultsForBuildings([
+        { id: wifiPackageBuildingId }
+      ]);
+      wifiPackages = await buildingWifiPackageService.listForBuilding(wifiPackageBuildingId);
+    } else {
+      wifiPackagesUnavailableReason =
+        "Wi-Fi is hidden because no building has it enabled.";
+    }
+
+    const registryRows = registryBuildingId
+      ? residentDirectory
+          .filter((item) => item.buildingId === registryBuildingId)
+          .map(({ buildingId: _buildingId, buildingName: _buildingName, ...row }) => row)
+      : [];
+    const utilityBuildingConfiguration =
+      registryBuildingId && buildingConfigurationService
+        ? await buildingConfigurationService.getForBuilding(registryBuildingId)
+        : null;
+    const utilityRateDefaults = registryBuildingId
+      ? getUtilityRateDefaultsForBuilding(registryBuildingId) ?? { buildingId: registryBuildingId }
+      : null;
+    if (utilityRateDefaults && !utilityRateDefaults.buildingId) {
+      utilityRateDefaults.buildingId = registryBuildingId;
+    }
+
+    const meters = registryBuildingId
+      ? utilityBillingService
+          .listMeters({ buildingId: registryBuildingId })
+          .filter((item) => visibleHouseNumbers.has(normalizeHouseNumber(item.houseNumber)))
+      : [];
+    const bills = registryBuildingId
+      ? utilityBillingService
+          .listBills({
+            buildingId: registryBuildingId,
+            limit: 600
+          })
+          .filter((item) => visibleHouseNumbers.has(normalizeHouseNumber(item.houseNumber)))
+      : [];
+    const payments = registryBuildingId
+      ? utilityBillingService
+          .listPayments({
+            buildingId: registryBuildingId,
+            limit: 600
+          })
+          .filter((item) => visibleHouseNumbers.has(normalizeHouseNumber(item.houseNumber)))
+      : [];
+    const expenditures = registryBuildingId
+      ? [...buildingExpenditures.values()]
+          .filter((item) => item.buildingId === normalizeBuildingId(registryBuildingId))
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .slice(0, 500)
+      : [];
+
+    let caretakerRequests: Array<ReturnType<typeof mapCaretakerAccessRequestWithUser>> = [];
+    let caretakers: Array<
+      CaretakerAccessRecord & {
+        user: {
+          id: string;
+          fullName: string;
+          email: string | null;
+          phone: string;
+          role: string;
+          status: string;
+        } | null;
+      }
+    > = [];
+
+    if (registryBuildingId) {
+      if (!repositoryContext.prisma) {
+        throw new Error("Caretaker access management requires database connection.");
+      }
+
+      const pendingRequests = listCaretakerAccessRequests({
+        buildingId: registryBuildingId,
+        status: "pending"
+      });
+      const caretakerRecords = listCaretakerRecordsForBuilding(registryBuildingId);
+      const userIds = [...new Set([
+        ...pendingRequests.map((item) => item.userId),
+        ...caretakerRecords.map((item) => item.userId)
+      ])];
+
+      const users =
+        userIds.length > 0
+          ? await repositoryContext.prisma.housingUser.findMany({
+              where: {
+                id: { in: userIds }
+              },
+              select: {
+                id: true,
+                fullName: true,
+                email: true,
+                phone: true,
+                role: true,
+                status: true
+              }
+            })
+          : [];
+      const userById = new Map(users.map((item) => [item.id, item]));
+
+      caretakerRequests = pendingRequests.map((item) =>
+        mapCaretakerAccessRequestWithUser(item, userById.get(item.userId) ?? null)
+      );
+      caretakers = caretakerRecords.map((item) => ({
+        ...item,
+        user: userById.get(item.userId) ?? null
+      }));
+    }
+
+    return {
+      selection: {
+        roomBuildingId,
+        registryBuildingId,
+        caretakerBuildingId: registryBuildingId,
+        residentsBuildingId: buildings.length > 0 ? "all" : "",
+        overviewRoomBuildingId: "all",
+        ticketBuildingId: "",
+        wifiPackageBuildingId,
+        rentPaymentBuildingId
+      },
+      buildings,
+      applications,
+      pendingApplicationsCount: applications.length,
+      rentStatus,
+      paymentAccess,
+      wifiPackages,
+      wifiPackagesUnavailableReason,
+      caretakerRequests,
+      caretakers,
+      tickets,
+      residentDirectory,
+      registryRows,
+      utilityBuildingConfiguration,
+      utilityRateDefaults,
+      meters,
+      bills,
+      payments,
+      expenditures
+    };
   };
 
   const persistUtilityBillingStateNow = async () => {
@@ -4399,6 +5414,18 @@ async function bootstrap() {
 
       const houseNumber = parsed.houseNumber.trim().toUpperCase();
       const phoneNumber = normalizeKenyaPhone(parsed.phoneNumber);
+      const hasMatchingTenancy = await userAccountService.hasActiveResidentTenancy({
+        buildingId: parsed.buildingId,
+        houseNumber,
+        phoneNumber
+      });
+
+      if (!hasMatchingTenancy) {
+        return res.status(404).json({
+          error: "Active tenancy not found for the provided building, house number, and phone."
+        });
+      }
+
       const recoveryKey = `${parsed.buildingId}:${houseNumber}:${phoneNumber}`;
       const now = Date.now();
       const rateSnapshot = passwordRecoveryRateWindow.get(recoveryKey);
@@ -5286,6 +6313,31 @@ async function bootstrap() {
     }
   });
 
+  app.get("/api/landlord/startup", async (req, res, next) => {
+    try {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) {
+        return;
+      }
+
+      const data = await buildLandlordStartupPayload(context);
+      return res.json({ data, role: context.role });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to load landlord data.";
+      if (message === "Landlord authentication required") {
+        return res.status(401).json({ error: message });
+      }
+      if (
+        message.includes("database connection") ||
+        message.includes("Database connection") ||
+        message.includes("unavailable")
+      ) {
+        return res.status(503).json({ error: message });
+      }
+      return next(error);
+    }
+  });
+
   app.get("/api/landlord/buildings", async (req, res, next) => {
     try {
       const context = await resolveLandlordAccessContext(req, res);
@@ -5293,62 +6345,7 @@ async function bootstrap() {
         return;
       }
 
-      const visibleBuildings = await listVisibleBuildingsForLandlordContext(context);
-      const residentCountByBuilding = new Map<string, number>();
-      const buildingConfigById = new Map();
-
-      if (repositoryContext.prisma && visibleBuildings.length > 0) {
-        const buildingIds = visibleBuildings.map((item) => item.id);
-        const activeTenancies = await repositoryContext.prisma.tenancy.findMany({
-          where: {
-            active: true,
-            buildingId: {
-              in: buildingIds
-            }
-          },
-          select: {
-            buildingId: true,
-            userId: true
-          }
-        });
-
-        const userSetByBuilding = new Map<string, Set<string>>();
-        for (const tenancy of activeTenancies) {
-          const set = userSetByBuilding.get(tenancy.buildingId) ?? new Set<string>();
-          set.add(tenancy.userId);
-          userSetByBuilding.set(tenancy.buildingId, set);
-        }
-
-        userSetByBuilding.forEach((set, buildingId) => {
-          residentCountByBuilding.set(buildingId, set.size);
-        });
-
-        if (buildingConfigurationService) {
-          await buildingConfigurationService.ensureDefaultsForBuildings(visibleBuildings);
-          const configs = await buildingConfigurationService.listForBuildings(buildingIds);
-          configs.forEach((config) => {
-            buildingConfigById.set(config.buildingId, config);
-          });
-        }
-      }
-
-      const data = visibleBuildings
-        .map((item) => ({
-          wifiEnabled: buildingConfigById.get(item.id)?.wifiEnabled ?? false,
-          wifiAccessMode: buildingConfigById.get(item.id)?.wifiAccessMode ?? "disabled",
-          id: item.id,
-          name: item.name,
-          address: item.address,
-          county: item.county,
-          cctvStatus: item.cctvStatus,
-          units: item.units,
-          houseNumbers: item.houseNumbers ?? [],
-          media: item.media,
-          residentUsers: residentCountByBuilding.get(item.id) ?? 0,
-          updatedAt: item.updatedAt
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name));
-
+      const data = await listLandlordBuildingSummaries(context);
       return res.json({ data, role: context.role });
     } catch (error) {
       return next(error);
@@ -5524,6 +6521,11 @@ async function bootstrap() {
             caretakerEnabled: parsed.caretakerEnabled,
             expenditureTrackingEnabled: parsed.expenditureTrackingEnabled,
             utilityBillingMode: parsed.utilityBillingMode,
+            defaultWaterRatePerUnitKsh: parsed.defaultWaterRatePerUnitKsh,
+            defaultElectricityRatePerUnitKsh: parsed.defaultElectricityRatePerUnitKsh,
+            defaultWaterFixedChargeKsh: parsed.defaultWaterFixedChargeKsh,
+            defaultElectricityFixedChargeKsh: parsed.defaultElectricityFixedChargeKsh,
+            defaultCombinedUtilityChargeKsh: parsed.defaultCombinedUtilityChargeKsh,
             utilityBalanceVisibleDays: parsed.utilityBalanceVisibleDays,
             rentGraceDays: parsed.rentGraceDays,
             allowManualRentPosting: parsed.allowManualRentPosting,
@@ -5550,9 +6552,7 @@ async function bootstrap() {
             userId: context.userId
           }
         );
-        utilityBillingService.setCombinedChargeBuildingIds(
-          await buildingConfigurationService.listCombinedChargeBuildingIds()
-        );
+        await syncDerivedBuildingConfigurationState();
 
         return res.json({
           data: {
@@ -8507,123 +9507,10 @@ async function bootstrap() {
         : 500;
 
       const visibleBuildings = await listVisibleBuildingsForLandlordContext(context);
-      const visibleBuildingIds = new Set(visibleBuildings.map((item) => item.id));
-      const ledgerRows: Array<{
-        buildingId: string;
-        houseNumber: string;
-        paymentStatus: string;
-        monthlyRentKsh: number;
-        balanceKsh: number;
-        paidAmountKsh: number;
-        totalPaidKsh: number;
-        dueDate: string;
-        latestPaymentReference?: string;
-        latestPaymentAt?: string;
-        latestPaymentAmountKsh?: number;
-      }> = rentLedgerService
-        .listCollectionStatus(limit)
-        .filter((item) => visibleBuildingIds.has(item.buildingId))
-        .filter((item) => paymentAccessService.isEnabled(item.buildingId, "rent"))
-        .map((item) => ({
-          buildingId: item.buildingId,
-          houseNumber: item.houseNumber,
-          paymentStatus: item.paymentStatus.toUpperCase(),
-          monthlyRentKsh: item.monthlyRentKsh,
-          balanceKsh: item.balanceKsh,
-          paidAmountKsh: item.paidAmountKsh,
-          totalPaidKsh: item.totalPaidKsh,
-          dueDate: item.dueDate,
-          latestPaymentReference: item.latestPaymentReference,
-          latestPaymentAt: item.latestPaymentAt,
-          latestPaymentAmountKsh: item.latestPaymentAmountKsh
-        }));
-      const collectionRowsByKey = new Map(
-        ledgerRows.map((item) => [
-          `${normalizeBuildingId(item.buildingId)}:${normalizeHouseNumber(item.houseNumber)}`,
-          item
-        ])
+      const data = await listLandlordRentCollectionStatusRows(
+        new Set(visibleBuildings.map((item) => item.id)),
+        limit
       );
-
-      if (repositoryContext.prisma && visibleBuildingIds.size > 0) {
-        const buildAgreementFallbackRentDueDate = (
-          paymentDueDay?: number,
-          leaseStartDate?: Date | null
-        ) => {
-          const now = new Date();
-          const fallbackDay = Number.isFinite(paymentDueDay)
-            ? Number(paymentDueDay)
-            : leaseStartDate instanceof Date && !Number.isNaN(leaseStartDate.getTime())
-              ? leaseStartDate.getUTCDate()
-              : now.getUTCDate();
-          const lastDayOfMonth = new Date(
-            Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)
-          ).getUTCDate();
-          const dueDay = Math.min(Math.max(Math.trunc(fallbackDay), 1), lastDayOfMonth);
-
-          return new Date(
-            Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), dueDay, 0, 0, 0, 0)
-          ).toISOString();
-        };
-
-        const agreementRows = await repositoryContext.prisma.tenantAgreement.findMany({
-          where: {
-            buildingId: {
-              in: [...visibleBuildingIds]
-            },
-            monthlyRentKsh: {
-              gt: 0
-            },
-            tenancy: {
-              active: true,
-              unit: {
-                isActive: true
-              }
-            }
-          },
-          select: {
-            buildingId: true,
-            houseNumber: true,
-            monthlyRentKsh: true,
-            paymentDueDay: true,
-            leaseStartDate: true,
-            updatedAt: true
-          },
-          orderBy: { updatedAt: "desc" }
-        });
-
-        for (const agreement of agreementRows) {
-          const key = `${normalizeBuildingId(agreement.buildingId)}:${normalizeHouseNumber(
-            agreement.houseNumber
-          )}`;
-          if (collectionRowsByKey.has(key)) {
-            continue;
-          }
-
-          const monthlyRentKsh = Math.max(0, Number(agreement.monthlyRentKsh ?? 0));
-          if (monthlyRentKsh <= 0) {
-            continue;
-          }
-
-          collectionRowsByKey.set(key, {
-            buildingId: agreement.buildingId,
-            houseNumber: normalizeHouseNumber(agreement.houseNumber),
-            paymentStatus: "NOT_PAID",
-            monthlyRentKsh,
-            balanceKsh: monthlyRentKsh,
-            paidAmountKsh: 0,
-            totalPaidKsh: 0,
-            dueDate: buildAgreementFallbackRentDueDate(
-              agreement.paymentDueDay ?? undefined,
-              agreement.leaseStartDate
-            ),
-            latestPaymentReference: undefined,
-            latestPaymentAt: undefined,
-            latestPaymentAmountKsh: undefined
-          });
-        }
-      }
-
-      const data = [...collectionRowsByKey.values()].slice(0, limit);
 
       return res.json({
         data,
@@ -8989,6 +9876,231 @@ async function bootstrap() {
   );
 
   app.get(
+    "/api/landlord/buildings/:buildingId/utility-bulk-audits",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) {
+          return;
+        }
+
+        if (!appStateService) {
+          return res.status(503).json({
+            error: "Bulk utility audit requires database connection."
+          });
+        }
+
+        const buildingId = req.params.buildingId?.trim();
+        const building = buildingId ? await store.getBuilding(buildingId) : null;
+        if (!building) {
+          return res.status(404).json({ error: "Building not found" });
+        }
+
+        const hasAccess = await canManageBuildingFromLandlordContext(
+          context,
+          building.id
+        );
+        if (!hasAccess) {
+          return res.status(403).json({ error: "Building access denied" });
+        }
+
+        const requestedLimit =
+          typeof req.query.limit === "string" ? Number(req.query.limit) : 20;
+        const data = await listUtilityBulkSubmissionAudits(building.id, requestedLimit);
+
+        return res.json({ data, role: context.role });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
+  app.post(
+    "/api/landlord/buildings/:buildingId/utility-bulk-audits",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) {
+          return;
+        }
+
+        if (!appStateService) {
+          return res.status(503).json({
+            error: "Bulk utility audit requires database connection."
+          });
+        }
+
+        const buildingId = req.params.buildingId?.trim();
+        const building = buildingId ? await store.getBuilding(buildingId) : null;
+        if (!building) {
+          return res.status(404).json({ error: "Building not found" });
+        }
+
+        const hasAccess = await canManageBuildingFromLandlordContext(
+          context,
+          building.id
+        );
+        if (!hasAccess) {
+          return res.status(403).json({ error: "Building access denied" });
+        }
+
+        const parsed = landlordUtilityBulkSubmissionAuditCreateSchema.parse(req.body ?? {});
+        const data = await createUtilityBulkSubmissionAudit(building, parsed, {
+          role: context.role,
+          userId: context.userId
+        });
+
+        return res.status(201).json({ data, role: context.role });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
+  app.patch(
+    "/api/landlord/buildings/:buildingId/utility-bulk-audits/:auditId",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) {
+          return;
+        }
+
+        if (!appStateService) {
+          return res.status(503).json({
+            error: "Bulk utility audit requires database connection."
+          });
+        }
+
+        const buildingId = req.params.buildingId?.trim();
+        const building = buildingId ? await store.getBuilding(buildingId) : null;
+        if (!building) {
+          return res.status(404).json({ error: "Building not found" });
+        }
+
+        const hasAccess = await canManageBuildingFromLandlordContext(
+          context,
+          building.id
+        );
+        if (!hasAccess) {
+          return res.status(403).json({ error: "Building access denied" });
+        }
+
+        const auditId = String(req.params.auditId ?? "").trim();
+        if (!auditId) {
+          return res.status(400).json({ error: "Audit ID is required." });
+        }
+
+        const parsed = landlordUtilityBulkSubmissionAuditFinalizeSchema.parse(
+          req.body ?? {}
+        );
+        const data = await finalizeUtilityBulkSubmissionAudit(
+          building.id,
+          auditId,
+          parsed
+        );
+        if (!data) {
+          return res.status(404).json({ error: "Bulk utility audit not found" });
+        }
+
+        return res.json({ data, role: context.role });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
+  app.get(
+    "/api/landlord/buildings/:buildingId/utility-bulk-audits/:auditId/export.csv",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) {
+          return;
+        }
+
+        if (!appStateService) {
+          return res.status(503).json({
+            error: "Bulk utility audit requires database connection."
+          });
+        }
+
+        const buildingId = req.params.buildingId?.trim();
+        const building = buildingId ? await store.getBuilding(buildingId) : null;
+        if (!building) {
+          return res.status(404).json({ error: "Building not found" });
+        }
+
+        const hasAccess = await canManageBuildingFromLandlordContext(
+          context,
+          building.id
+        );
+        if (!hasAccess) {
+          return res.status(403).json({ error: "Building access denied" });
+        }
+
+        const auditId = String(req.params.auditId ?? "").trim();
+        if (!auditId) {
+          return res.status(400).json({ error: "Audit ID is required." });
+        }
+
+        const data = await getUtilityBulkSubmissionAudit(building.id, auditId);
+        if (!data) {
+          return res.status(404).json({ error: "Bulk utility audit not found" });
+        }
+
+        const filename = [
+          "captyn-housing",
+          normalizeBuildingId(building.id).toLowerCase(),
+          data.billingMonth,
+          "bulk-utility-audit.csv"
+        ].join("-");
+        res.setHeader("content-type", "text/csv; charset=utf-8");
+        res.setHeader("content-disposition", `attachment; filename="${filename}"`);
+        return res.send(buildUtilityBulkSubmissionAuditCsv(data));
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
+  app.get(
+    "/api/landlord/resident-directory",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) {
+          return;
+        }
+
+        const requestedBuildingId = String(req.query.buildingId ?? "").trim();
+        let buildings = await listVisibleBuildingsForLandlordContext(context);
+
+        if (requestedBuildingId) {
+          const building = buildings.find((item) => item.id === requestedBuildingId);
+          if (!building) {
+            const existingBuilding = await store.getBuilding(requestedBuildingId);
+            return res
+              .status(existingBuilding ? 403 : 404)
+              .json({ error: existingBuilding ? "Building access denied" : "Building not found" });
+          }
+
+          buildings = [building];
+        }
+
+        const data = await listLandlordResidentDirectoryRows(buildings);
+
+        return res.json({
+          data,
+          role: context.role
+        });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
+  app.get(
     "/api/landlord/buildings/:buildingId/utility-registry",
     async (req, res, next) => {
       try {
@@ -9016,6 +10128,9 @@ async function bootstrap() {
           building.houseNumbers ?? []
         );
         const rateDefaults = getUtilityRateDefaultsForBuilding(building.id);
+        const buildingConfiguration = buildingConfigurationService
+          ? await buildingConfigurationService.getForBuilding(building.id)
+          : null;
 
         return res.json({
           data,
@@ -9023,6 +10138,7 @@ async function bootstrap() {
             id: building.id,
             name: building.name
           },
+          buildingConfiguration,
           rateDefaults,
           role: context.role
         });
@@ -9119,18 +10235,22 @@ async function bootstrap() {
 
         await upsertHouseholdMembersForBuilding(building.id, householdMemberRows);
         upsertUtilityChargeDefaultsForBuilding(building.id, utilityChargeRows);
-        upsertUtilityRateDefaultsForBuilding(building.id, rateDefaults ?? {});
+        await upsertUtilityRateDefaultsForBuilding(building.id, rateDefaults ?? {});
         await persistUtilityBillingStateNow();
 
         const data = await buildLandlordUtilityRegistryRows(
           building.id,
           building.houseNumbers ?? []
         );
+        const buildingConfiguration = buildingConfigurationService
+          ? await buildingConfigurationService.getForBuilding(building.id)
+          : null;
 
         return res.json({
           data,
           updatedRows: parsed.rows.length,
           touchedHouses: [...touchedHouses].sort(compareHouseNumbers),
+          buildingConfiguration,
           rateDefaults: getUtilityRateDefaultsForBuilding(building.id),
           role: context.role
         });
@@ -9239,7 +10359,6 @@ async function bootstrap() {
         if (!visibleHouseNumbers.has(normalizeHouseNumber(houseNumber))) {
           return res.status(403).json({ error: "House access denied" });
         }
-        const parsed = createUtilityBillSchema.parse(req.body);
         const buildingId =
           typeof req.body?.buildingId === "string"
             ? req.body.buildingId
@@ -9247,17 +10366,19 @@ async function bootstrap() {
               ? req.query.buildingId
               : "";
 
-        const resolved = applyUtilityRateDefaults(
-          utilityType,
-          buildingId,
-          houseNumber,
-          parsed
+        const parsed = createUtilityBillSchema.parse(
+          applyUtilityBillDefaults(
+            utilityType,
+            buildingId,
+            houseNumber,
+            req.body ?? {}
+          )
         );
         const data = utilityBillingService.createBill(
           utilityType,
           buildingId,
           houseNumber,
-          resolved
+          parsed
         );
         await persistUtilityBillingStateNow();
         return res.status(201).json({ data, role: context.role });
@@ -9292,6 +10413,10 @@ async function bootstrap() {
               houseNumber: req.query.houseNumber
             }).houseNumber
           : undefined;
+      const billingMonth =
+        typeof req.query.billingMonth === "string"
+          ? billingMonthSchema.parse(req.query.billingMonth)
+          : undefined;
       const buildingId =
         typeof req.query.buildingId === "string" ? req.query.buildingId : undefined;
       if (houseNumber && !visibleHouseNumbers.has(normalizeHouseNumber(houseNumber))) {
@@ -9307,6 +10432,7 @@ async function bootstrap() {
         utilityType,
         buildingId,
         houseNumber,
+        billingMonth,
         limit
       });
       const filtered = data.filter((item) =>
@@ -9497,7 +10623,6 @@ async function bootstrap() {
       const { houseNumber } = houseNumberQuerySchema.parse({
         houseNumber: req.params.houseNumber
       });
-      const parsed = createUtilityBillSchema.parse(req.body);
       const buildingId =
         typeof req.body?.buildingId === "string"
           ? req.body.buildingId
@@ -9505,17 +10630,19 @@ async function bootstrap() {
             ? req.query.buildingId
             : "";
 
-      const resolved = applyUtilityRateDefaults(
-        utilityType,
-        buildingId,
-        houseNumber,
-        parsed
+      const parsed = createUtilityBillSchema.parse(
+        applyUtilityBillDefaults(
+          utilityType,
+          buildingId,
+          houseNumber,
+          req.body ?? {}
+        )
       );
       const data = utilityBillingService.createBill(
         utilityType,
         buildingId,
         houseNumber,
-        resolved
+        parsed
       );
       await persistUtilityBillingStateNow();
       return res.status(201).json({ data, role: admin.role });

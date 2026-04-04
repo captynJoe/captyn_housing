@@ -37,4 +37,22 @@ export class AppStateService {
     this.writeChains.set(key, next);
     return next;
   }
+
+  queueUpdateJson<T>(key: string, updater: (current: T | null) => T): Promise<T> {
+    const previous = this.writeChains.get(key) ?? Promise.resolve();
+    let result: T | undefined;
+
+    const next = previous
+      .catch(() => {
+        // Keep queue alive after an earlier failure.
+      })
+      .then(async () => {
+        const current = await this.getJson<T>(key);
+        result = updater(current);
+        await this.setJson(key, result);
+      });
+
+    this.writeChains.set(key, next);
+    return next.then(() => result as T);
+  }
 }

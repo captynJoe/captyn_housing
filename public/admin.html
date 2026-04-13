@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CAPTYN Housing Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/admin.css?v=20260404c" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="tag">CAPTYN Housing</p>
+          <h1>Platform Admin</h1>
+          <p class="subtitle">
+            Building registry, landlord access, password recovery, and ownership oversight across
+            the full housing portfolio.
+          </p>
+          <p id="auth-status" class="status-text">Checking admin session...</p>
+        </div>
+        <div class="action-row">
+          <a href="/landlord" class="home-link">Landlord Portal</a>
+          <a href="/resident" class="home-link">Resident Portal</a>
+          <span id="admin-role" class="status-text">role: -</span>
+          <button id="refresh-all-btn" type="button">Refresh All</button>
+          <button id="admin-logout-btn" type="button">Sign Out</button>
+        </div>
+      </header>
+
+      <section class="panel metrics-panel">
+        <div class="panel-head">
+          <h2>Portfolio Overview</h2>
+        </div>
+        <div class="metrics-grid">
+          <article class="metric-card">
+            <p>Buildings</p>
+            <strong id="metric-buildings">-</strong>
+          </article>
+          <article class="metric-card">
+            <p>Active Landlords</p>
+            <strong id="metric-active-landlords">-</strong>
+          </article>
+          <article class="metric-card">
+            <p>Unassigned Buildings</p>
+            <strong id="metric-unassigned-buildings">-</strong>
+          </article>
+          <article class="metric-card">
+            <p>Pending Landlord Access</p>
+            <strong id="metric-pending-landlord-access">-</strong>
+          </article>
+          <article class="metric-card">
+            <p>Resident Recoveries</p>
+            <strong id="metric-resident-recovery">-</strong>
+          </article>
+          <article class="metric-card">
+            <p>Account Recoveries</p>
+            <strong id="metric-account-recovery">-</strong>
+          </article>
+        </div>
+        <p id="platform-summary" class="panel-note">
+          Platform coverage is loading.
+        </p>
+      </section>
+
+      <section class="layout">
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Platform Role Boundaries</h2>
+          </div>
+          <p class="panel-note">
+            Admin owns platform governance only: building registry, landlord access, ownership
+            assignment, and password recovery.
+          </p>
+          <p class="status-text">
+            Complaints, room issues, theft cases, utility billing, rent collection, and Wi-Fi
+            operations stay with the landlord who owns the specific building. Those workflows now
+            belong in the <a href="/landlord" class="home-link">Landlord Portal</a>.
+          </p>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Landlord Access Approvals</h2>
+            <button id="refresh-landlord-access" type="button">Refresh</button>
+          </div>
+          <p class="panel-note">
+            Tenants request landlord access by email. Approve after ownership verification.
+            Approved landlords can also be revoked here.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Requested</th>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Phone</th>
+                  <th>Status</th>
+                  <th>Reason</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="landlord-access-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Resident Password Recovery</h2>
+            <button id="refresh-password-recovery" type="button">Refresh</button>
+          </div>
+          <p class="panel-note">
+            Residents submit forgot-password requests with building, house, and phone. Verify
+            identity before issuing a temporary password.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Requested</th>
+                  <th>Building</th>
+                  <th>House</th>
+                  <th>Phone</th>
+                  <th>Status</th>
+                  <th>Resident Note</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="password-recovery-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Account Password Recovery</h2>
+            <button id="refresh-account-password-recovery" type="button">Refresh</button>
+          </div>
+          <p class="panel-note">
+            Landlord-side account recovery is reviewed here. Issue temporary passwords only after
+            identity verification.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Requested</th>
+                  <th>Name</th>
+                  <th>Role</th>
+                  <th>Identifier</th>
+                  <th>Status</th>
+                  <th>User Note</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="account-password-recovery-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Landlord Portfolio</h2>
+            <button id="refresh-portfolios" type="button">Refresh</button>
+          </div>
+          <p class="panel-note">
+            Aggregated ownership view for scale. Use this to see how many buildings and tracked
+            units each landlord currently carries.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Landlord</th>
+                  <th>Role</th>
+                  <th>Buildings</th>
+                  <th>Units</th>
+                  <th>Latest Update</th>
+                  <th>Portfolio</th>
+                </tr>
+              </thead>
+              <tbody id="landlord-portfolios-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Ownership Gaps</h2>
+            <button id="refresh-ownership-gaps" type="button">Refresh</button>
+          </div>
+          <p class="panel-note">
+            Buildings without an assigned landlord should be resolved quickly so complaints and
+            resident workflows always have a responsible owner.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Building</th>
+                  <th>County</th>
+                  <th>Units</th>
+                  <th>CCTV</th>
+                  <th>Updated</th>
+                  <th>Next Action</th>
+                </tr>
+              </thead>
+              <tbody id="ownership-gap-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Building Registry</h2>
+            <button id="refresh-buildings" type="button">Refresh</button>
+          </div>
+          <p id="registry-summary" class="panel-note">
+            Registered buildings are loading.
+          </p>
+
+          <form id="building-create-form" class="package-card">
+            <div class="inline-fields compact-fields">
+              <label>
+                Building Name
+                <input
+                  id="building-name"
+                  type="text"
+                  maxlength="120"
+                  placeholder="Nyota Heights"
+                  required
+                />
+              </label>
+              <label>
+                County
+                <input
+                  id="building-county"
+                  type="text"
+                  maxlength="80"
+                  placeholder="Nairobi"
+                  required
+                />
+              </label>
+            </div>
+
+            <label>
+              Address
+              <input
+                id="building-address"
+                type="text"
+                maxlength="200"
+                placeholder="Mirema Drive, Nairobi"
+                required
+              />
+            </label>
+
+            <div class="inline-fields compact-fields">
+              <label>
+                Units (optional)
+                <input id="building-units" type="number" min="1" placeholder="24" />
+              </label>
+              <label>
+                CCTV Status
+                <select id="building-cctv-status" required>
+                  <option value="none">none</option>
+                  <option value="partial">partial</option>
+                  <option value="verified">verified</option>
+                </select>
+              </label>
+            </div>
+
+            <button type="submit">Add Building</button>
+          </form>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Name</th>
+                  <th>County</th>
+                  <th>Address</th>
+                  <th>Units</th>
+                  <th>Landlord Owner</th>
+                  <th>CCTV</th>
+                  <th>Updated</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="buildings-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="admin-error" class="error-box hidden"></section>
+    </main>
+
+    <script type="module" src="/admin.js?v=20260404c"></script>
+  </body>
+</html>

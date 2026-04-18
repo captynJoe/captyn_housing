@@ -41,13 +41,59 @@ const buildingUnitsEl = document.getElementById("building-units");
 const buildingCctvStatusEl = document.getElementById("building-cctv-status");
 const buildingsBodyEl = document.getElementById("buildings-body");
 const refreshBuildingsBtn = document.getElementById("refresh-buildings");
+const adminBillingBuildingSelectEl = document.getElementById(
+  "admin-billing-building-select"
+);
+const refreshAdminBillingBtnEl = document.getElementById("refresh-admin-billing");
+const adminBillingSummaryEl = document.getElementById("admin-billing-summary");
+const adminMonthlyCombinedChargeFormEl = document.getElementById(
+  "admin-monthly-combined-charge-form"
+);
+const adminMonthlyCombinedChargeMonthEl = document.getElementById(
+  "admin-monthly-combined-charge-month"
+);
+const adminMonthlyCombinedChargeAmountEl = document.getElementById(
+  "admin-monthly-combined-charge-amount"
+);
+const adminUtilityRegistryBodyEl = document.getElementById("admin-utility-registry-body");
+const adminUtilityBillFormEl = document.getElementById("admin-utility-bill-form");
+const adminUtilityBillTypeEl = document.getElementById("admin-utility-bill-type");
+const adminUtilityBillHouseEl = document.getElementById("admin-utility-bill-house");
+const adminUtilityBillMonthEl = document.getElementById("admin-utility-bill-month");
+const adminUtilityBillDueDateEl = document.getElementById("admin-utility-bill-due-date");
+const adminUtilityBillFixedChargeEl = document.getElementById(
+  "admin-utility-bill-fixed-charge"
+);
+const adminUtilityBillPreviousReadingEl = document.getElementById(
+  "admin-utility-bill-previous-reading"
+);
+const adminUtilityBillCurrentReadingEl = document.getElementById(
+  "admin-utility-bill-current-reading"
+);
+const adminUtilityBillRateEl = document.getElementById("admin-utility-bill-rate");
+const adminUtilityBillNoteEl = document.getElementById("admin-utility-bill-note");
+const adminUtilityPaymentFormEl = document.getElementById("admin-utility-payment-form");
+const adminUtilityPaymentTypeEl = document.getElementById("admin-utility-payment-type");
+const adminUtilityPaymentHouseEl = document.getElementById("admin-utility-payment-house");
+const adminUtilityPaymentMonthEl = document.getElementById("admin-utility-payment-month");
+const adminUtilityPaymentAmountEl = document.getElementById("admin-utility-payment-amount");
+const adminUtilityPaymentProviderEl = document.getElementById("admin-utility-payment-provider");
+const adminUtilityPaymentPaidAtEl = document.getElementById("admin-utility-payment-paid-at");
+const adminUtilityPaymentReferenceEl = document.getElementById(
+  "admin-utility-payment-reference"
+);
+const adminUtilityPaymentNoteEl = document.getElementById("admin-utility-payment-note");
+const adminUtilityPaymentsBodyEl = document.getElementById("admin-utility-payments-body");
 
 const adminErrorEl = document.getElementById("admin-error");
 
 const state = {
   role: "-",
   overview: null,
-  buildings: []
+  buildings: [],
+  selectedAdminBillingBuildingId: "",
+  adminBillingRegistryRows: [],
+  adminUtilityPayments: []
 };
 
 initResponsiveTables();
@@ -90,6 +136,92 @@ function formatDateTime(value) {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(date);
+}
+
+function formatCurrency(value) {
+  return `KSh ${Number(value ?? 0).toLocaleString("en-US")}`;
+}
+
+function currentBillingMonth() {
+  const now = new Date();
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function toBillingMonth(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  return raw.slice(0, 7);
+}
+
+function formatBillingMonth(value) {
+  const normalized = toBillingMonth(value);
+  if (!normalized) {
+    return "-";
+  }
+
+  const date = new Date(`${normalized}-01T00:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    return normalized;
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    year: "numeric"
+  }).format(date);
+}
+
+function toOptionalNumber(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return undefined;
+  }
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function toIsoFromDateTimeLocal(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return undefined;
+  }
+
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) {
+    return undefined;
+  }
+
+  return date.toISOString();
+}
+
+function numberToInputString(value) {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed)) {
+    return "";
+  }
+
+  return parsed % 1 === 0 ? String(Math.trunc(parsed)) : String(parsed);
+}
+
+function formatUtilityPaymentCoverage(data, fallbackBillingMonth) {
+  const coveredMonths = Array.isArray(data?.allocations)
+    ? [...new Set(
+        data.allocations
+          .map((item) =>
+            String(item?.bill?.billingMonth ?? item?.event?.billingMonth ?? "").trim()
+          )
+          .filter(Boolean)
+      )]
+    : [];
+  if (coveredMonths.length > 0) {
+    return coveredMonths.map((item) => formatBillingMonth(item)).join(", ");
+  }
+
+  const fallback = String(fallbackBillingMonth ?? "").trim();
+  return fallback ? formatBillingMonth(fallback) : "";
 }
 
 function escapeHtml(value) {
@@ -798,6 +930,225 @@ function renderRegistrySummary() {
     `and ${trackedUnits.toLocaleString("en-US")} unit(s) are registered in the platform.`;
 }
 
+function getSelectedAdminBillingBuildingId() {
+  return adminBillingBuildingSelectEl instanceof HTMLSelectElement
+    ? String(adminBillingBuildingSelectEl.value || state.selectedAdminBillingBuildingId || "").trim()
+    : String(state.selectedAdminBillingBuildingId || "").trim();
+}
+
+function renderAdminUtilityPayments(rows) {
+  if (!(adminUtilityPaymentsBodyEl instanceof HTMLElement)) {
+    return;
+  }
+
+  adminUtilityPaymentsBodyEl.replaceChildren();
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    appendEmptyRow(
+      adminUtilityPaymentsBodyEl,
+      8,
+      "No utility payments found for the selected building."
+    );
+    return;
+  }
+
+  rows.forEach((item) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${escapeHtml(item.utilityType)}</td>
+      <td>${escapeHtml(item.houseNumber)}</td>
+      <td>${escapeHtml(formatBillingMonth(item.billingMonth))}</td>
+      <td>${escapeHtml(formatBillingMonth(item.paidAt))}</td>
+      <td>${escapeHtml(item.provider)}</td>
+      <td>${escapeHtml(item.providerReference ?? "-")}</td>
+      <td>${escapeHtml(formatCurrency(item.amountKsh))}</td>
+      <td>${escapeHtml(formatDateTime(item.paidAt))}</td>
+    `;
+    adminUtilityPaymentsBodyEl.append(row);
+  });
+}
+
+function renderAdminUtilityRegistry(rows) {
+  if (!(adminUtilityRegistryBodyEl instanceof HTMLElement)) {
+    return;
+  }
+
+  adminUtilityRegistryBodyEl.replaceChildren();
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    appendEmptyRow(
+      adminUtilityRegistryBodyEl,
+      6,
+      "No rooms found for the selected building."
+    );
+    return;
+  }
+
+  rows
+    .slice()
+    .sort((left, right) => normalizeHouse(left.houseNumber).localeCompare(normalizeHouse(right.houseNumber), undefined, {
+      numeric: true,
+      sensitivity: "base"
+    }))
+    .forEach((item) => {
+      const row = document.createElement("tr");
+      const residentLabel = item.residentName
+        ? `${escapeHtml(item.residentName)}<br /><small>${escapeHtml(item.residentPhone ?? "-")}</small>`
+        : '<small>Vacant</small>';
+      row.innerHTML = `
+        <td>${escapeHtml(item.houseNumber)}</td>
+        <td>${residentLabel}</td>
+        <td><input data-field="waterFixedChargeKsh" type="number" min="0" step="1" value="${escapeHtml(numberToInputString(item.waterFixedChargeKsh))}" /></td>
+        <td><input data-field="electricityFixedChargeKsh" type="number" min="0" step="1" value="${escapeHtml(numberToInputString(item.electricityFixedChargeKsh))}" /></td>
+        <td><input data-field="combinedUtilityChargeKsh" type="number" min="0" step="1" value="${escapeHtml(numberToInputString(item.combinedUtilityChargeKsh))}" /></td>
+        <td>
+          <button type="button" data-action="save-room-billing" data-house-number="${escapeHtml(item.houseNumber)}">
+            Save Room
+          </button>
+        </td>
+      `;
+      adminUtilityRegistryBodyEl.append(row);
+    });
+}
+
+function renderAdminBillingSummary() {
+  if (!(adminBillingSummaryEl instanceof HTMLElement)) {
+    return;
+  }
+
+  const buildingId = getSelectedAdminBillingBuildingId();
+  if (!buildingId) {
+    adminBillingSummaryEl.textContent =
+      "Select a building to manage room-level utility charging, post bills, and record payments from admin.";
+    return;
+  }
+
+  const building = state.buildings.find((item) => item.id === buildingId);
+  const roomCount = Array.isArray(state.adminBillingRegistryRows)
+    ? state.adminBillingRegistryRows.length
+    : 0;
+  const paymentCount = Array.isArray(state.adminUtilityPayments)
+    ? state.adminUtilityPayments.length
+    : 0;
+  adminBillingSummaryEl.textContent =
+    `${building?.name ?? buildingId} (${buildingId}) has ${roomCount} room billing row(s) in view and ${paymentCount} recent utility payment(s) loaded.`;
+}
+
+function syncAdminBillingBuildingOptions() {
+  if (!(adminBillingBuildingSelectEl instanceof HTMLSelectElement)) {
+    return;
+  }
+
+  const currentValue = getSelectedAdminBillingBuildingId();
+  const sortedBuildings = [...state.buildings].sort((left, right) =>
+    `${left.name}:${left.id}`.localeCompare(`${right.name}:${right.id}`)
+  );
+
+  adminBillingBuildingSelectEl.replaceChildren();
+
+  if (sortedBuildings.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No buildings";
+    adminBillingBuildingSelectEl.append(option);
+    state.selectedAdminBillingBuildingId = "";
+    renderAdminUtilityRegistry([]);
+    renderAdminUtilityPayments([]);
+    renderAdminBillingSummary();
+    return;
+  }
+
+  sortedBuildings.forEach((building) => {
+    const option = document.createElement("option");
+    option.value = building.id;
+    option.textContent = `${building.name} (${building.id})`;
+    adminBillingBuildingSelectEl.append(option);
+  });
+
+  state.selectedAdminBillingBuildingId =
+    sortedBuildings.some((item) => item.id === currentValue)
+      ? currentValue
+      : sortedBuildings[0].id;
+  adminBillingBuildingSelectEl.value = state.selectedAdminBillingBuildingId;
+  renderAdminBillingSummary();
+}
+
+async function loadAdminUtilityRegistry() {
+  const buildingId = getSelectedAdminBillingBuildingId();
+  if (!buildingId) {
+    state.adminBillingRegistryRows = [];
+    renderAdminUtilityRegistry([]);
+    renderAdminBillingSummary();
+    return;
+  }
+
+  const payload = await requestJson(
+    `/api/admin/buildings/${encodeURIComponent(buildingId)}/utility-registry`
+  );
+  state.adminBillingRegistryRows = payload.data ?? [];
+  renderAdminUtilityRegistry(state.adminBillingRegistryRows);
+  renderAdminBillingSummary();
+}
+
+async function loadAdminUtilityPayments() {
+  const buildingId = getSelectedAdminBillingBuildingId();
+  if (!buildingId) {
+    state.adminUtilityPayments = [];
+    renderAdminUtilityPayments([]);
+    renderAdminBillingSummary();
+    return;
+  }
+
+  const payload = await requestJson(
+    `/api/admin/utilities/payments?buildingId=${encodeURIComponent(buildingId)}&limit=120`
+  );
+  state.adminUtilityPayments = payload.data ?? [];
+  renderAdminUtilityPayments(state.adminUtilityPayments);
+  renderAdminBillingSummary();
+}
+
+async function loadAdminMonthlyCombinedCharge() {
+  const buildingId = getSelectedAdminBillingBuildingId();
+  const billingMonth = toBillingMonth(adminMonthlyCombinedChargeMonthEl?.value) || currentBillingMonth();
+
+  if (adminMonthlyCombinedChargeMonthEl instanceof HTMLInputElement) {
+    adminMonthlyCombinedChargeMonthEl.value = billingMonth;
+  }
+
+  if (!buildingId) {
+    if (adminMonthlyCombinedChargeAmountEl instanceof HTMLInputElement) {
+      adminMonthlyCombinedChargeAmountEl.value = "";
+    }
+    return;
+  }
+
+  const payload = await requestJson(
+    `/api/admin/buildings/${encodeURIComponent(buildingId)}/monthly-combined-utility-charge?billingMonth=${encodeURIComponent(
+      billingMonth
+    )}`
+  );
+  if (adminMonthlyCombinedChargeAmountEl instanceof HTMLInputElement) {
+    adminMonthlyCombinedChargeAmountEl.value =
+      payload.data?.amountKsh != null ? numberToInputString(payload.data.amountKsh) : "";
+  }
+}
+
+async function loadAdminBillingConsole() {
+  const buildingId = getSelectedAdminBillingBuildingId();
+  if (!buildingId) {
+    renderAdminUtilityRegistry([]);
+    renderAdminUtilityPayments([]);
+    renderAdminBillingSummary();
+    return;
+  }
+
+  await Promise.all([
+    loadAdminUtilityRegistry(),
+    loadAdminUtilityPayments(),
+    loadAdminMonthlyCombinedCharge()
+  ]);
+}
+
 function renderBuildings(rows) {
   if (!(buildingsBodyEl instanceof HTMLElement)) {
     return;
@@ -925,6 +1276,8 @@ async function loadBuildings() {
   renderLandlordPortfolios(state.buildings);
   renderOwnershipGaps(state.buildings);
   renderRegistrySummary();
+  syncAdminBillingBuildingOptions();
+  await loadAdminBillingConsole();
 }
 
 async function loadAdminData() {
@@ -1111,6 +1464,286 @@ if (buildingsBodyEl instanceof HTMLElement) {
     })();
   });
 }
+
+if (adminUtilityRegistryBodyEl instanceof HTMLElement) {
+  adminUtilityRegistryBodyEl.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    if (String(target.dataset.action ?? "") !== "save-room-billing") {
+      return;
+    }
+
+    const buildingId = getSelectedAdminBillingBuildingId();
+    const houseNumber = normalizeHouse(target.dataset.houseNumber);
+    const row = target.closest("tr");
+    if (!buildingId || !houseNumber || !(row instanceof HTMLTableRowElement)) {
+      showError("Select a building and room before saving room billing.");
+      return;
+    }
+
+    const waterInput = row.querySelector('input[data-field="waterFixedChargeKsh"]');
+    const electricityInput = row.querySelector(
+      'input[data-field="electricityFixedChargeKsh"]'
+    );
+    const combinedInput = row.querySelector(
+      'input[data-field="combinedUtilityChargeKsh"]'
+    );
+
+    clearError();
+    target.disabled = true;
+
+    void (async () => {
+      try {
+        await requestJson(
+          `/api/admin/buildings/${encodeURIComponent(buildingId)}/utility-registry`,
+          {
+            method: "PUT",
+            headers: {
+              "content-type": "application/json"
+            },
+            body: JSON.stringify({
+              rows: [
+                {
+                  houseNumber,
+                  waterFixedChargeKsh:
+                    waterInput instanceof HTMLInputElement
+                      ? toOptionalNumber(waterInput.value)
+                      : undefined,
+                  electricityFixedChargeKsh:
+                    electricityInput instanceof HTMLInputElement
+                      ? toOptionalNumber(electricityInput.value)
+                      : undefined,
+                  combinedUtilityChargeKsh:
+                    combinedInput instanceof HTMLInputElement
+                      ? toOptionalNumber(combinedInput.value)
+                      : undefined
+                }
+              ],
+              rateDefaults: {}
+            })
+          }
+        );
+
+        setStatus(`Room billing defaults saved for house ${houseNumber} in ${buildingId}.`);
+        await loadAdminUtilityRegistry();
+      } catch (error) {
+        handleAdminError(error, "Failed to save room billing defaults.");
+      } finally {
+        target.disabled = false;
+      }
+    })();
+  });
+}
+
+if (adminMonthlyCombinedChargeFormEl instanceof HTMLFormElement) {
+  adminMonthlyCombinedChargeFormEl.addEventListener("submit", (event) => {
+    event.preventDefault();
+    clearError();
+
+    const buildingId = getSelectedAdminBillingBuildingId();
+    const billingMonth = toBillingMonth(adminMonthlyCombinedChargeMonthEl?.value);
+    const amountKsh = Number(adminMonthlyCombinedChargeAmountEl?.value);
+
+    if (!buildingId || !billingMonth || !Number.isFinite(amountKsh) || amountKsh <= 0) {
+      showError("Combined utility charge requires building, month, and amount.");
+      return;
+    }
+
+    const submitButton = adminMonthlyCombinedChargeFormEl.querySelector(
+      'button[type="submit"]'
+    );
+    if (submitButton instanceof HTMLButtonElement) {
+      submitButton.disabled = true;
+    }
+
+    void (async () => {
+      try {
+        await requestJson(
+          `/api/admin/buildings/${encodeURIComponent(buildingId)}/monthly-combined-utility-charge`,
+          {
+            method: "PUT",
+            headers: {
+              "content-type": "application/json"
+            },
+            body: JSON.stringify({
+              billingMonth,
+              amountKsh: Math.round(amountKsh),
+              acknowledgeImpact: true
+            })
+          }
+        );
+
+        setStatus(
+          `Monthly combined utility charge saved for ${buildingId} (${formatBillingMonth(
+            billingMonth
+          )}).`
+        );
+        await loadAdminMonthlyCombinedCharge();
+      } catch (error) {
+        handleAdminError(error, "Failed to save monthly combined utility charge.");
+      } finally {
+        if (submitButton instanceof HTMLButtonElement) {
+          submitButton.disabled = false;
+        }
+      }
+    })();
+  });
+}
+
+if (adminUtilityBillFormEl instanceof HTMLFormElement) {
+  adminUtilityBillFormEl.addEventListener("submit", (event) => {
+    event.preventDefault();
+    clearError();
+
+    const buildingId = getSelectedAdminBillingBuildingId();
+    const utilityType = String(adminUtilityBillTypeEl?.value ?? "water");
+    const houseNumber = normalizeHouse(adminUtilityBillHouseEl?.value);
+    const billingMonth = toBillingMonth(adminUtilityBillMonthEl?.value);
+    const dueDate = toIsoFromDateTimeLocal(adminUtilityBillDueDateEl?.value);
+    const payload = {
+      buildingId,
+      billingMonth,
+      dueDate,
+      fixedChargeKsh: toOptionalNumber(adminUtilityBillFixedChargeEl?.value),
+      previousReading: toOptionalNumber(adminUtilityBillPreviousReadingEl?.value),
+      currentReading: toOptionalNumber(adminUtilityBillCurrentReadingEl?.value),
+      ratePerUnitKsh: toOptionalNumber(adminUtilityBillRateEl?.value),
+      note: String(adminUtilityBillNoteEl?.value ?? "").trim() || undefined
+    };
+
+    if (!buildingId || !houseNumber || !billingMonth || !dueDate) {
+      showError("Utility bill requires building, house, month, and due date.");
+      return;
+    }
+
+    const submitButton = adminUtilityBillFormEl.querySelector('button[type="submit"]');
+    if (submitButton instanceof HTMLButtonElement) {
+      submitButton.disabled = true;
+    }
+
+    void (async () => {
+      try {
+        await requestJson(
+          `/api/admin/utilities/${encodeURIComponent(utilityType)}/${encodeURIComponent(houseNumber)}/bills`,
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json"
+            },
+            body: JSON.stringify(payload)
+          }
+        );
+
+        setStatus(
+          `${utilityType} bill posted for house ${houseNumber} (${formatBillingMonth(
+            billingMonth
+          )}) in ${buildingId}.`
+        );
+        if (adminUtilityBillNoteEl instanceof HTMLInputElement) {
+          adminUtilityBillNoteEl.value = "";
+        }
+        await Promise.all([loadAdminUtilityRegistry(), loadAdminUtilityPayments()]);
+      } catch (error) {
+        handleAdminError(error, "Failed to post utility bill.");
+      } finally {
+        if (submitButton instanceof HTMLButtonElement) {
+          submitButton.disabled = false;
+        }
+      }
+    })();
+  });
+}
+
+if (adminUtilityPaymentFormEl instanceof HTMLFormElement) {
+  adminUtilityPaymentFormEl.addEventListener("submit", (event) => {
+    event.preventDefault();
+    clearError();
+
+    const buildingId = getSelectedAdminBillingBuildingId();
+    const utilityType = String(adminUtilityPaymentTypeEl?.value ?? "water");
+    const houseNumber = normalizeHouse(adminUtilityPaymentHouseEl?.value);
+    const payload = {
+      buildingId,
+      billingMonth: toBillingMonth(adminUtilityPaymentMonthEl?.value) || undefined,
+      amountKsh: Number(adminUtilityPaymentAmountEl?.value),
+      provider: String(adminUtilityPaymentProviderEl?.value ?? "cash"),
+      providerReference:
+        String(adminUtilityPaymentReferenceEl?.value ?? "").trim() || undefined,
+      paidAt: toIsoFromDateTimeLocal(adminUtilityPaymentPaidAtEl?.value),
+      note: String(adminUtilityPaymentNoteEl?.value ?? "").trim() || undefined
+    };
+
+    if (!buildingId || !houseNumber || !Number.isFinite(payload.amountKsh) || payload.amountKsh <= 0) {
+      showError("Utility payment requires building, house, and amount.");
+      return;
+    }
+
+    const submitButton = adminUtilityPaymentFormEl.querySelector(
+      'button[type="submit"]'
+    );
+    if (submitButton instanceof HTMLButtonElement) {
+      submitButton.disabled = true;
+    }
+
+    void (async () => {
+      try {
+        const response = await requestJson(
+          `/api/admin/utilities/${encodeURIComponent(utilityType)}/${encodeURIComponent(houseNumber)}/payments`,
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json"
+            },
+            body: JSON.stringify(payload)
+          }
+        );
+        const coverage = formatUtilityPaymentCoverage(response?.data, payload.billingMonth);
+
+        setStatus(
+          `${utilityType} payment recorded for house ${houseNumber}${
+            coverage ? ` covering ${coverage}` : ""
+          }.`
+        );
+        if (adminUtilityPaymentReferenceEl instanceof HTMLInputElement) {
+          adminUtilityPaymentReferenceEl.value = "";
+        }
+        if (adminUtilityPaymentNoteEl instanceof HTMLInputElement) {
+          adminUtilityPaymentNoteEl.value = "";
+        }
+        await Promise.all([loadAdminUtilityRegistry(), loadAdminUtilityPayments()]);
+      } catch (error) {
+        handleAdminError(error, "Failed to record utility payment.");
+      } finally {
+        if (submitButton instanceof HTMLButtonElement) {
+          submitButton.disabled = false;
+        }
+      }
+    })();
+  });
+}
+
+adminBillingBuildingSelectEl?.addEventListener("change", () => {
+  state.selectedAdminBillingBuildingId = getSelectedAdminBillingBuildingId();
+  void loadAdminBillingConsole().catch((error) => {
+    handleAdminError(error, "Unable to refresh admin billing console.");
+  });
+});
+
+refreshAdminBillingBtnEl?.addEventListener("click", () => {
+  state.selectedAdminBillingBuildingId = getSelectedAdminBillingBuildingId();
+  void loadAdminBillingConsole().catch((error) => {
+    handleAdminError(error, "Unable to refresh admin billing console.");
+  });
+});
+
+adminMonthlyCombinedChargeMonthEl?.addEventListener("change", () => {
+  void loadAdminMonthlyCombinedCharge().catch((error) => {
+    handleAdminError(error, "Unable to load monthly combined utility charge.");
+  });
+});
 
 refreshLandlordAccessBtn?.addEventListener("click", () => {
   void loadLandlordAccessRequests().catch((error) => {

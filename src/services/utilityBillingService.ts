@@ -32,6 +32,12 @@ export interface UtilityPaymentEvent {
   createdAt: string;
 }
 
+export interface UtilityPaymentAllocation {
+  event: UtilityPaymentEvent;
+  bill: UtilityBillSnapshot;
+  appliedAmountKsh: number;
+}
+
 interface UtilityBillRecord {
   id: string;
   utilityType: UtilityType;
@@ -74,11 +80,13 @@ export interface UtilityReadingSnapshot {
 export interface RecordUtilityPaymentResult {
   event: UtilityPaymentEvent;
   bill: UtilityBillSnapshot;
+  allocations: UtilityPaymentAllocation[];
+  totalAppliedAmountKsh: number;
 }
 
 interface UtilityPaymentReferenceIndexEntry {
-  event: UtilityPaymentEvent;
-  billId: string;
+  events: UtilityPaymentEvent[];
+  billIds: string[];
 }
 
 export interface UtilityReminderNotification {
@@ -921,11 +929,13 @@ export class UtilityBillingService {
       throw new Error(`No ${utilityType} bills found for house ${normalizedHouse}.`);
     }
 
+    const openBills = [...mergedRecords]
+      .filter((item) => item.balanceKsh > 0)
+      .sort((a, b) => monthSortAsc(a.billingMonth, b.billingMonth));
+
     const target = input.billingMonth
       ? mergedRecords.find((item) => item.billingMonth === input.billingMonth)
-      : [...mergedRecords]
-          .filter((item) => item.balanceKsh > 0)
-          .sort((a, b) => monthSortAsc(a.billingMonth, b.billingMonth))[0];
+      : openBills[0];
 
     if (!target) {
       throw new Error(
@@ -935,51 +945,96 @@ export class UtilityBillingService {
       );
     }
 
+    const candidateBills = input.billingMonth
+      ? [
+          target,
+          ...openBills.filter((item) => item.id !== target.id)
+        ]
+      : openBills;
+
+    const availableBalanceKsh = candidateBills.reduce(
+      (sum, item) => sum + Math.max(0, Math.round(item.balanceKsh)),
+      0
+    );
+    const requestedAmountKsh = Math.round(input.amountKsh);
+
+    if (requestedAmountKsh > availableBalanceKsh) {
+      throw new Error(
+        `Payment is larger than the open ${utilityType} balance for house ${normalizedHouse}.`
+      );
+    }
+
     const normalizedReference = input.providerReference?.trim()
       ? normalizeProviderReference(input.providerReference)
       : undefined;
     if (normalizedReference) {
       const existingReference = this.paymentReferenceIndex.get(normalizedReference);
       if (existingReference) {
-        const existingBill = this.findBillById(existingReference.billId);
-        if (existingBill) {
-          return {
-            event: existingReference.event,
-            bill: this.toSnapshot(existingBill)
-          };
+        const existingResult = this.buildRecordPaymentResult(
+          existingReference.events,
+          existingReference.billIds
+        );
+        if (existingResult) {
+          return existingResult;
         }
       }
     }
 
-    const event: UtilityPaymentEvent = {
-      id: randomUUID(),
-      utilityType,
-      buildingId: target.buildingId,
-      houseNumber: normalizedHouse,
-      billingMonth: target.billingMonth,
-      provider: input.provider,
-      providerReference: normalizedReference,
-      amountKsh: Math.round(input.amountKsh),
-      paidAt: input.paidAt ?? nowIso(),
-      note: input.note?.trim() || undefined,
-      createdAt: nowIso()
-    };
+    const paidAt = input.paidAt ?? nowIso();
+    const createdAt = nowIso();
+    let remainingAmountKsh = requestedAmountKsh;
+    const appliedEvents: UtilityPaymentEvent[] = [];
+    const appliedBillIds: string[] = [];
 
-    target.payments.unshift(event);
-    target.balanceKsh = Math.max(0, target.balanceKsh - event.amountKsh);
-    target.updatedAt = nowIso();
-    if (event.providerReference) {
-      this.paymentReferenceIndex.set(event.providerReference, {
-        event: { ...event },
-        billId: target.id
+    for (const bill of candidateBills) {
+      if (remainingAmountKsh <= 0) {
+        break;
+      }
+
+      const openBalanceKsh = Math.max(0, Math.round(bill.balanceKsh));
+      if (openBalanceKsh <= 0) {
+        continue;
+      }
+
+      const appliedAmountKsh = Math.min(remainingAmountKsh, openBalanceKsh);
+      const event: UtilityPaymentEvent = {
+        id: randomUUID(),
+        utilityType,
+        buildingId: bill.buildingId,
+        houseNumber: normalizedHouse,
+        billingMonth: bill.billingMonth,
+        provider: input.provider,
+        providerReference: normalizedReference,
+        amountKsh: appliedAmountKsh,
+        paidAt,
+        note: input.note?.trim() || undefined,
+        createdAt
+      };
+
+      bill.payments.unshift(event);
+      bill.balanceKsh = Math.max(0, bill.balanceKsh - appliedAmountKsh);
+      bill.updatedAt = createdAt;
+      appliedEvents.push(event);
+      appliedBillIds.push(bill.id);
+      remainingAmountKsh -= appliedAmountKsh;
+    }
+
+    if (normalizedReference) {
+      this.paymentReferenceIndex.set(normalizedReference, {
+        events: appliedEvents.map((event) => ({ ...event })),
+        billIds: [...appliedBillIds]
       });
     }
     this.emitStateChange();
 
-    return {
-      event,
-      bill: this.toSnapshot(target)
-    };
+    const result = this.buildRecordPaymentResult(appliedEvents, appliedBillIds);
+    if (!result) {
+      throw new Error(
+        `Failed to record ${utilityType} payment for house ${normalizedHouse}.`
+      );
+    }
+
+    return result;
   }
 
   collectAutoReminders(
@@ -1147,6 +1202,40 @@ export class UtilityBillingService {
     return null;
   }
 
+  private buildRecordPaymentResult(
+    events: UtilityPaymentEvent[],
+    billIds: string[]
+  ): RecordUtilityPaymentResult | null {
+    const allocations = events
+      .map((event, index) => {
+        const bill = this.findBillById(billIds[index] ?? "");
+        if (!bill) {
+          return null;
+        }
+
+        return {
+          event: { ...event },
+          bill: this.toSnapshot(bill),
+          appliedAmountKsh: event.amountKsh
+        };
+      })
+      .filter((item): item is UtilityPaymentAllocation => item !== null);
+
+    if (allocations.length === 0) {
+      return null;
+    }
+
+    return {
+      event: allocations[0].event,
+      bill: allocations[0].bill,
+      allocations,
+      totalAppliedAmountKsh: allocations.reduce(
+        (sum, item) => sum + item.appliedAmountKsh,
+        0
+      )
+    };
+  }
+
   private normalizeCombinedChargeState(): void {
     this.normalizeBaselineCombinedCharges();
     this.normalizeCombinedMonthlyCharges();
@@ -1163,9 +1252,16 @@ export class UtilityBillingService {
             continue;
           }
 
+          const existing = this.paymentReferenceIndex.get(payment.providerReference);
+          if (existing) {
+            existing.events.push({ ...payment });
+            existing.billIds.push(record.id);
+            continue;
+          }
+
           this.paymentReferenceIndex.set(payment.providerReference, {
-            event: { ...payment },
-            billId: record.id
+            events: [{ ...payment }],
+            billIds: [record.id]
           });
         }
       }

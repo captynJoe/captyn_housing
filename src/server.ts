@@ -4568,6 +4568,9 @@ async function bootstrap() {
       input
     );
     const utilityLabel = utilityType === "water" ? "Water" : "Electricity";
+    const appliedBillingMonths = [...new Set(
+      data.allocations.map((item) => item.bill.billingMonth)
+    )];
     userSupportService.enqueueSystemNotifications(buildingId, houseNumber, [
       {
         title: utilityLabel + " Payment Received",
@@ -4576,8 +4579,9 @@ async function bootstrap() {
           " payment of KSh " +
           Math.round(input.amountKsh).toLocaleString("en-US") +
           " has been applied to your " +
-          data.bill.billingMonth +
-          " bill.",
+          appliedBillingMonths.join(", ") +
+          " bill" +
+          (appliedBillingMonths.length === 1 ? "." : "s."),
         level: "success",
         source: "system",
         dedupeKey: "utility-payment-" + utilityType + "-" + data.event.id
@@ -9493,6 +9497,219 @@ async function bootstrap() {
 
     return res.json({ data, role: admin.role });
   });
+
+  app.get(
+    "/api/admin/buildings/:buildingId/utility-registry",
+    async (req, res, next) => {
+      try {
+        const admin = getAdminSession(req, res, "admin");
+        if (!admin) {
+          return;
+        }
+
+        const buildingId = req.params.buildingId?.trim();
+        const building = buildingId ? await store.getBuilding(buildingId) : null;
+        if (!building) {
+          return res.status(404).json({ error: "Building not found" });
+        }
+
+        const data = await buildLandlordUtilityRegistryRows(
+          building.id,
+          building.houseNumbers ?? []
+        );
+        const buildingConfiguration = buildingConfigurationService
+          ? await buildingConfigurationService.getForBuilding(building.id)
+          : null;
+        const rateDefaults =
+          utilityRateDefaultsByBuilding.get(normalizeBuildingId(building.id)) ?? null;
+
+        return res.json({
+          data,
+          buildingConfiguration,
+          rateDefaults,
+          role: admin.role
+        });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
+  app.put(
+    "/api/admin/buildings/:buildingId/utility-registry",
+    async (req, res, next) => {
+      try {
+        const admin = getAdminSession(req, res, "admin");
+        if (!admin) {
+          return;
+        }
+
+        const buildingId = req.params.buildingId?.trim();
+        const building = buildingId ? await store.getBuilding(buildingId) : null;
+        if (!building) {
+          return res.status(404).json({ error: "Building not found" });
+        }
+
+        const parsed = landlordUtilityRegistryUpsertSchema.parse(req.body ?? {});
+        const rateDefaults = parsed.rateDefaults;
+        const allowedHouseSet = new Set(
+          (building.houseNumbers ?? [])
+            .map((item) => normalizeHouseNumber(item))
+            .filter(Boolean)
+        );
+
+        const householdMemberRows: Array<{ houseNumber: string; members: number }> = [];
+        const utilityChargeRows: Array<{
+          houseNumber: string;
+          waterFixedChargeKsh?: number;
+          electricityFixedChargeKsh?: number;
+          combinedUtilityChargeKsh?: number;
+        }> = [];
+
+        for (const row of parsed.rows) {
+          const normalizedHouse = normalizeHouseNumber(
+            houseNumberQuerySchema.parse({ houseNumber: row.houseNumber }).houseNumber
+          );
+
+          if (!allowedHouseSet.has(normalizedHouse)) {
+            return res.status(404).json({
+              error: `House number ${normalizedHouse} is not registered in building ${building.id}.`
+            });
+          }
+
+          const waterMeterNumber = row.waterMeterNumber?.trim();
+          if (waterMeterNumber) {
+            utilityBillingService.upsertMeter("water", building.id, normalizedHouse, {
+              meterNumber: waterMeterNumber
+            });
+          }
+
+          const electricityMeterNumber = row.electricityMeterNumber?.trim();
+          if (electricityMeterNumber) {
+            utilityBillingService.upsertMeter("electricity", building.id, normalizedHouse, {
+              meterNumber: electricityMeterNumber
+            });
+          }
+
+          if (typeof row.householdMembers === "number") {
+            householdMemberRows.push({
+              houseNumber: normalizedHouse,
+              members: row.householdMembers
+            });
+          }
+
+          utilityChargeRows.push({
+            houseNumber: normalizedHouse,
+            waterFixedChargeKsh: row.waterFixedChargeKsh,
+            electricityFixedChargeKsh: row.electricityFixedChargeKsh,
+            combinedUtilityChargeKsh: row.combinedUtilityChargeKsh
+          });
+        }
+
+        await upsertHouseholdMembersForBuilding(building.id, householdMemberRows);
+        upsertUtilityChargeDefaultsForBuilding(building.id, utilityChargeRows);
+        await upsertUtilityRateDefaultsForBuilding(building.id, rateDefaults ?? {});
+        await persistUtilityBillingStateNow();
+
+        const data = await buildLandlordUtilityRegistryRows(
+          building.id,
+          building.houseNumbers ?? []
+        );
+        const buildingConfiguration = buildingConfigurationService
+          ? await buildingConfigurationService.getForBuilding(building.id)
+          : null;
+
+        return res.json({
+          data,
+          updatedRows: parsed.rows.length,
+          buildingConfiguration,
+          rateDefaults: utilityRateDefaultsByBuilding.get(normalizeBuildingId(building.id)) ?? null,
+          role: admin.role
+        });
+      } catch (error) {
+        const mapped = mapUtilityDomainError(error);
+        if (mapped) {
+          return res.status(mapped.status).json({ error: mapped.message });
+        }
+        return next(error);
+      }
+    }
+  );
+
+  app.get(
+    "/api/admin/buildings/:buildingId/monthly-combined-utility-charge",
+    async (req, res, next) => {
+      try {
+        const admin = getAdminSession(req, res, "admin");
+        if (!admin) {
+          return;
+        }
+
+        const buildingId = req.params.buildingId?.trim();
+        const building = buildingId ? await store.getBuilding(buildingId) : null;
+        if (!building) {
+          return res.status(404).json({ error: "Building not found" });
+        }
+
+        const billingMonth = billingMonthSchema.parse(
+          typeof req.query.billingMonth === "string" ? req.query.billingMonth : ""
+        );
+        const data = getMonthlyCombinedUtilityCharge(building.id, billingMonth);
+
+        return res.json({
+          data: data
+            ? {
+                ...data,
+                buildingName: building.name
+              }
+            : {
+                buildingId: building.id,
+                buildingName: building.name,
+                billingMonth,
+                amountKsh: null
+              },
+          role: admin.role
+        });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
+  app.put(
+    "/api/admin/buildings/:buildingId/monthly-combined-utility-charge",
+    async (req, res, next) => {
+      try {
+        const admin = getAdminSession(req, res, "admin");
+        if (!admin) {
+          return;
+        }
+
+        const buildingId = req.params.buildingId?.trim();
+        const building = buildingId ? await store.getBuilding(buildingId) : null;
+        if (!building) {
+          return res.status(404).json({ error: "Building not found" });
+        }
+
+        const parsed = landlordMonthlyCombinedUtilityChargeSchema.parse(req.body ?? {});
+        const data = upsertMonthlyCombinedUtilityCharge(
+          building.id,
+          parsed.billingMonth,
+          parsed.amountKsh
+        );
+
+        return res.json({
+          data: {
+            ...data,
+            buildingName: building.name
+          },
+          role: admin.role
+        });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
 
   app.get("/api/landlord/rent-collection-status", async (req, res, next) => {
     try {

@@ -473,6 +473,56 @@ test("records utility payment against oldest outstanding bill", () => {
   assert.equal(payments[0].providerReference, "UTIL-123");
 });
 
+test("spreads utility payment across the selected month and the next open month", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.createBill("water", BUILDING_A, "B-7", {
+    billingMonth: "2026-02",
+    fixedChargeKsh: 300,
+    dueDate
+  });
+
+  service.createBill("water", BUILDING_A, "B-7", {
+    billingMonth: "2026-03",
+    fixedChargeKsh: 400,
+    dueDate
+  });
+
+  const paid = service.recordPayment("water", BUILDING_A, "B-7", {
+    billingMonth: "2026-02",
+    amountKsh: 500,
+    provider: "cash",
+    providerReference: "UTIL-SPREAD-1"
+  });
+
+  assert.equal(paid.allocations.length, 2);
+  assert.deepEqual(
+    paid.allocations.map((item) => item.bill.billingMonth),
+    ["2026-02", "2026-03"]
+  );
+  assert.deepEqual(
+    paid.allocations.map((item) => item.appliedAmountKsh),
+    [300, 200]
+  );
+
+  const bills = service.listBills({ buildingId: BUILDING_A, houseNumber: "B-7" });
+  const februaryBill = bills.find((item) => item.billingMonth === "2026-02");
+  const marchBill = bills.find((item) => item.billingMonth === "2026-03");
+
+  assert.ok(februaryBill);
+  assert.equal(februaryBill.balanceKsh, 0);
+  assert.ok(marchBill);
+  assert.equal(marchBill.balanceKsh, 200);
+
+  const payments = service.listPayments({ buildingId: BUILDING_A, houseNumber: "B-7" });
+  assert.equal(payments.length, 2);
+  assert.deepEqual(
+    payments.map((item) => item.billingMonth).sort(),
+    ["2026-02", "2026-03"]
+  );
+});
+
 test("does not apply the same provider reference twice", () => {
   const service = new UtilityBillingService();
   const dueDate = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();

@@ -75,14 +75,187 @@
             <h2>Platform Role Boundaries</h2>
           </div>
           <p class="panel-note">
-            Admin owns platform governance only: building registry, landlord access, ownership
-            assignment, and password recovery.
+            Admin owns platform governance first, and can now step into billing recovery when a
+            building needs central support.
           </p>
           <p class="status-text">
-            Complaints, room issues, theft cases, utility billing, rent collection, and Wi-Fi
-            operations stay with the landlord who owns the specific building. Those workflows now
-            belong in the <a href="/landlord" class="home-link">Landlord Portal</a>.
+            Landlords still handle day-to-day operations in their own portal, but platform admin
+            can now post utility bills, record utility payments, and adjust room utility charging
+            from this page when recovery or oversight is needed.
           </p>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Billing Console</h2>
+            <div class="action-row">
+              <select id="admin-billing-building-select"></select>
+              <button id="refresh-admin-billing" type="button">Refresh</button>
+            </div>
+          </div>
+          <p id="admin-billing-summary" class="panel-note">
+            Select a building to manage room-level utility charging, post bills, and record
+            payments from admin.
+          </p>
+          <p class="status-text">
+            Use room utility amounts or fixed charges to bill a room higher or lower. Enter
+            <strong>0</strong> in the room defaults to suspend fixed or combined utility charging
+            for that room until you change it again.
+          </p>
+
+          <form id="admin-monthly-combined-charge-form" class="package-card">
+            <div class="panel-head">
+              <h3>Building Monthly Combined Charge</h3>
+            </div>
+            <div class="inline-fields compact-fields">
+              <label>
+                Billing Month
+                <input id="admin-monthly-combined-charge-month" type="month" required />
+              </label>
+              <label>
+                Amount (KSh)
+                <input id="admin-monthly-combined-charge-amount" type="number" min="1" step="1" required />
+              </label>
+            </div>
+            <button type="submit">Save Monthly Combined Charge</button>
+          </form>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>House</th>
+                  <th>Resident</th>
+                  <th>Water Fixed (KSh)</th>
+                  <th>Electric Fixed (KSh)</th>
+                  <th>Room Utility Amount (KSh)</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="admin-utility-registry-body"></tbody>
+            </table>
+          </div>
+
+          <form id="admin-utility-bill-form" class="package-card">
+            <div class="panel-head">
+              <h3>Post Utility Bill</h3>
+            </div>
+            <div class="inline-fields compact-fields">
+              <label>
+                Utility Type
+                <select id="admin-utility-bill-type" required>
+                  <option value="water">water</option>
+                  <option value="electricity">electricity</option>
+                </select>
+              </label>
+              <label>
+                House
+                <input id="admin-utility-bill-house" type="text" maxlength="24" placeholder="31" required />
+              </label>
+              <label>
+                Billing Month
+                <input id="admin-utility-bill-month" type="month" required />
+              </label>
+              <label>
+                Due Date
+                <input id="admin-utility-bill-due-date" type="datetime-local" required />
+              </label>
+            </div>
+            <div class="inline-fields compact-fields">
+              <label>
+                Fixed Charge (KSh)
+                <input id="admin-utility-bill-fixed-charge" type="number" min="0" step="1" placeholder="0" />
+              </label>
+              <label>
+                Previous Reading
+                <input id="admin-utility-bill-previous-reading" type="number" min="0" step="0.01" />
+              </label>
+              <label>
+                Current Reading
+                <input id="admin-utility-bill-current-reading" type="number" min="0" step="0.01" />
+              </label>
+              <label>
+                Rate / Unit (KSh)
+                <input id="admin-utility-bill-rate" type="number" min="0" step="0.01" />
+              </label>
+            </div>
+            <label>
+              Note (optional)
+              <input id="admin-utility-bill-note" type="text" maxlength="280" placeholder="Manual utility bill posted by admin." />
+            </label>
+            <button type="submit">Post Utility Bill</button>
+          </form>
+
+          <form id="admin-utility-payment-form" class="package-card">
+            <div class="panel-head">
+              <h3>Record Utility Payment</h3>
+            </div>
+            <div class="inline-fields compact-fields">
+              <label>
+                Utility Type
+                <select id="admin-utility-payment-type" required>
+                  <option value="water">water</option>
+                  <option value="electricity">electricity</option>
+                </select>
+              </label>
+              <label>
+                House
+                <input id="admin-utility-payment-house" type="text" maxlength="24" placeholder="31" required />
+              </label>
+              <label>
+                Billing Month (optional)
+                <input id="admin-utility-payment-month" type="month" />
+              </label>
+            </div>
+            <div class="inline-fields compact-fields">
+              <label>
+                Amount (KSh)
+                <input id="admin-utility-payment-amount" type="number" min="1" step="1" required />
+              </label>
+              <label>
+                Provider
+                <select id="admin-utility-payment-provider">
+                  <option value="cash">cash</option>
+                  <option value="mpesa">mpesa</option>
+                  <option value="bank">bank</option>
+                  <option value="card">card</option>
+                </select>
+              </label>
+              <label>
+                Paid At (optional)
+                <input id="admin-utility-payment-paid-at" type="datetime-local" />
+              </label>
+            </div>
+            <div class="inline-fields compact-fields">
+              <label>
+                Reference (optional)
+                <input id="admin-utility-payment-reference" type="text" maxlength="120" placeholder="CASH-WATER-31-2026-03" />
+              </label>
+              <label>
+                Note (optional)
+                <input id="admin-utility-payment-note" type="text" maxlength="280" placeholder="Manual utility payment recorded by admin." />
+              </label>
+            </div>
+            <button type="submit">Record Utility Payment</button>
+          </form>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Utility</th>
+                  <th>House</th>
+                  <th>Paid For</th>
+                  <th>Paid Month</th>
+                  <th>Provider</th>
+                  <th>Reference</th>
+                  <th>Amount</th>
+                  <th>Paid On</th>
+                </tr>
+              </thead>
+              <tbody id="admin-utility-payments-body"></tbody>
+            </table>
+          </div>
         </section>
 
         <section class="panel wide-panel">

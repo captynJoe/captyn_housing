@@ -977,6 +977,41 @@ function formatDateOnly(value) {
   }).format(date);
 }
 
+function formatBillingMonth(value) {
+  const normalized = toBillingMonth(value);
+  if (!normalized) {
+    return "-";
+  }
+
+  const date = new Date(`${normalized}-01T00:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    return normalized;
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    year: "numeric"
+  }).format(date);
+}
+
+function formatUtilityPaymentCoverage(data, fallbackBillingMonth) {
+  const coveredMonths = Array.isArray(data?.allocations)
+    ? [...new Set(
+        data.allocations
+          .map((item) =>
+            String(item?.bill?.billingMonth ?? item?.event?.billingMonth ?? "").trim()
+          )
+          .filter(Boolean)
+      )]
+    : [];
+  if (coveredMonths.length > 0) {
+    return coveredMonths.map((item) => formatBillingMonth(item)).join(", ");
+  }
+
+  const fallback = String(fallbackBillingMonth ?? "").trim();
+  return fallback ? formatBillingMonth(fallback) : "";
+}
+
 function formatCurrency(value) {
   return `KSh ${Number(value ?? 0).toLocaleString("en-US")}`;
 }
@@ -5921,7 +5956,7 @@ function renderUtilityPayments(rows) {
 
   if (!Array.isArray(rows) || rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="7">No utility payments found.</td>';
+    row.innerHTML = '<td colspan="8">No utility payments found.</td>';
     utilityPaymentsBodyEl.append(row);
     return;
   }
@@ -5931,7 +5966,8 @@ function renderUtilityPayments(rows) {
     row.innerHTML = `
       <td>${item.utilityType}</td>
       <td>${item.houseNumber}</td>
-      <td>${item.billingMonth ?? "-"}</td>
+      <td>${formatBillingMonth(item.billingMonth)}</td>
+      <td>${formatBillingMonth(item.paidAt)}</td>
       <td>${item.provider}</td>
       <td>${item.providerReference ?? "-"}</td>
       <td>${formatCurrency(item.amountKsh)}</td>
@@ -6066,7 +6102,7 @@ function openOverviewUtilityPaymentModal(action) {
   }
   if (overviewUtilityPaymentHelpEl instanceof HTMLElement) {
     overviewUtilityPaymentHelpEl.textContent =
-      `Record the cash payment here for ${billingMonth}. Amount defaults to the open balance and can be reduced for a partial payment.`;
+      `Record the cash payment here for ${billingMonth}. If the amount is larger than this bill, the remainder will keep applying to the next open month for this room.`;
   }
 
   showOverviewUtilityPaymentModal();
@@ -8129,7 +8165,7 @@ utilityPaymentFormEl?.addEventListener("submit", (event) => {
 
   void (async () => {
     try {
-      await requestJson(
+      const response = await requestJson(
         withBuildingQuery(
           `/api/landlord/utilities/${encodeURIComponent(utility.utilityType)}/${encodeURIComponent(utility.houseNumber)}/payments`,
           utility.buildingId
@@ -8142,9 +8178,15 @@ utilityPaymentFormEl?.addEventListener("submit", (event) => {
           body: JSON.stringify(utility.payload)
         }
       );
+      const coverage = formatUtilityPaymentCoverage(
+        response?.data,
+        utility.payload.billingMonth
+      );
 
       setStatus(
-        `${utility.utilityType} payment recorded for ${utility.houseNumber}${utility.payload.billingMonth ? ` (${utility.payload.billingMonth})` : ""}.`
+        `${utility.utilityType} payment recorded for ${utility.houseNumber}${
+          coverage ? ` covering ${coverage}` : ""
+        }.`
       );
       if (utilityPaymentReferenceEl instanceof HTMLInputElement) {
         utilityPaymentReferenceEl.value = "";
@@ -8225,7 +8267,7 @@ overviewUtilityPaymentFormEl?.addEventListener("submit", (event) => {
 
   void (async () => {
     try {
-      await requestJson(
+      const response = await requestJson(
         withBuildingQuery(
           `/api/landlord/utilities/${encodeURIComponent(utilityType)}/${encodeURIComponent(houseNumber)}/payments`,
           buildingId
@@ -8246,10 +8288,13 @@ overviewUtilityPaymentFormEl?.addEventListener("submit", (event) => {
           })
         }
       );
+      const coverage = formatUtilityPaymentCoverage(response?.data, billingMonth);
 
       closeOverviewUtilityPaymentModal();
       setStatus(
-        `${utilityTypeLabel(utilityType)} payment recorded for ${houseNumber} (${billingMonth}).`
+        `${utilityTypeLabel(utilityType)} payment recorded for ${houseNumber}${
+          coverage ? ` covering ${coverage}` : ""
+        }.`
       );
       await Promise.all([loadBills(), loadPayments(), loadResidents()]);
     } catch (error) {

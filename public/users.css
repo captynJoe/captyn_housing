@@ -765,6 +765,29 @@ button,
   justify-content: flex-start;
 }
 
+.notification-toggle-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.notification-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  font-size: 0.95rem;
+  color: var(--ink-700);
+}
+
+.notification-toggle input {
+  accent-color: var(--teal-600);
+}
+
+.notification-toggle input:disabled + span {
+  opacity: 0.6;
+}
+
 .stack-item {
   border: 1px solid rgba(16, 28, 40, 0.14);
   border-radius: var(--radius-md);

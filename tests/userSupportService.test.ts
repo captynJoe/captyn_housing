@@ -120,3 +120,28 @@ test("lists tenant-scoped reports by normalized house number", () => {
   assert.equal(service.listReports("d-1").length, 1);
   assert.equal(service.listReports("A-1").length, 0);
 });
+
+test("emits inserted system notifications through the notification handler", async () => {
+  const service = new UserSupportService();
+  const insertedBatches = [];
+
+  service.setNotificationInsertHandler((notifications) => {
+    insertedBatches.push(notifications);
+  });
+
+  const inserted = service.enqueueSystemNotifications("captyn-bldg-00001", "e-3", [
+    {
+      title: "Rent Reminder",
+      message: "Rent is due tomorrow.",
+      level: "warning",
+      source: "rent",
+      dedupeKey: "rent-reminder-e3"
+    }
+  ]);
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(inserted.length, 1);
+  assert.equal(insertedBatches.length, 1);
+  assert.equal(insertedBatches[0][0].title, "Rent Reminder");
+});

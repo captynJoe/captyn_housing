@@ -604,6 +604,7 @@ export class UserSupportService {
       mapped
     );
     if (inserted.length > 0) {
+      this.emitNotificationsInserted(inserted);
       this.emitStateChange();
     }
 

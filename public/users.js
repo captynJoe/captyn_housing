@@ -90,9 +90,14 @@ const notificationListEl = document.getElementById("notification-list");
 const notificationCountEl = document.getElementById("notification-count");
 const installAppStatusEl = document.getElementById("install-app-status");
 const pushStatusTextEl = document.getElementById("push-status-text");
+const smsStatusTextEl = document.getElementById("sms-status-text");
 const installAppBtnEl = document.getElementById("install-app-btn");
 const pushEnableBtnEl = document.getElementById("push-enable-btn");
 const pushDisableBtnEl = document.getElementById("push-disable-btn");
+const smsEnableBtnEl = document.getElementById("sms-enable-btn");
+const smsDisableBtnEl = document.getElementById("sms-disable-btn");
+const smsRentToggleEl = document.getElementById("sms-rent-toggle");
+const smsUtilityToggleEl = document.getElementById("sms-utility-toggle");
 const rentDueEl = document.getElementById("rent-due");
 
 const paymentsSummaryActionEl = document.getElementById("payments-summary-action");
@@ -153,6 +158,12 @@ const DEFAULT_PAYMENT_ACCESS = Object.freeze({
   waterEnabled: true,
   electricityEnabled: true
 });
+const DEFAULT_SMS_PREFERENCES = Object.freeze({
+  smsEnabled: true,
+  rentEnabled: true,
+  utilityEnabled: true,
+  supportEnabled: false
+});
 const VALID_RESIDENT_VIEWS = new Set(["overview", "support", "payments", "notices"]);
 const REPORT_ATTACHMENT_LIMIT = 4;
 
@@ -186,6 +197,7 @@ const state = {
   notifications: [],
   pushConfig: null,
   pushSubscriptionEndpoint: "",
+  smsConfig: null,
   utilityBills: [],
   utilityMeters: [],
   utilityLatestReadings: [],
@@ -277,9 +289,14 @@ const REQUIRED_DOM_BINDINGS = Object.freeze([
   ["notification-count", notificationCountEl],
   ["install-app-status", installAppStatusEl],
   ["push-status-text", pushStatusTextEl],
+  ["sms-status-text", smsStatusTextEl],
   ["install-app-btn", installAppBtnEl],
   ["push-enable-btn", pushEnableBtnEl],
   ["push-disable-btn", pushDisableBtnEl],
+  ["sms-enable-btn", smsEnableBtnEl],
+  ["sms-disable-btn", smsDisableBtnEl],
+  ["sms-rent-toggle", smsRentToggleEl],
+  ["sms-utility-toggle", smsUtilityToggleEl],
   ["rent-due", rentDueEl],
   ["payments-summary-action", paymentsSummaryActionEl],
   ["payments-total-outstanding", paymentsTotalOutstandingEl],
@@ -2066,6 +2083,67 @@ function renderPwaControls() {
   }
 }
 
+function renderSmsControls() {
+  const hasSession = Boolean(state.residentSession) && !isPasswordChangeRequired();
+  const smsConfig = state.smsConfig;
+  const serverEnabled = Boolean(smsConfig?.enabled);
+  const preferences = {
+    ...DEFAULT_SMS_PREFERENCES,
+    ...(smsConfig?.preferences ?? {})
+  };
+  const phoneMask = smsConfig?.phoneMask || "your resident phone";
+  const senderId = String(smsConfig?.senderId || "").trim();
+
+  if (smsStatusTextEl instanceof HTMLElement) {
+    if (!hasSession) {
+      smsStatusTextEl.textContent =
+        "Sign in to manage SMS alerts for rent and utility updates.";
+    } else if (!serverEnabled) {
+      smsStatusTextEl.textContent =
+        "SMS alerts are not configured on this server yet.";
+    } else if (!preferences.smsEnabled) {
+      smsStatusTextEl.textContent = `SMS updates are paused for ${phoneMask}.`;
+    } else {
+      const categories = [];
+      if (preferences.rentEnabled) {
+        categories.push("rent");
+      }
+      if (preferences.utilityEnabled) {
+        categories.push("utility");
+      }
+
+      smsStatusTextEl.textContent =
+        categories.length > 0
+          ? `SMS updates are active for ${phoneMask} for ${categories.join(
+              " and "
+            )} notices.${senderId ? ` Sender ID: ${senderId}.` : ""}`
+          : `SMS updates are active for ${phoneMask}, but no billing category is selected yet.${
+              senderId ? ` Sender ID: ${senderId}.` : ""
+            }`;
+    }
+  }
+
+  if (smsEnableBtnEl instanceof HTMLButtonElement) {
+    smsEnableBtnEl.disabled = !hasSession || !serverEnabled;
+    smsEnableBtnEl.classList.toggle("hidden", preferences.smsEnabled);
+  }
+
+  if (smsDisableBtnEl instanceof HTMLButtonElement) {
+    smsDisableBtnEl.disabled = !hasSession || !serverEnabled || !preferences.smsEnabled;
+    smsDisableBtnEl.classList.toggle("hidden", !preferences.smsEnabled);
+  }
+
+  if (smsRentToggleEl instanceof HTMLInputElement) {
+    smsRentToggleEl.checked = Boolean(preferences.rentEnabled);
+    smsRentToggleEl.disabled = !hasSession || !serverEnabled || !preferences.smsEnabled;
+  }
+
+  if (smsUtilityToggleEl instanceof HTMLInputElement) {
+    smsUtilityToggleEl.checked = Boolean(preferences.utilityEnabled);
+    smsUtilityToggleEl.disabled = !hasSession || !serverEnabled || !preferences.smsEnabled;
+  }
+}
+
 async function ensureResidentServiceWorkerRegistration() {
   if (!supportsResidentPwa()) {
     return null;
@@ -2111,6 +2189,106 @@ async function loadResidentPushConfig() {
 
   renderPwaControls();
   return state.pushConfig;
+}
+
+async function loadResidentSmsConfig() {
+  if (!state.residentSession || isPasswordChangeRequired()) {
+    state.smsConfig = null;
+    renderSmsControls();
+    return null;
+  }
+
+  try {
+    const payload = await requestJson(
+      "/api/user/notification-preferences",
+      {},
+      { auth: true }
+    );
+    state.smsConfig = payload.data?.sms ?? null;
+  } catch (error) {
+    console.error("Failed to load resident SMS notification preferences", error);
+    state.smsConfig = {
+      enabled: false,
+      senderId: null,
+      phoneMask: "",
+      preferences: { ...DEFAULT_SMS_PREFERENCES }
+    };
+  }
+
+  renderSmsControls();
+  return state.smsConfig;
+}
+
+async function updateResidentNotificationPreferences(
+  patch,
+  { successMessage = "" } = {}
+) {
+  if (!state.residentSession || isPasswordChangeRequired()) {
+    showFeedback("Sign in with an active resident session before updating SMS alerts.");
+    return null;
+  }
+
+  const payload = await requestJson(
+    "/api/user/notification-preferences",
+    {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(patch)
+    },
+    { auth: true }
+  );
+
+  state.smsConfig = payload.data?.sms ?? state.smsConfig;
+  renderSmsControls();
+
+  if (successMessage) {
+    showFeedback(successMessage, "success");
+  }
+
+  return state.smsConfig;
+}
+
+async function enableResidentSmsNotifications() {
+  clearFeedback();
+
+  if (!state.residentSession || isPasswordChangeRequired()) {
+    showFeedback("Sign in with an active resident session before enabling SMS alerts.");
+    return;
+  }
+
+  const smsConfig = state.smsConfig ?? (await loadResidentSmsConfig());
+  if (!smsConfig?.enabled) {
+    showFeedback("SMS alerts are not configured on this server yet.");
+    return;
+  }
+
+  try {
+    await updateResidentNotificationPreferences(
+      { smsEnabled: true },
+      { successMessage: "SMS alerts enabled for this resident account." }
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to enable SMS alerts.";
+    showFeedback(message);
+  }
+}
+
+async function disableResidentSmsNotifications() {
+  clearFeedback();
+
+  try {
+    await updateResidentNotificationPreferences(
+      { smsEnabled: false },
+      { successMessage: "SMS alerts paused for this resident account." }
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to pause SMS alerts.";
+    showFeedback(message);
+  }
 }
 
 async function registerResidentPushSubscription(subscription) {
@@ -3073,6 +3251,7 @@ function showSignedOutState() {
   state.notifications = [];
   state.pushConfig = null;
   state.pushSubscriptionEndpoint = "";
+  state.smsConfig = null;
   state.rentDue = null;
   state.rentPayments = [];
   state.utilityPayments = [];
@@ -3097,6 +3276,7 @@ function showSignedOutState() {
   syncUtilityPaymentFormFromBalances();
   applyPaymentAccessUi();
   renderPwaControls();
+  renderSmsControls();
   syncRememberDeviceToggle();
   updateResidentBranding();
 }
@@ -3138,6 +3318,7 @@ function showSignedInState() {
     setActiveResidentView(state.activeResidentView);
   }
   renderPwaControls();
+  renderSmsControls();
   syncRememberDeviceToggle();
   updateResidentBranding();
 }
@@ -3148,6 +3329,7 @@ async function loadResidentSession() {
     state.residentSession = payload.data;
     showSignedInState();
     await loadResidentPushConfig();
+    await loadResidentSmsConfig();
     await syncResidentPushState({ subscribeIfAllowed: true });
     return true;
   } catch (_error) {
@@ -4357,6 +4539,50 @@ function startResidentPortal() {
   if (pushDisableBtnEl instanceof HTMLButtonElement) {
     pushDisableBtnEl.addEventListener("click", () => {
       void disableResidentPushNotifications();
+    });
+  }
+
+  if (smsEnableBtnEl instanceof HTMLButtonElement) {
+    smsEnableBtnEl.addEventListener("click", () => {
+      void enableResidentSmsNotifications();
+    });
+  }
+
+  if (smsDisableBtnEl instanceof HTMLButtonElement) {
+    smsDisableBtnEl.addEventListener("click", () => {
+      void disableResidentSmsNotifications();
+    });
+  }
+
+  if (smsRentToggleEl instanceof HTMLInputElement) {
+    smsRentToggleEl.addEventListener("change", () => {
+      void updateResidentNotificationPreferences({
+        rentEnabled: smsRentToggleEl.checked
+      }).catch((error) => {
+        console.error("Failed to update resident rent SMS preference", error);
+        showFeedback(
+          error instanceof Error
+            ? error.message
+            : "Unable to update rent SMS preference."
+        );
+        renderSmsControls();
+      });
+    });
+  }
+
+  if (smsUtilityToggleEl instanceof HTMLInputElement) {
+    smsUtilityToggleEl.addEventListener("change", () => {
+      void updateResidentNotificationPreferences({
+        utilityEnabled: smsUtilityToggleEl.checked
+      }).catch((error) => {
+        console.error("Failed to update resident utility SMS preference", error);
+        showFeedback(
+          error instanceof Error
+            ? error.message
+            : "Unable to update utility SMS preference."
+        );
+        renderSmsControls();
+      });
     });
   }
 

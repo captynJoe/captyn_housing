@@ -242,6 +242,24 @@ export const deleteResidentPushSubscriptionSchema = z.object({
   endpoint: z.string().trim().url().max(2_048)
 });
 
+export const updateResidentNotificationPreferencesSchema = z
+  .object({
+    smsEnabled: z.boolean().optional(),
+    rentEnabled: z.boolean().optional(),
+    utilityEnabled: z.boolean().optional(),
+    supportEnabled: z.boolean().optional()
+  })
+  .refine(
+    (value) =>
+      typeof value.smsEnabled === "boolean" ||
+      typeof value.rentEnabled === "boolean" ||
+      typeof value.utilityEnabled === "boolean" ||
+      typeof value.supportEnabled === "boolean",
+    {
+      message: "Provide at least one notification preference to update."
+    }
+  );
+
 export const upsertRentDueSchema = z.object({
   monthlyRentKsh: z.number().int().min(0).max(500_000),
   balanceKsh: z.number().int().min(0).max(500_000),
@@ -963,6 +981,9 @@ export type ResidentPasswordSetupInput = z.infer<
   typeof residentPasswordSetupSchema
 >;
 export type ResidentPhoneLoginInput = z.infer<typeof residentPhoneLoginSchema>;
+export type UpdateResidentNotificationPreferencesInput = z.infer<
+  typeof updateResidentNotificationPreferencesSchema
+>;
 export type ResidentChangePasswordInput = z.infer<
   typeof residentChangePasswordSchema
 >;

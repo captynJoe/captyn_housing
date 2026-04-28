@@ -682,6 +682,32 @@
                   </button>
                 </div>
               </section>
+              <section class="notification-control-card">
+                <div class="notification-control-copy">
+                  <p class="subheading">SMS updates</p>
+                  <p id="sms-status-text" class="item-details">
+                    Sign in to manage SMS alerts for rent and utility updates.
+                  </p>
+                  <div class="notification-toggle-grid">
+                    <label class="notification-toggle">
+                      <input id="sms-rent-toggle" type="checkbox" />
+                      <span>Rent updates</span>
+                    </label>
+                    <label class="notification-toggle">
+                      <input id="sms-utility-toggle" type="checkbox" />
+                      <span>Utility updates</span>
+                    </label>
+                  </div>
+                </div>
+                <div class="action-row notification-control-actions">
+                  <button id="sms-enable-btn" type="button" class="ghost-btn">
+                    Enable SMS
+                  </button>
+                  <button id="sms-disable-btn" type="button" class="ghost-btn hidden">
+                    Pause SMS
+                  </button>
+                </div>
+              </section>
               <section id="notification-list" class="stack-list"></section>
             </article>
           </section>

@@ -60,10 +60,17 @@ import {
   type PaymentAccessPersistedState
 } from "./services/paymentAccessService.js";
 import {
-  type PushNotificationPayload,
+  NotificationDeliveryService,
+  SmsNotificationService
+} from "./services/notifications/index.js";
+import {
   PushNotificationService,
   type PushSubscriptionPersistedState
 } from "./services/pushNotificationService.js";
+import {
+  ResidentNotificationPreferenceService,
+  type ResidentNotificationPreferencePersistedState
+} from "./services/residentNotificationPreferenceService.js";
 import {
   adminLoginSchema,
   deleteResidentPushSubscriptionSchema,
@@ -97,6 +104,7 @@ import {
   recordUtilityPaymentSchema,
   mediaUploadSignatureRequestSchema,
   residentPushSubscriptionSchema,
+  updateResidentNotificationPreferencesSchema,
   upsertUtilityMeterSchema,
   utilityTypeSchema,
   caretakerAccessRequestStatusSchema,
@@ -206,6 +214,10 @@ const pushVapidPrivateKey = String(
 const pushVapidSubject = String(
   process.env.PUSH_VAPID_SUBJECT ?? "mailto:support@captyn.shop"
 ).trim();
+const africasTalkingApiKey = String(process.env.AFRICASTALKING_API_KEY ?? "").trim();
+const africasTalkingUsername = String(process.env.AFRICASTALKING_USERNAME ?? "").trim();
+const africasTalkingSenderId = String(process.env.AFRICASTALKING_SENDER_ID ?? "").trim();
+const notificationSweepToken = String(process.env.NOTIFICATION_SWEEP_TOKEN ?? "").trim();
 const ADMIN_AUTH_STATE_KEY = "admin_auth_v1";
 const RENT_LEDGER_STATE_KEY = "rent_ledger_v1";
 const UTILITY_BILLING_STATE_KEY = "utility_billing_v1";
@@ -217,6 +229,8 @@ const CARETAKER_ACCESS_STATE_KEY = "caretaker_access_v1";
 const BUILDING_EXPENDITURE_STATE_KEY = "building_expenditure_v1";
 const RUNTIME_QUEUES_STATE_KEY = "runtime_queues_v1";
 const PUSH_SUBSCRIPTIONS_STATE_KEY = "push_subscriptions_v1";
+const RESIDENT_NOTIFICATION_PREFERENCES_STATE_KEY =
+  "resident_notification_preferences_v1";
 const DEFAULT_ALLOWED_CORS_ORIGINS = ["https://housing.captyn.shop"];
 const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const COOKIE_PROTECTED_PATH_PREFIXES = ["/api/auth/", "/api/user/", "/api/landlord/", "/api/admin/"];
@@ -2574,6 +2588,8 @@ async function bootstrap() {
   const rentLedgerService = new RentLedgerService();
   const utilityBillingService = new UtilityBillingService();
   const paymentAccessService = new PaymentAccessService();
+  const residentNotificationPreferenceService =
+    new ResidentNotificationPreferenceService();
   const appStateService = repositoryContext.prisma
     ? new AppStateService(repositoryContext.prisma)
     : null;
@@ -2586,6 +2602,11 @@ async function bootstrap() {
         }
       : null
   );
+  const smsNotificationService = new SmsNotificationService({
+    apiKey: africasTalkingApiKey,
+    username: africasTalkingUsername,
+    senderId: africasTalkingSenderId
+  });
 
   if (
     (pushVapidPublicKey || pushVapidPrivateKey) &&
@@ -2593,6 +2614,15 @@ async function bootstrap() {
   ) {
     console.warn(
       "Housing web push is disabled because PUSH_VAPID_PUBLIC_KEY/PUSH_VAPID_PRIVATE_KEY are incomplete."
+    );
+  }
+
+  if (
+    (africasTalkingApiKey || africasTalkingUsername) &&
+    !smsNotificationService.isEnabled()
+  ) {
+    console.warn(
+      "Housing SMS is disabled because AFRICASTALKING_API_KEY/AFRICASTALKING_USERNAME are incomplete."
     );
   }
 
@@ -2999,7 +3029,8 @@ async function bootstrap() {
         caretakerAccessState,
         buildingExpenditureState,
         runtimeQueuesState,
-        pushSubscriptionState
+        pushSubscriptionState,
+        residentNotificationPreferenceState
       ] = await Promise.all([
         appStateService.getJson<AdminAuthPersistedState>(ADMIN_AUTH_STATE_KEY),
         appStateService.getJson<RentLedgerPersistedState>(RENT_LEDGER_STATE_KEY),
@@ -3020,6 +3051,9 @@ async function bootstrap() {
         appStateService.getJson<RuntimeQueuesPersistedState>(RUNTIME_QUEUES_STATE_KEY),
         appStateService.getJson<PushSubscriptionPersistedState>(
           PUSH_SUBSCRIPTIONS_STATE_KEY
+        ),
+        appStateService.getJson<ResidentNotificationPreferencePersistedState>(
+          RESIDENT_NOTIFICATION_PREFERENCES_STATE_KEY
         )
       ]);
 
@@ -3030,6 +3064,9 @@ async function bootstrap() {
       wifiService.importState(wifiState);
       paymentAccessService.importState(paymentAccessState);
       pushNotificationService.importState(pushSubscriptionState);
+      residentNotificationPreferenceService.importState(
+        residentNotificationPreferenceState
+      );
       importCaretakerAccessState(caretakerAccessState);
       importBuildingExpenditureState(buildingExpenditureState);
       await syncDerivedBuildingConfigurationState();
@@ -3187,6 +3224,9 @@ async function bootstrap() {
       pushNotificationService.setStateChangeHandler((state) =>
         queuePersist(PUSH_SUBSCRIPTIONS_STATE_KEY, state)
       );
+      residentNotificationPreferenceService.setStateChangeHandler((state) =>
+        queuePersist(RESIDENT_NOTIFICATION_PREFERENCES_STATE_KEY, state)
+      );
 
       if (utilityStateNormalized) {
         await appStateService.queueSetJson(
@@ -3228,6 +3268,10 @@ async function bootstrap() {
         PUSH_SUBSCRIPTIONS_STATE_KEY,
         pushNotificationService.exportState()
       );
+      void queuePersist(
+        RESIDENT_NOTIFICATION_PREFERENCES_STATE_KEY,
+        residentNotificationPreferenceService.exportState()
+      );
       persistCaretakerAccessState();
       persistBuildingExpenditureState();
       persistRuntimeQueuesState();
@@ -3245,61 +3289,8 @@ async function bootstrap() {
     await syncDerivedBuildingConfigurationState();
   }
 
-  const sendResidentPushNotifications = async (
-    notifications: UserSupportPersistedState["notifications"]
-  ) => {
-    if (!pushNotificationService.isEnabled() || notifications.length === 0) {
-      return;
-    }
-
-    const grouped = new Map<string, typeof notifications>();
-    for (const item of notifications) {
-      const key = `${item.buildingId}::${item.houseNumber}`;
-      const current = grouped.get(key) ?? [];
-      current.push(item);
-      grouped.set(key, current);
-    }
-
-    for (const items of grouped.values()) {
-      const [first] = items;
-      if (!first) {
-        continue;
-      }
-
-      const payload: PushNotificationPayload =
-        items.length === 1
-          ? {
-              title: first.title,
-              body: first.message,
-              level: first.level,
-              tag: first.dedupeKey ?? `resident-${first.source}`,
-              url: "/resident"
-            }
-          : {
-              title: `${items.length} new resident alerts`,
-              body: items
-                .slice(0, 2)
-                .map((item) => item.title)
-                .join(" • "),
-              level: items.some((item) => item.level === "warning")
-                ? "warning"
-                : items.some((item) => item.level === "success")
-                  ? "success"
-                  : "info",
-              tag: `resident-alerts-${first.buildingId}-${first.houseNumber}`,
-              url: "/resident"
-            };
-
-      await pushNotificationService.notifyResidentScope(
-        first.buildingId,
-        first.houseNumber,
-        payload
-      );
-    }
-  };
-
   userSupportService.setNotificationInsertHandler((notifications) =>
-    sendResidentPushNotifications(notifications)
+    notificationDeliveryService.deliverResidentNotifications(notifications)
   );
 
   if (!userAccountService) {
@@ -3716,6 +3707,55 @@ async function bootstrap() {
     return false;
   };
 
+  const enqueueResidentBillingNotifications = (
+    buildingId: string,
+    houseNumber: string
+  ) => {
+    let rentInsertedCount = 0;
+    let utilityInsertedCount = 0;
+
+    const rentReminders = rentLedgerService.collectAutoReminders(buildingId, houseNumber);
+    if (rentReminders.length > 0) {
+      rentInsertedCount = userSupportService.enqueueSystemNotifications(
+        buildingId,
+        houseNumber,
+        rentReminders.map((item) => ({
+          title: item.title,
+          message: item.message,
+          level: item.level,
+          source: "rent",
+          createdAt: item.createdAt,
+          dedupeKey: item.dedupeKey
+        }))
+      ).length;
+    }
+
+    const utilityReminders = utilityBillingService.collectAutoReminders(
+      buildingId,
+      houseNumber
+    );
+    if (utilityReminders.length > 0) {
+      utilityInsertedCount = userSupportService.enqueueSystemNotifications(
+        buildingId,
+        houseNumber,
+        utilityReminders.map((item) => ({
+          title: item.title,
+          message: item.message,
+          level: item.level,
+          source: "system",
+          createdAt: item.createdAt,
+          dedupeKey: item.dedupeKey
+        }))
+      ).length;
+    }
+
+    return {
+      rentInsertedCount,
+      utilityInsertedCount,
+      insertedCount: rentInsertedCount + utilityInsertedCount
+    };
+  };
+
   const resolveTenantByHouseAndPhone = async (input: {
     houseNumber: string;
     phoneNumber: string;
@@ -3793,6 +3833,74 @@ async function bootstrap() {
       phoneMask: maskPhone(match.user.phone)
     };
   };
+
+  const resolveResidentNotificationRecipient = async (scope: {
+    buildingId: string;
+    houseNumber: string;
+  }) => {
+    if (!repositoryContext.prisma) {
+      return null;
+    }
+
+    const normalizedBuildingId = normalizeBuildingId(scope.buildingId);
+    const normalizedHouseNumber = normalizeHouseNumber(scope.houseNumber);
+    const tenancy = await repositoryContext.prisma.tenancy.findFirst({
+      where: {
+        buildingId: normalizedBuildingId,
+        active: true,
+        unit: {
+          houseNumber: normalizedHouseNumber
+        }
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            phone: true
+          }
+        },
+        unit: {
+          select: {
+            houseNumber: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: "desc"
+      }
+    });
+
+    if (!tenancy) {
+      return null;
+    }
+
+    const tenantApplication = await repositoryContext.prisma.tenantApplication.findFirst({
+      where: {
+        userId: tenancy.userId,
+        buildingId: normalizedBuildingId,
+        houseNumber: tenancy.unit.houseNumber
+      },
+      select: {
+        status: true
+      },
+      orderBy: {
+        updatedAt: "desc"
+      }
+    });
+
+    return {
+      userId: tenancy.userId,
+      phoneNumber: tenancy.user.phone,
+      verificationStatus: toResidentVerificationStatus(tenantApplication?.status)
+    };
+  };
+
+  const notificationDeliveryService = new NotificationDeliveryService({
+    pushNotificationService,
+    smsNotificationService,
+    residentNotificationPreferenceService,
+    resolveRecipient: resolveResidentNotificationRecipient
+  });
 
   const buildLandlordUtilityRegistryRows = async (
     buildingId: string,
@@ -7961,43 +8069,7 @@ async function bootstrap() {
     }
 
     if (hasResidentBillingAccess(session)) {
-      const reminders = rentLedgerService.collectAutoReminders(
-        session.buildingId,
-        session.houseNumber
-      );
-      if (reminders.length > 0) {
-        userSupportService.enqueueSystemNotifications(
-          session.buildingId,
-          session.houseNumber,
-          reminders.map((item) => ({
-            title: item.title,
-            message: item.message,
-            level: item.level,
-            source: "rent",
-            createdAt: item.createdAt,
-            dedupeKey: item.dedupeKey
-          }))
-        );
-      }
-
-      const utilityReminders = utilityBillingService.collectAutoReminders(
-        session.buildingId,
-        session.houseNumber
-      );
-      if (utilityReminders.length > 0) {
-        userSupportService.enqueueSystemNotifications(
-          session.buildingId,
-          session.houseNumber,
-          utilityReminders.map((item) => ({
-            title: item.title,
-            message: item.message,
-            level: item.level,
-            source: "system",
-            createdAt: item.createdAt,
-            dedupeKey: item.dedupeKey
-          }))
-        );
-      }
+      enqueueResidentBillingNotifications(session.buildingId, session.houseNumber);
     }
 
     const data = filterResidentNotificationsForSession(
@@ -8028,24 +8100,7 @@ async function bootstrap() {
       });
     }
 
-    const reminders = rentLedgerService.collectAutoReminders(
-      session.buildingId,
-      session.houseNumber
-    );
-    if (reminders.length > 0) {
-      userSupportService.enqueueSystemNotifications(
-        reminders[0]?.buildingId ?? session.buildingId,
-        session.houseNumber,
-        reminders.map((item) => ({
-          title: item.title,
-          message: item.message,
-          level: item.level,
-          source: "rent",
-          createdAt: item.createdAt,
-          dedupeKey: item.dedupeKey
-        }))
-      );
-    }
+    enqueueResidentBillingNotifications(session.buildingId, session.houseNumber);
 
     const data = rentLedgerService.getRentDue(
       session.buildingId,
@@ -8057,6 +8112,100 @@ async function bootstrap() {
         ? undefined
         : "Rent profile is not configured yet for this house number."
     });
+  });
+
+  app.get("/api/user/notification-preferences", async (req, res) => {
+    const session = await getResidentSession(req, res);
+    if (!session) {
+      return;
+    }
+
+    return res.json({
+      data: {
+        sms: {
+          enabled: smsNotificationService.isEnabled(),
+          senderId: smsNotificationService.getSenderId(),
+          phoneMask: maskPhone(session.phoneNumber),
+          preferences: residentNotificationPreferenceService.getForUser(session.userId)
+        }
+      }
+    });
+  });
+
+  app.patch("/api/user/notification-preferences", async (req, res, next) => {
+    try {
+      const session = await getResidentSession(req, res);
+      if (!session) {
+        return;
+      }
+
+      const parsed = updateResidentNotificationPreferencesSchema.parse(req.body);
+      const preferences = residentNotificationPreferenceService.updateForUser(
+        session.userId,
+        parsed
+      );
+
+      return res.json({
+        data: {
+          sms: {
+            enabled: smsNotificationService.isEnabled(),
+            senderId: smsNotificationService.getSenderId(),
+            phoneMask: maskPhone(session.phoneNumber),
+            preferences
+          }
+        }
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.post("/api/internal/notifications/billing/sweep", async (_req, res, next) => {
+    try {
+      const providedToken = String(
+        _req.header("x-notification-sweep-token") ?? ""
+      ).trim();
+      if (!notificationSweepToken) {
+        return res.status(503).json({
+          error: "Notification sweep token is not configured on this server."
+        });
+      }
+
+      if (providedToken !== notificationSweepToken) {
+        return res.status(401).json({ error: "Invalid notification sweep token." });
+      }
+
+      const scopeKeys = new Set<string>();
+      for (const item of rentLedgerService.listCollectionStatus(5_000)) {
+        scopeKeys.add(`${item.buildingId}::${item.houseNumber}`);
+      }
+      for (const item of utilityBillingService.listBills({ limit: 5_000 })) {
+        scopeKeys.add(`${item.buildingId}::${item.houseNumber}`);
+      }
+
+      let rentNotificationsCreated = 0;
+      let utilityNotificationsCreated = 0;
+      for (const scopeKey of scopeKeys) {
+        const separator = scopeKey.indexOf("::");
+        const buildingId = scopeKey.slice(0, separator);
+        const houseNumber = scopeKey.slice(separator + 2);
+        const outcome = enqueueResidentBillingNotifications(buildingId, houseNumber);
+        rentNotificationsCreated += outcome.rentInsertedCount;
+        utilityNotificationsCreated += outcome.utilityInsertedCount;
+      }
+
+      return res.json({
+        data: {
+          scopesChecked: scopeKeys.size,
+          rentNotificationsCreated,
+          utilityNotificationsCreated,
+          notificationsCreated:
+            rentNotificationsCreated + utilityNotificationsCreated
+        }
+      });
+    } catch (error) {
+      return next(error);
+    }
   });
 
   app.get("/api/user/payment-access-controls", async (req, res) => {
@@ -10891,13 +11040,12 @@ async function bootstrap() {
             ? req.query.buildingId
             : "";
 
-      const data = utilityBillingService.recordPayment(
+      const data = await recordResidentUtilityPaymentAndNotify(
         utilityType,
         buildingId,
         houseNumber,
         parsed
       );
-      await persistUtilityBillingStateNow();
       return res.status(201).json({ data, role: admin.role });
     } catch (error) {
       return next(error);

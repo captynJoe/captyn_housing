@@ -45,6 +45,9 @@ const adminBillingBuildingSelectEl = document.getElementById(
   "admin-billing-building-select"
 );
 const refreshAdminBillingBtnEl = document.getElementById("refresh-admin-billing");
+const deleteAdminBillingBuildingBtnEl = document.getElementById(
+  "delete-admin-billing-building"
+);
 const adminBillingSummaryEl = document.getElementById("admin-billing-summary");
 const adminMonthlyCombinedChargeFormEl = document.getElementById(
   "admin-monthly-combined-charge-form"
@@ -936,6 +939,34 @@ function getSelectedAdminBillingBuildingId() {
     : String(state.selectedAdminBillingBuildingId || "").trim();
 }
 
+async function deleteBuildingFromAdmin(buildingId, buildingName) {
+  const shouldProceed = window.confirm(
+    `Delete ${buildingName} (${buildingId})? This permanently removes the building and linked unit records.`
+  );
+  if (!shouldProceed) {
+    return false;
+  }
+
+  await requestJson(`/api/admin/buildings/${encodeURIComponent(buildingId)}`, {
+    method: "DELETE",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      confirmBuildingId: buildingId,
+      confirmationText: "DELETE"
+    })
+  });
+
+  if (state.selectedAdminBillingBuildingId === buildingId) {
+    state.selectedAdminBillingBuildingId = "";
+  }
+
+  setStatus(`Deleted building ${buildingName} (${buildingId}).`);
+  await Promise.all([loadOverview(), loadBuildings()]);
+  return true;
+}
+
 function renderAdminUtilityPayments(rows) {
   if (!(adminUtilityPaymentsBodyEl instanceof HTMLElement)) {
     return;
@@ -1431,31 +1462,12 @@ if (buildingsBodyEl instanceof HTMLElement) {
       return;
     }
 
-    const shouldProceed = window.confirm(
-      `Delete ${buildingName} (${buildingId})? This permanently removes the building and linked unit records.`
-    );
-    if (!shouldProceed) {
-      return;
-    }
-
     target.disabled = true;
     clearError();
 
     void (async () => {
       try {
-        await requestJson(`/api/admin/buildings/${encodeURIComponent(buildingId)}`, {
-          method: "DELETE",
-          headers: {
-            "content-type": "application/json"
-          },
-          body: JSON.stringify({
-            confirmBuildingId: buildingId,
-            confirmationText: "DELETE"
-          })
-        });
-
-        setStatus(`Deleted building ${buildingName} (${buildingId}).`);
-        await Promise.all([loadOverview(), loadBuildings()]);
+        await deleteBuildingFromAdmin(buildingId, buildingName);
       } catch (error) {
         handleAdminError(error, "Failed to delete building.");
       } finally {
@@ -1737,6 +1749,29 @@ refreshAdminBillingBtnEl?.addEventListener("click", () => {
   void loadAdminBillingConsole().catch((error) => {
     handleAdminError(error, "Unable to refresh admin billing console.");
   });
+});
+
+deleteAdminBillingBuildingBtnEl?.addEventListener("click", () => {
+  const buildingId = getSelectedAdminBillingBuildingId();
+  if (!buildingId) {
+    showError("Select a building first.");
+    return;
+  }
+
+  const buildingName =
+    state.buildings.find((item) => item.id === buildingId)?.name ?? buildingId;
+  deleteAdminBillingBuildingBtnEl.disabled = true;
+  clearError();
+
+  void (async () => {
+    try {
+      await deleteBuildingFromAdmin(buildingId, buildingName);
+    } catch (error) {
+      handleAdminError(error, "Failed to delete building.");
+    } finally {
+      deleteAdminBillingBuildingBtnEl.disabled = false;
+    }
+  })();
 });
 
 adminMonthlyCombinedChargeMonthEl?.addEventListener("change", () => {

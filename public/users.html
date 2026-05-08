@@ -499,7 +499,8 @@
                           </label>
                         </div>
                         <p class="item-details payment-inline-note">
-                          The M-PESA prompt will be sent to this phone number.
+                          The M-PESA prompt will be sent to this phone number. Payment applies to
+                          the oldest open balance first.
                         </p>
                         <div class="field-grid">
                           <label>
@@ -509,7 +510,7 @@
                               <option value="electricity">Electricity</option>
                             </select>
                           </label>
-                          <label>
+                          <label class="hidden">
                             Bill Month
                             <select id="utility-payment-month">
                               <option value="">No open bill</option>
@@ -517,7 +518,7 @@
                           </label>
                         </div>
                         <p id="utility-payment-balance" class="item-details">
-                          Select a utility and bill month to load the current balance.
+                          Select a utility to load the current balance.
                         </p>
                         <p class="item-details payment-encouragement">
                           Pay any amount today. You do not need to clear the full utility balance at
@@ -577,13 +578,13 @@
                           once.
                         </p>
                         <div class="field-grid payment-channel-grid">
-                          <label>
+                          <label class="hidden">
                             Rent Month
                             <select id="rent-payment-month">
                               <option value="">Current due month</option>
                             </select>
                           </label>
-                          <label class="payment-provider-field">
+                          <label class="payment-provider-field hidden">
                             Payment Method
                             <select id="rent-payment-method" required>
                               <option value="mpesa">M-PESA</option>
@@ -600,8 +601,8 @@
                           </label>
                         </div>
                         <p class="item-details payment-inline-note">
-                          Choose the rent month to show on the receipt. The payment still reduces
-                          your total open rent balance immediately.
+                          Your rent payment reduces the open balance immediately and the receipt
+                          month stays in sync automatically.
                         </p>
                         <label>
                           Amount (KSh)

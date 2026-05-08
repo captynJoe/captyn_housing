@@ -4705,26 +4705,64 @@ async function bootstrap() {
     const lowerBoundMs = Number.isFinite(initiatedAtMs)
       ? initiatedAtMs - 10 * 60 * 1000
       : Number.NEGATIVE_INFINITY;
+    const recentPayments = utilityBillingService
+      .listPayments({
+        buildingId: pending.buildingId,
+        houseNumber: pending.houseNumber,
+        utilityType: pending.utilityType,
+        limit: 24
+      })
+      .filter((payment) => {
+        const paidAtMs = Date.parse(payment.paidAt);
+        return (
+          payment.provider === "mpesa" &&
+          (!Number.isFinite(lowerBoundMs) ||
+            !Number.isFinite(paidAtMs) ||
+            paidAtMs >= lowerBoundMs)
+        );
+      });
+
+    const directMatch = recentPayments.find(
+      (payment) =>
+        payment.billingMonth === pending.billingMonth &&
+        Math.round(Number(payment.amountKsh ?? 0)) ===
+          Math.round(Number(pending.amountKsh ?? 0))
+    );
+    if (directMatch) {
+      return directMatch;
+    }
+
+    const groupedByReference = new Map<
+      string,
+      {
+        payment: (typeof recentPayments)[number];
+        totalAmountKsh: number;
+      }
+    >();
+
+    for (const payment of recentPayments) {
+      const reference = String(payment.providerReference ?? "").trim();
+      if (!reference) {
+        continue;
+      }
+
+      const existing = groupedByReference.get(reference);
+      if (existing) {
+        existing.totalAmountKsh += Math.round(Number(payment.amountKsh ?? 0));
+        continue;
+      }
+
+      groupedByReference.set(reference, {
+        payment,
+        totalAmountKsh: Math.round(Number(payment.amountKsh ?? 0))
+      });
+    }
 
     return (
-      utilityBillingService
-        .listPayments({
-          buildingId: pending.buildingId,
-          houseNumber: pending.houseNumber,
-          utilityType: pending.utilityType,
-          limit: 24
-        })
-        .find((payment) => {
-          const paidAtMs = Date.parse(payment.paidAt);
-          return (
-            payment.provider === "mpesa" &&
-            payment.billingMonth === pending.billingMonth &&
-            Math.round(Number(payment.amountKsh ?? 0)) === Math.round(Number(pending.amountKsh ?? 0)) &&
-            (!Number.isFinite(lowerBoundMs) ||
-              !Number.isFinite(paidAtMs) ||
-              paidAtMs >= lowerBoundMs)
-          );
-        }) ?? null
+      [...groupedByReference.values()].find(
+        (group) =>
+          group.totalAmountKsh === Math.round(Number(pending.amountKsh ?? 0))
+      )?.payment ?? null
     );
   };
 
@@ -8712,11 +8750,12 @@ async function bootstrap() {
           });
         }
 
+        const openBills = [...bills]
+          .filter((item) => item.balanceKsh > 0)
+          .sort((a, b) => a.billingMonth.localeCompare(b.billingMonth));
         const targetBill = parsed.billingMonth
           ? bills.find((item) => item.billingMonth === parsed.billingMonth)
-          : [...bills]
-              .filter((item) => item.balanceKsh > 0)
-              .sort((a, b) => a.billingMonth.localeCompare(b.billingMonth))[0];
+          : openBills[0];
 
         if (!targetBill) {
           return res.status(409).json({
@@ -8726,16 +8765,29 @@ async function bootstrap() {
           });
         }
 
-        if (targetBill.balanceKsh <= 0) {
+        const candidateBills = parsed.billingMonth
+          ? [targetBill, ...openBills.filter((item) => item.id !== targetBill.id)]
+          : openBills;
+        const availableBalanceKsh = candidateBills.reduce(
+          (sum, item) => sum + Math.max(0, Math.round(item.balanceKsh)),
+          0
+        );
+        const amountKsh = Math.round(parsed.amountKsh);
+        const effectiveBill =
+          candidateBills.find((item) => item.balanceKsh > 0) ?? null;
+
+        if (!effectiveBill || availableBalanceKsh <= 0) {
           return res.status(409).json({
-            error: `${utilityType} bill for ${targetBill.billingMonth} is already cleared.`
+            error: parsed.billingMonth
+              ? `${utilityType} bill for ${targetBill.billingMonth} is already cleared.`
+              : `No outstanding ${utilityType} bill found for house ${session.houseNumber}.`
           });
         }
 
-        if (Math.round(parsed.amountKsh) > Math.round(targetBill.balanceKsh)) {
+        if (amountKsh > availableBalanceKsh) {
           return res.status(400).json({
             error: `Amount exceeds remaining ${utilityType} balance of KSh ${Math.round(
-              targetBill.balanceKsh
+              availableBalanceKsh
             ).toLocaleString("en-US")}.`
           });
         }
@@ -8766,12 +8818,11 @@ async function bootstrap() {
           ? mpesaConfig.callbackUrl
           : appendQueryParam(mpesaConfig.callbackUrl, "token", mpesaRentCallbackToken);
         const initiatedAt = new Date().toISOString();
-        const billingMonth = parsed.billingMonth ?? targetBill.billingMonth;
+        const billingMonth = parsed.billingMonth ?? effectiveBill.billingMonth;
         const utilityRef = utilityType === "water" ? "WATER" : "POWER";
         const houseRef =
           session.houseNumber.replace(/[^A-Za-z0-9]/g, "").slice(0, 7) || "HOUSE";
         const accountReference = `${utilityRef}${houseRef}`.slice(0, 12);
-        const amountKsh = Math.round(parsed.amountKsh);
         const building = await store.getBuilding(session.buildingId);
         const buildingLabel =
           building?.name?.trim() || session.buildingId?.trim() || "Utility";
@@ -11282,9 +11333,18 @@ async function bootstrap() {
 
   app.delete("/api/admin/buildings/:buildingId", async (req, res, next) => {
     try {
-      const admin = getAdminSession(req, res, "admin");
-      if (!admin) {
-        return;
+      const userSession = await resolveOptionalUserSession(req);
+      const legacyAdminSession = adminAuthService.getSession(readAdminSessionToken(req));
+      const hasLegacyAdmin = legacyAdminSession
+        ? adminAuthService.hasRole(legacyAdminSession, "admin")
+        : false;
+
+      if (!userSession && !hasLegacyAdmin) {
+        return res.status(401).json({ error: "Authorization required" });
+      }
+
+      if (userSession && !hasUserRoleAtLeast(userSession.role, "admin")) {
+        return res.status(403).json({ error: "admin role required" });
       }
 
       const buildingId = req.params.buildingId?.trim();
@@ -11316,7 +11376,7 @@ async function bootstrap() {
           name: deleted.name,
           deletedAt: new Date().toISOString()
         },
-        role: admin.role
+        role: userSession?.role ?? legacyAdminSession?.role ?? "admin"
       });
     } catch (error) {
       return next(error);

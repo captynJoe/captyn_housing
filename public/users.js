@@ -765,6 +765,13 @@ function listOutstandingUtilityBills(utilityType) {
     .sort((a, b) => a.billingMonth.localeCompare(b.billingMonth));
 }
 
+function getTotalOutstandingUtilityBalanceForType(utilityType) {
+  return listOutstandingUtilityBills(utilityType).reduce(
+    (sum, bill) => sum + toPositiveNumber(bill.balanceKsh),
+    0
+  );
+}
+
 function getSelectedUtilityBillMonth(utilityType) {
   return normalizeBillingMonthInput(
     state.utilitySelectedBillMonthByType?.[utilityType] ?? ""
@@ -882,8 +889,8 @@ function syncRentBillingMonthOptions() {
   const options = billingMonths.length > 0 ? billingMonths : fallbackMonth ? [fallbackMonth] : [];
   const nextSelectedMonth =
     options.find((billingMonth) => billingMonth === currentSelectedMonth) ??
-    fallbackMonth ??
     billingMonths[0] ??
+    fallbackMonth ??
     null;
 
   setSelectedRentBillingMonth(nextSelectedMonth);
@@ -939,9 +946,7 @@ function getTotalOutstandingBalance() {
 }
 
 function getUtilityOutstandingBalance(utilityType) {
-  const selectedMonth = getSelectedUtilityBillMonth(utilityType);
-  const bill = findOutstandingUtilityBill(utilityType, selectedMonth);
-  return toPositiveNumber(bill?.balanceKsh);
+  return getTotalOutstandingUtilityBalanceForType(utilityType);
 }
 
 function computeRemainingBalance(balance, amount) {
@@ -1040,6 +1045,7 @@ function updateUtilityPaymentGuidance() {
   }
 
   const utilityType = String(utilityPaymentTypeEl.value ?? "water");
+  const outstandingBills = listOutstandingUtilityBills(utilityType);
   const bill = findOutstandingUtilityBill(
     utilityType,
     getSelectedUtilityBillMonth(utilityType)
@@ -1053,24 +1059,45 @@ function updateUtilityPaymentGuidance() {
   }
 
   const balance = toPositiveNumber(bill.balanceKsh);
+  const totalOutstanding = getTotalOutstandingUtilityBalanceForType(utilityType);
+  const billCount = outstandingBills.length;
   const enteredAmount = toPositiveNumber(utilityPaymentAmountEl.value);
 
   if (enteredAmount <= 0) {
-    const suggestedStarter = computeSuggestedStarterAmount(balance);
-    utilityPaymentRemainingEl.textContent = `${utilityLabel(
-      utilityType
-    )} ${bill.billingMonth} is open for ${formatCurrency(
-      balance
-    )}. Suggested start today: ${formatCurrency(
-      suggestedStarter
-    )}. Enter any amount to preview what remains.`;
+    const suggestedStarter = computeSuggestedStarterAmount(totalOutstanding || balance);
+    utilityPaymentRemainingEl.textContent =
+      billCount > 1
+        ? `${utilityLabel(utilityType)} payments start with ${
+            bill.billingMonth
+          } and can cover ${formatCurrency(totalOutstanding)} across ${billCount} open bills. Suggested start today: ${formatCurrency(
+            suggestedStarter
+          )}.`
+        : `${utilityLabel(utilityType)} ${bill.billingMonth} is open for ${formatCurrency(
+            balance
+          )}. Suggested start today: ${formatCurrency(
+            suggestedStarter
+          )}. Enter any amount to preview what remains.`;
+    return;
+  }
+
+  if (enteredAmount >= totalOutstanding) {
+    utilityPaymentRemainingEl.textContent =
+      billCount > 1
+        ? `This payment clears the full ${utilityLabel(utilityType).toLowerCase()} balance of ${formatCurrency(
+            totalOutstanding
+          )} across ${billCount} bills.`
+        : `This payment clears the full ${utilityLabel(utilityType).toLowerCase()} balance for ${bill.billingMonth}.`;
     return;
   }
 
   if (enteredAmount >= balance) {
-    utilityPaymentRemainingEl.textContent = `This payment clears the full ${utilityLabel(
-      utilityType
-    ).toLowerCase()} balance for ${bill.billingMonth}.`;
+    const carryForward = Math.max(0, enteredAmount - balance);
+    utilityPaymentRemainingEl.textContent =
+      carryForward > 0
+        ? `This clears ${bill.billingMonth} and carries ${formatCurrency(
+            carryForward
+          )} into the next open ${utilityLabel(utilityType).toLowerCase()} bill.`
+        : `This payment clears the full ${utilityLabel(utilityType).toLowerCase()} balance for ${bill.billingMonth}.`;
     return;
   }
 
@@ -2979,7 +3006,7 @@ function renderUtilityBills(bills, meters = [], fallbackMessage, latestReadings 
       utilityCounts.electricity
     } • Remaining ${formatCurrency(
       otherOutstandingTotal
-    )}. Use Utility and Bill Month above to choose a different balance.`;
+    )}. Payments continue across these open bills automatically.`;
 
     rollup.append(top, details);
     utilityBillsListEl.append(rollup);
@@ -3074,19 +3101,20 @@ function syncUtilityPaymentFormFromBalances() {
     return;
   }
 
-  utilityPaymentBalanceEl.replaceChildren();
-  utilityPaymentBalanceEl.append(
-    document.createTextNode(
-      `${utilityLabel(utilityType)} ${bill.billingMonth} balance selected: `
-    )
-  );
-  const balanceStrong = document.createElement("strong");
-  balanceStrong.textContent = formatCurrency(bill.balanceKsh);
-  utilityPaymentBalanceEl.append(balanceStrong);
+  const totalOutstanding = getTotalOutstandingUtilityBalanceForType(utilityType);
+  const outstandingCount = listOutstandingUtilityBills(utilityType).length;
+  utilityPaymentBalanceEl.textContent =
+    outstandingCount > 1
+      ? `${utilityLabel(utilityType)} payments auto-apply from ${
+          bill.billingMonth
+        }. Total open balance: ${formatCurrency(totalOutstanding)} across ${outstandingCount} bills.`
+      : `${utilityLabel(utilityType)} ${bill.billingMonth} balance ready: ${formatCurrency(
+          bill.balanceKsh
+        )}.`;
 
-  if (!String(utilityPaymentAmountEl.value ?? "").trim() && Number(bill.balanceKsh) > 0) {
+  if (!String(utilityPaymentAmountEl.value ?? "").trim() && totalOutstanding > 0) {
     utilityPaymentAmountEl.value = formatAmountValue(
-      computeSuggestedStarterAmount(bill.balanceKsh)
+      computeSuggestedStarterAmount(totalOutstanding)
     );
   }
 

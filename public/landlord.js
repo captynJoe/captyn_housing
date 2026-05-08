@@ -3941,6 +3941,19 @@ function renderBuildings(rows) {
           Add Rooms
         </button>
       `;
+    const deleteBuildingButton = isCaretakerRole()
+      ? ""
+      : `
+        <button
+          type="button"
+          class="btn-danger"
+          data-action="delete-building"
+          data-building-id="${escapeHtml(item.id)}"
+          data-building-name="${escapeHtml(item.name)}"
+        >
+          Delete Building
+        </button>
+      `;
     row.innerHTML = `
       <td>${item.id}</td>
       <td>${
@@ -3957,11 +3970,57 @@ function renderBuildings(rows) {
         <div class="action-row">
           ${useBuildingButton}
           ${addRoomsButton}
+          ${deleteBuildingButton}
         </div>
       </td>
     `;
     buildingsBodyEl.append(row);
   });
+}
+
+function handleDeleteBuildingClick(target, buildingId, buildingName) {
+  if (isCaretakerRole()) {
+    showError("House manager accounts cannot delete buildings.");
+    return;
+  }
+
+  const shouldProceed = window.confirm(
+    `Delete ${buildingName || buildingId} (${buildingId})?\nThis permanently removes the building, rooms, active tenancy links, and linked unit records.`
+  );
+  if (!shouldProceed) {
+    return;
+  }
+
+  target.disabled = true;
+  clearError();
+
+  void (async () => {
+    try {
+      await requestJson(`/api/landlord/buildings/${encodeURIComponent(buildingId)}`, {
+        method: "DELETE",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          confirmBuildingId: buildingId,
+          confirmationText: "DELETE"
+        })
+      });
+
+      setStatus(`Deleted building ${buildingName || buildingId}.`);
+      await loadBuildings();
+
+      const nextBuildingId = state.selectedRegistryBuildingId || state.buildings[0]?.id || "";
+      if (nextBuildingId) {
+        setPreferredBuildingSelection(nextBuildingId);
+        await activateBuilding(nextBuildingId, { view: state.activeLandlordView });
+      }
+    } catch (error) {
+      handleLandlordError(error, "Failed to delete building.");
+    } finally {
+      target.disabled = false;
+    }
+  })();
 }
 
 function setPreferredBuildingSelection(buildingId, options = {}) {
@@ -7267,6 +7326,12 @@ buildingsBodyEl.addEventListener("click", (event) => {
 
   if (target.dataset.action === "open-room-drawer") {
     openBuildingDrawer(buildingId);
+    return;
+  }
+
+  if (target.dataset.action === "delete-building") {
+    const buildingName = String(target.dataset.buildingName || buildingId).trim();
+    handleDeleteBuildingClick(target, buildingId, buildingName);
     return;
   }
 

@@ -11383,6 +11383,60 @@ async function bootstrap() {
     }
   });
 
+  app.delete("/api/landlord/buildings/:buildingId", async (req, res, next) => {
+    try {
+      const session = await getUserSession(req, res, "landlord");
+      if (!session) {
+        return;
+      }
+
+      if (!userAccountService) {
+        return res.status(503).json({
+          error: "User account service unavailable. Database connection is required."
+        });
+      }
+
+      const buildingId = req.params.buildingId?.trim();
+      if (!buildingId) {
+        return res.status(400).json({ error: "Building id is required." });
+      }
+
+      const hasAccess = await userAccountService.canAccessBuilding(session, buildingId);
+      if (!hasAccess) {
+        return res.status(403).json({ error: "Building access denied" });
+      }
+
+      const parsed = deleteBuildingSchema.parse(req.body ?? {});
+      if (
+        parsed.confirmBuildingId &&
+        parsed.confirmBuildingId.trim() !== buildingId
+      ) {
+        return res.status(400).json({
+          error: "Confirmation building id does not match the selected building."
+        });
+      }
+
+      const deleted = await store.deleteBuilding(buildingId);
+      if (!deleted) {
+        return res.status(404).json({ error: "Building not found" });
+      }
+
+      purgeRuntimeStateForBuilding(deleted.id);
+      await syncDerivedBuildingConfigurationState();
+
+      return res.json({
+        data: {
+          id: deleted.id,
+          name: deleted.name,
+          deletedAt: new Date().toISOString()
+        },
+        role: session.role
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   app.post("/api/landlord/buildings/:buildingId/houses", async (req, res, next) => {
     try {
       const session = await getUserSession(req, res, "landlord");

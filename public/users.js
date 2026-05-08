@@ -14,7 +14,7 @@ import {
 const RESIDENT_TOKEN_KEY = "captyn_resident_session_token";
 const RESIDENT_SESSION_TOKEN_KEY = "captyn_resident_session_token_session";
 const RESIDENT_REMEMBER_DEVICE_KEY = "captyn_resident_remember_device";
-const RESIDENT_SW_URL = "/resident-sw.js?v=20260325b";
+const RESIDENT_SW_URL = "/resident-sw.js?v=20260508b";
 
 let deferredInstallPrompt = null;
 let residentSwRegistrationPromise = null;
@@ -3113,9 +3113,7 @@ function syncUtilityPaymentFormFromBalances() {
         )}.`;
 
   if (!String(utilityPaymentAmountEl.value ?? "").trim() && totalOutstanding > 0) {
-    utilityPaymentAmountEl.value = formatAmountValue(
-      computeSuggestedStarterAmount(totalOutstanding)
-    );
+    utilityPaymentAmountEl.value = formatAmountValue(totalOutstanding);
   }
 
   updateUtilityPaymentGuidance();
@@ -4817,12 +4815,9 @@ function startResidentPortal() {
     syncUtilityPaymentFormFromBalances();
 
     if (!String(utilityPaymentAmountEl.value ?? "").trim()) {
-      const selectedBill = findOutstandingUtilityBill(
-        utilityType,
-        getSelectedUtilityBillMonth(utilityType)
-      );
-      if (selectedBill && Number(selectedBill.balanceKsh) > 0) {
-        utilityPaymentAmountEl.value = String(Math.round(Number(selectedBill.balanceKsh)));
+      const totalOutstanding = getTotalOutstandingUtilityBalanceForType(utilityType);
+      if (totalOutstanding > 0) {
+        utilityPaymentAmountEl.value = formatAmountValue(totalOutstanding);
       }
     }
 

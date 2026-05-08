@@ -1,11 +1,11 @@
-const CACHE_NAME = "resident-portal-v20260325b";
+const CACHE_NAME = "resident-portal-v20260508b";
 const RESIDENT_SHELL_URL = "/resident";
 const USER_SHELL_URL = "/user/";
 const APP_ASSETS = [
   RESIDENT_SHELL_URL,
   USER_SHELL_URL,
   "/users.css?v=20260325a",
-  "/users.js?v=20260325b",
+  "/users.js?v=20260508b",
   "/user.css?v=20260315g",
   "/user.js?v=20260325a",
   "/password-visibility.js",
@@ -88,21 +88,20 @@ self.addEventListener("fetch", (event) => {
   }
 
   event.respondWith(
-    caches.match(request).then((cached) => {
-      const network = fetch(request)
-        .then((response) => {
-          if (response.ok) {
-            const copy = response.clone();
-            void caches.open(CACHE_NAME).then((cache) => {
-              cache.put(request, copy);
-            });
-          }
-          return response;
-        })
-        .catch(() => cached);
-
-      return cached || network;
-    })
+    fetch(request)
+      .then((response) => {
+        if (response.ok) {
+          const copy = response.clone();
+          void caches.open(CACHE_NAME).then((cache) => {
+            cache.put(request, copy);
+          });
+        }
+        return response;
+      })
+      .catch(async () => {
+        const cached = await caches.match(request);
+        return cached || Response.error();
+      })
   );
 });
 

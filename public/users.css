@@ -1165,6 +1165,20 @@ button,
   color: #0b5f5b;
 }
 
+.payment-summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.payment-summary-actions button {
+  flex: 1 1 180px;
+}
+
+.payment-summary-note {
+  margin: -2px 0 0;
+}
+
 .payments-grid {
   display: grid;
   gap: 16px;
@@ -1516,6 +1530,11 @@ body.app-loading #resident-password-change-panel {
   .payment-provider-field,
   .receipt-grid {
     grid-column: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .payment-summary-actions {
+    display: grid;
     grid-template-columns: 1fr;
   }
 

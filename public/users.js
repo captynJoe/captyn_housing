@@ -14,7 +14,7 @@ import {
 const RESIDENT_TOKEN_KEY = "captyn_resident_session_token";
 const RESIDENT_SESSION_TOKEN_KEY = "captyn_resident_session_token_session";
 const RESIDENT_REMEMBER_DEVICE_KEY = "captyn_resident_remember_device";
-const RESIDENT_SW_URL = "/resident-sw.js?v=20260508b";
+const RESIDENT_SW_URL = "/resident-sw.js?v=20260508c";
 
 let deferredInstallPrompt = null;
 let residentSwRegistrationPromise = null;
@@ -104,6 +104,7 @@ const paymentsSummaryActionEl = document.getElementById("payments-summary-action
 const paymentsTotalOutstandingEl = document.getElementById("payments-total-outstanding");
 const paymentsRentOutstandingEl = document.getElementById("payments-rent-outstanding");
 const paymentsUtilityOutstandingEl = document.getElementById("payments-utility-outstanding");
+const paymentShortcutButtons = [...document.querySelectorAll("[data-payment-shortcut]")];
 const utilityBillsSummaryEl = document.getElementById("utility-bills-summary");
 const utilityBillsListEl = document.getElementById("utility-bills-list");
 const rentPaymentClusterEl = document.querySelector(".payment-cluster-rent");
@@ -949,6 +950,60 @@ function getUtilityOutstandingBalance(utilityType) {
   return getTotalOutstandingUtilityBalanceForType(utilityType);
 }
 
+function resolveShortcutUtilityType(preferredType) {
+  const explicitType =
+    preferredType === "electricity" || preferredType === "water" ? preferredType : "";
+  if (explicitType && getUtilityOutstandingBalance(explicitType) > 0) {
+    return explicitType;
+  }
+
+  const balances = [
+    ["water", getUtilityOutstandingBalance("water")],
+    ["electricity", getUtilityOutstandingBalance("electricity")]
+  ];
+  const firstOpen = balances.find(([, balance]) => balance > 0);
+  return firstOpen ? firstOpen[0] : "water";
+}
+
+function syncPaymentShortcutButtons() {
+  const billingEnabled = !state.residentSession || canResidentAccessBilling();
+  const rentOutstanding = getRentOutstandingBalance();
+  const utilityOutstanding = getTotalUtilityOutstandingBalance();
+  const totalOutstanding = getTotalOutstandingBalance();
+  const suggestedStarter = computeSuggestedStarterAmount(totalOutstanding);
+
+  paymentShortcutButtons.forEach((button) => {
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    const shortcut = String(button.dataset.paymentShortcut || "").trim();
+    if (shortcut === "utility-full") {
+      button.disabled = !billingEnabled || utilityOutstanding <= 0;
+      button.textContent =
+        utilityOutstanding > 0
+          ? `Use utility ${formatCurrency(utilityOutstanding)}`
+          : "Utility cleared";
+      return;
+    }
+
+    if (shortcut === "rent-full") {
+      button.disabled = !billingEnabled || rentOutstanding <= 0;
+      button.textContent =
+        rentOutstanding > 0 ? `Use rent ${formatCurrency(rentOutstanding)}` : "Rent cleared";
+      return;
+    }
+
+    if (shortcut === "suggested-start") {
+      button.disabled = !billingEnabled || totalOutstanding <= 0;
+      button.textContent =
+        totalOutstanding > 0
+          ? `Suggested ${formatCurrency(suggestedStarter)}`
+          : "Nothing due now";
+    }
+  });
+}
+
 function computeRemainingBalance(balance, amount) {
   return Math.max(0, Math.ceil(toPositiveNumber(balance)) - Math.ceil(toPositiveNumber(amount)));
 }
@@ -959,6 +1014,7 @@ function updatePaymentsSummaryCard() {
     paymentsRentOutstandingEl.textContent = formatCurrency(0);
     paymentsUtilityOutstandingEl.textContent = formatCurrency(0);
     paymentsSummaryActionEl.textContent = getPendingReviewBillingMessage();
+    syncPaymentShortcutButtons();
     return;
   }
 
@@ -973,6 +1029,7 @@ function updatePaymentsSummaryCard() {
   if (totalOutstanding <= 0) {
     paymentsSummaryActionEl.textContent =
       "All balances are clear right now. If a new bill is posted, you can still pay it in small steps.";
+    syncPaymentShortcutButtons();
     return;
   }
 
@@ -988,6 +1045,7 @@ function updatePaymentsSummaryCard() {
   )} at once. A good start today is ${formatCurrency(
     suggestedStarter
   )}, and the remainder stays on your account.`;
+  syncPaymentShortcutButtons();
 }
 
 function updateRentPaymentGuidance() {
@@ -1113,6 +1171,87 @@ function syncPaymentMessaging() {
   updatePaymentsSummaryCard();
   updateRentPaymentGuidance();
   updateUtilityPaymentGuidance();
+}
+
+function focusResidentPaymentSection(section, input) {
+  setActiveResidentView("payments");
+  window.requestAnimationFrame(() => {
+    if (section instanceof HTMLElement) {
+      section.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    if (input instanceof HTMLInputElement) {
+      input.focus({ preventScroll: true });
+      input.select();
+    }
+  });
+}
+
+function applyResidentPaymentShortcut(shortcut) {
+  if (state.residentSession && !canResidentAccessBilling()) {
+    showFeedback(getPendingReviewBillingMessage());
+    setActiveResidentView("payments", { scroll: true });
+    return;
+  }
+
+  if (shortcut === "utility-full") {
+    const utilityType = resolveShortcutUtilityType(utilityPaymentTypeEl?.value);
+    const totalOutstanding = getUtilityOutstandingBalance(utilityType);
+    if (totalOutstanding <= 0) {
+      showFeedback(
+        `No ${utilityLabel(utilityType).toLowerCase()} balance is open right now.`,
+        "info"
+      );
+      return;
+    }
+
+    utilityPaymentTypeEl.value = utilityType;
+    setSelectedUtilityBillMonth(utilityType, null);
+    applyPaymentAccessUi();
+    syncUtilityPaymentFormFromBalances();
+    utilityPaymentAmountEl.value = formatAmountValue(totalOutstanding);
+    updateUtilityPaymentGuidance();
+    focusResidentPaymentSection(utilityPaymentSectionEl, utilityPaymentAmountEl);
+    return;
+  }
+
+  if (shortcut === "rent-full") {
+    const rentOutstanding = getRentOutstandingBalance();
+    if (rentOutstanding <= 0) {
+      showFeedback("No rent balance is open right now.", "info");
+      return;
+    }
+
+    rentPaymentAmountEl.value = formatAmountValue(rentOutstanding);
+    updateRentPaymentGuidance();
+    focusResidentPaymentSection(rentPaymentSectionEl, rentPaymentAmountEl);
+    return;
+  }
+
+  const rentOutstanding = getRentOutstandingBalance();
+  const waterOutstanding = getUtilityOutstandingBalance("water");
+  const electricityOutstanding = getUtilityOutstandingBalance("electricity");
+  const largestUtilityType =
+    electricityOutstanding > waterOutstanding ? "electricity" : "water";
+  const utilityOutstanding = Math.max(waterOutstanding, electricityOutstanding);
+
+  if (utilityOutstanding >= rentOutstanding && utilityOutstanding > 0) {
+    utilityPaymentTypeEl.value = largestUtilityType;
+    setSelectedUtilityBillMonth(largestUtilityType, null);
+    applyPaymentAccessUi();
+    syncUtilityPaymentFormFromBalances();
+    utilityPaymentAmountEl.value = formatAmountValue(
+      computeSuggestedStarterAmount(utilityOutstanding)
+    );
+    updateUtilityPaymentGuidance();
+    focusResidentPaymentSection(utilityPaymentSectionEl, utilityPaymentAmountEl);
+    return;
+  }
+
+  if (rentOutstanding > 0) {
+    rentPaymentAmountEl.value = formatAmountValue(computeSuggestedStarterAmount(rentOutstanding));
+    updateRentPaymentGuidance();
+    focusResidentPaymentSection(rentPaymentSectionEl, rentPaymentAmountEl);
+  }
 }
 
 function escapeHtml(value) {
@@ -4539,6 +4678,16 @@ function startResidentPortal() {
       setActiveResidentView("notices", { scroll: true });
     });
   }
+
+  paymentShortcutButtons.forEach((button) => {
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    button.addEventListener("click", () => {
+      applyResidentPaymentShortcut(String(button.dataset.paymentShortcut || ""));
+    });
+  });
 
   authBuildingIdEl?.addEventListener("change", () => {
     updateResidentBranding();

@@ -1,11 +1,11 @@
-const CACHE_NAME = "resident-portal-v20260508b";
+const CACHE_NAME = "resident-portal-v20260508c";
 const RESIDENT_SHELL_URL = "/resident";
 const USER_SHELL_URL = "/user/";
 const APP_ASSETS = [
   RESIDENT_SHELL_URL,
   USER_SHELL_URL,
-  "/users.css?v=20260325a",
-  "/users.js?v=20260508b",
+  "/users.css?v=20260508c",
+  "/users.js?v=20260508c",
   "/user.css?v=20260315g",
   "/user.js?v=20260325a",
   "/password-visibility.js",

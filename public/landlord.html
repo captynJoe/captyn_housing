@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=20260322b" />
-    <link rel="stylesheet" href="/landlord.css?v=20260404d" />
+    <link rel="stylesheet" href="/landlord.css?v=20260508b" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -129,6 +129,73 @@
           <button type="button" class="metric-card metric-card-btn" data-metric-target="payments"><p>Paid Total</p><strong id="metric-payments">-</strong></button>
           <button type="button" class="metric-card metric-card-btn" data-metric-target="outstanding"><p>Outstanding</p><strong id="metric-balance">-</strong></button>
         </div>
+      </section>
+
+      <section class="panel landlord-focus-panel">
+        <div class="panel-head">
+          <h2>Current Building Focus</h2>
+          <div class="action-row landlord-focus-actions">
+            <button
+              type="button"
+              data-landlord-focus-target-view="buildings"
+              data-landlord-focus-target-section="buildings-section"
+            >
+              Manage
+            </button>
+            <button
+              type="button"
+              data-landlord-focus-target-view="residents"
+              data-landlord-focus-target-section="residents-section"
+            >
+              Residents
+            </button>
+            <button
+              type="button"
+              data-landlord-focus-target-view="utilities"
+              data-landlord-focus-target-section="utilities-registry-section"
+            >
+              Utilities
+            </button>
+            <button
+              type="button"
+              data-landlord-focus-target-view="applications"
+              data-landlord-focus-target-section="overview-issues-section"
+            >
+              Requests
+            </button>
+          </div>
+        </div>
+        <p class="status-text">
+          Pick one working building here. The main landlord forms and room lookups follow this
+          focus so you do not keep re-selecting the same property.
+        </p>
+        <div class="landlord-focus-grid">
+          <label class="landlord-focus-field">
+            Working Building
+            <select id="landlord-focus-building-select"></select>
+          </label>
+          <div class="landlord-focus-summary" aria-live="polite">
+            <div class="landlord-focus-stat">
+              <span>Units</span>
+              <strong id="landlord-focus-units">-</strong>
+            </div>
+            <div class="landlord-focus-stat">
+              <span>Resident users</span>
+              <strong id="landlord-focus-residents">-</strong>
+            </div>
+            <div class="landlord-focus-stat">
+              <span>Open utility bills</span>
+              <strong id="landlord-focus-open-bills">-</strong>
+            </div>
+            <div class="landlord-focus-stat">
+              <span>Outstanding</span>
+              <strong id="landlord-focus-outstanding">-</strong>
+            </div>
+          </div>
+        </div>
+        <p id="landlord-focus-note" class="status-text landlord-focus-note">
+          Choose a building to keep the workspace aligned.
+        </p>
       </section>
 
       <div class="landlord-workspace">
@@ -269,6 +336,20 @@
           <p class="status-text">
             Create a building first, then switch into it or bulk-add more rooms/houses later.
           </p>
+          <div class="landlord-manage-tools">
+            <label class="landlord-manage-search">
+              Find Building
+              <input
+                id="building-management-search"
+                type="search"
+                maxlength="120"
+                placeholder="Name, ID, county, address"
+              />
+            </label>
+            <p id="building-management-summary" class="status-text">
+              Showing all buildings in your portfolio.
+            </p>
+          </div>
 
           <div class="package-card">
             <div class="panel-head">
@@ -1382,6 +1463,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=20260508a"></script>
+    <script type="module" src="/landlord.js?v=20260508b"></script>
   </body>
 </html>

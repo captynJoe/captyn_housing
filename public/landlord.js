@@ -30,12 +30,23 @@ const metricUnpaidEl = document.getElementById("metric-unpaid");
 const metricOverdueEl = document.getElementById("metric-overdue");
 const metricPaymentsEl = document.getElementById("metric-payments");
 const metricBalanceEl = document.getElementById("metric-balance");
+const landlordFocusBuildingSelectEl = document.getElementById(
+  "landlord-focus-building-select"
+);
+const landlordFocusUnitsEl = document.getElementById("landlord-focus-units");
+const landlordFocusResidentsEl = document.getElementById("landlord-focus-residents");
+const landlordFocusOpenBillsEl = document.getElementById("landlord-focus-open-bills");
+const landlordFocusOutstandingEl = document.getElementById("landlord-focus-outstanding");
+const landlordFocusNoteEl = document.getElementById("landlord-focus-note");
 const metricCardButtons = [...document.querySelectorAll("[data-metric-target]")];
 const landlordNavButtons = [
   ...document.querySelectorAll("[data-landlord-view]")
 ];
 const landlordViewPanels = [
   ...document.querySelectorAll("[data-landlord-view-panel]")
+];
+const landlordFocusTargetButtons = [
+  ...document.querySelectorAll("[data-landlord-focus-target-view]")
 ];
 const openCreateBuildingDrawerButtons = [
   ...document.querySelectorAll('[data-action="open-create-building-drawer"]')
@@ -76,6 +87,10 @@ const generateHouseNumbersBtnEl = document.getElementById(
 const buildingHousePreviewEl = document.getElementById("building-house-preview");
 const buildingsBodyEl = document.getElementById("buildings-body");
 const refreshBuildingsBtnEl = document.getElementById("refresh-buildings");
+const buildingManagementSearchEl = document.getElementById("building-management-search");
+const buildingManagementSummaryEl = document.getElementById(
+  "building-management-summary"
+);
 const buildingPhotoFormEl = document.getElementById("building-photo-form");
 const buildingPhotoBuildingSelectEl = document.getElementById(
   "building-photo-building-select"
@@ -307,6 +322,7 @@ const state = {
   tickets: [],
   residentDirectory: [],
   residentDirectoryByKey: new Map(),
+  buildingManagementQuery: "",
   selectedResidentsBuildingId: "",
   selectedOverviewRoomBuildingId: "all",
   residentStatusFilter: "all",
@@ -330,6 +346,10 @@ const state = {
 const BUILDING_PHOTO_LIMIT = 1;
 const APPLICATION_REFRESH_INTERVAL_MS = 30_000;
 const UTILITY_BALANCE_VISIBILITY_WINDOW_DAYS = 7;
+const buildingLabelCollator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base"
+});
 
 initResponsiveTables();
 
@@ -671,17 +691,44 @@ function getBuildingNameById(buildingId) {
   return getBuildingRecord(buildingId)?.name ?? "";
 }
 
-function resolveActiveLandlordBuildingName() {
+function compareBuildingRecords(a, b) {
+  const nameComparison = buildingLabelCollator.compare(
+    String(a?.name ?? ""),
+    String(b?.name ?? "")
+  );
+  if (nameComparison !== 0) {
+    return nameComparison;
+  }
+
+  return buildingLabelCollator.compare(String(a?.id ?? ""), String(b?.id ?? ""));
+}
+
+function getFocusedBuildingId() {
   const candidates = [
     state.selectedRegistryBuildingId,
     state.selectedRoomBuildingId,
+    state.selectedCaretakerBuildingId,
+    state.selectedRentPaymentBuildingId,
+    state.selectedWifiPackageBuildingId,
+    state.buildings[0]?.id
+  ];
+
+  for (const candidate of candidates) {
+    const normalizedBuildingId = normalizeLookupBuildingId(candidate);
+    if (normalizedBuildingId && state.buildingById.has(normalizedBuildingId)) {
+      return normalizedBuildingId;
+    }
+  }
+
+  return "";
+}
+
+function resolveActiveLandlordBuildingName() {
+  const candidates = [
+    getFocusedBuildingId(),
     state.selectedResidentsBuildingId,
     state.selectedOverviewRoomBuildingId,
-    state.selectedWifiPackageBuildingId,
-    state.selectedCaretakerBuildingId,
-    state.selectedTicketBuildingId,
-    state.selectedRentPaymentBuildingId,
-    state.buildings[0]?.id
+    state.selectedTicketBuildingId
   ];
 
   for (const candidate of candidates) {
@@ -3901,18 +3948,170 @@ async function ensureSession() {
   }
 }
 
+function getFocusedBuildingSummary(buildingId) {
+  const building = getBuildingRecord(buildingId);
+  if (!building) {
+    return null;
+  }
+
+  const units = Array.isArray(building.houseNumbers)
+    ? building.houseNumbers.length
+    : Number(building.units ?? 0);
+  const utilityBills = getActionableUtilityBills(state.bills).filter(
+    (item) => normalizeLookupBuildingId(item.buildingId) === buildingId
+  );
+  let openBills = 0;
+  let outstanding = 0;
+
+  utilityBills.forEach((item) => {
+    const balanceKsh = utilityAmount(item.balanceKsh);
+    if (balanceKsh > 0) {
+      openBills += 1;
+    }
+    outstanding += balanceKsh;
+  });
+
+  return {
+    building,
+    units: Number.isFinite(units) ? Math.max(0, units) : 0,
+    residentUsers: Math.max(0, Number(building.residentUsers ?? 0)),
+    openBills,
+    outstanding
+  };
+}
+
+function renderLandlordFocusPanel() {
+  if (
+    !(landlordFocusBuildingSelectEl instanceof HTMLSelectElement) ||
+    !(landlordFocusUnitsEl instanceof HTMLElement) ||
+    !(landlordFocusResidentsEl instanceof HTMLElement) ||
+    !(landlordFocusOpenBillsEl instanceof HTMLElement) ||
+    !(landlordFocusOutstandingEl instanceof HTMLElement) ||
+    !(landlordFocusNoteEl instanceof HTMLElement)
+  ) {
+    return;
+  }
+
+  landlordFocusBuildingSelectEl.replaceChildren();
+
+  if (!Array.isArray(state.buildings) || state.buildings.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No buildings available";
+    landlordFocusBuildingSelectEl.append(option);
+    landlordFocusBuildingSelectEl.disabled = true;
+    landlordFocusUnitsEl.textContent = "-";
+    landlordFocusResidentsEl.textContent = "-";
+    landlordFocusOpenBillsEl.textContent = "-";
+    landlordFocusOutstandingEl.textContent = "-";
+    landlordFocusNoteEl.textContent =
+      "Create your first building to unlock room setup, residents, and utility workflows.";
+    return;
+  }
+
+  const selectedBuildingId = getFocusedBuildingId() || state.buildings[0]?.id || "";
+  const orderedBuildings = [...state.buildings].sort(compareBuildingRecords);
+  landlordFocusBuildingSelectEl.disabled = false;
+
+  orderedBuildings.forEach((building) => {
+    const option = document.createElement("option");
+    option.value = building.id;
+    option.textContent = `${building.name} (${building.id})`;
+    if (building.id === selectedBuildingId) {
+      option.selected = true;
+    }
+    landlordFocusBuildingSelectEl.append(option);
+  });
+
+  const summary = getFocusedBuildingSummary(selectedBuildingId);
+  if (!summary) {
+    landlordFocusUnitsEl.textContent = "-";
+    landlordFocusResidentsEl.textContent = "-";
+    landlordFocusOpenBillsEl.textContent = "-";
+    landlordFocusOutstandingEl.textContent = "-";
+    landlordFocusNoteEl.textContent = "Choose a building to keep the workspace aligned.";
+    return;
+  }
+
+  landlordFocusUnitsEl.textContent = String(summary.units);
+  landlordFocusResidentsEl.textContent = String(summary.residentUsers);
+  landlordFocusOpenBillsEl.textContent = String(summary.openBills);
+  landlordFocusOutstandingEl.textContent = formatCurrency(summary.outstanding);
+  landlordFocusNoteEl.textContent = `${summary.building.name} • ${summary.building.county} • ${summary.building.address} • Updated ${formatDateTime(summary.building.updatedAt)}`;
+}
+
+function matchesBuildingManagementQuery(building, query) {
+  const normalizedQuery = String(query ?? "").trim().toLowerCase();
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  const haystack = [
+    building?.id,
+    building?.name,
+    building?.address,
+    building?.county
+  ]
+    .map((value) => String(value ?? "").trim().toLowerCase())
+    .join(" ");
+  return haystack.includes(normalizedQuery);
+}
+
+function renderBuildingManagementSummary(totalCount, visibleCount) {
+  if (!(buildingManagementSummaryEl instanceof HTMLElement)) {
+    return;
+  }
+
+  if (totalCount <= 0) {
+    buildingManagementSummaryEl.textContent =
+      "Create your first building, then focus it once and the main landlord tools will follow it.";
+    return;
+  }
+
+  const query = String(state.buildingManagementQuery ?? "").trim();
+  const focusedBuildingId = getFocusedBuildingId();
+  const focusedBuildingName = getBuildingNameById(focusedBuildingId);
+  const visibilityCopy = query
+    ? `Showing ${visibleCount} of ${totalCount} buildings for "${query}".`
+    : `Showing ${visibleCount} of ${totalCount} buildings.`;
+  const focusCopy =
+    focusedBuildingId && focusedBuildingName
+      ? ` Current focus: ${focusedBuildingName} (${focusedBuildingId}).`
+      : "";
+
+  buildingManagementSummaryEl.textContent = `${visibilityCopy}${focusCopy}`;
+}
+
 function renderBuildings(rows) {
   buildingsBodyEl.replaceChildren();
 
-  if (!Array.isArray(rows) || rows.length === 0) {
+  const allRows = Array.isArray(rows) ? rows : [];
+  const filteredRows = [...allRows]
+    .filter((item) => matchesBuildingManagementQuery(item, state.buildingManagementQuery))
+    .sort(compareBuildingRecords);
+  const focusedBuildingId = getFocusedBuildingId();
+
+  renderBuildingManagementSummary(allRows.length, filteredRows.length);
+
+  if (allRows.length === 0) {
     const row = document.createElement("tr");
     row.innerHTML = '<td colspan="8">No landlord buildings yet.</td>';
     buildingsBodyEl.append(row);
     return;
   }
 
-  [...rows].sort((a, b) => compareHouseNumber(a.houseNumber, b.houseNumber)).forEach((item) => {
+  if (filteredRows.length === 0) {
     const row = document.createElement("tr");
+    row.innerHTML = `<td colspan="8">No buildings match "${escapeHtml(
+      state.buildingManagementQuery
+    )}".</td>`;
+    buildingsBodyEl.append(row);
+    return;
+  }
+
+  filteredRows.forEach((item) => {
+    const row = document.createElement("tr");
+    const isFocused = item.id === focusedBuildingId;
     const houseCount = Array.isArray(item.houseNumbers)
       ? item.houseNumbers.length
       : Number(item.units ?? 0);
@@ -3925,8 +4124,9 @@ function renderBuildings(rows) {
         data-action="switch-building"
         data-building-id="${escapeHtml(item.id)}"
         data-building-name="${escapeHtml(item.name)}"
+        ${isFocused ? "disabled" : ""}
       >
-        Use Building
+        ${isFocused ? "Focused" : "Focus Building"}
       </button>
     `;
     const addRoomsButton = isCaretakerRole()
@@ -3954,6 +4154,7 @@ function renderBuildings(rows) {
           Delete Building
         </button>
       `;
+    row.className = `landlord-building-row${isFocused ? " is-focused-row" : ""}`;
     row.innerHTML = `
       <td>${item.id}</td>
       <td>${
@@ -3961,7 +4162,12 @@ function renderBuildings(rows) {
           ? `<a href="${escapeHtml(primaryPhoto)}" target="_blank" rel="noreferrer"><img class="building-table-thumb" src="${escapeHtml(primaryPhoto)}" alt="${escapeHtml(item.name)} front view" loading="lazy" /></a>`
           : '<span class="ticket-details muted">No photo</span>'
       }</td>
-      <td>${item.name}</td>
+      <td>
+        <div class="landlord-building-name">
+          <strong>${item.name}</strong>
+          ${isFocused ? '<span class="ticket-details muted">Current workspace focus</span>' : ""}
+        </div>
+      </td>
       <td>${item.address}</td>
       <td>${item.county}</td>
       <td>${houseCount}</td>
@@ -4034,6 +4240,8 @@ function setPreferredBuildingSelection(buildingId, options = {}) {
   state.selectedCaretakerBuildingId = normalizedBuildingId;
   state.selectedTicketBuildingId = normalizedBuildingId;
   state.selectedOverviewRoomBuildingId = normalizedBuildingId;
+  state.selectedWifiPackageBuildingId = normalizedBuildingId;
+  state.selectedRentPaymentBuildingId = normalizedBuildingId;
   if (options.includeResidents !== false) {
     state.selectedResidentsBuildingId = normalizedBuildingId;
   }
@@ -4049,6 +4257,12 @@ function setPreferredBuildingSelection(buildingId, options = {}) {
   }
   if (caretakerBuildingSelectEl instanceof HTMLSelectElement) {
     caretakerBuildingSelectEl.value = normalizedBuildingId;
+  }
+  if (wifiPackageBuildingSelectEl instanceof HTMLSelectElement) {
+    wifiPackageBuildingSelectEl.value = normalizedBuildingId;
+  }
+  if (rentPaymentBuildingSelectEl instanceof HTMLSelectElement) {
+    rentPaymentBuildingSelectEl.value = normalizedBuildingId;
   }
   if (landlordTicketBuildingSelectEl instanceof HTMLSelectElement) {
     landlordTicketBuildingSelectEl.value = normalizedBuildingId;
@@ -4070,6 +4284,8 @@ function setPreferredBuildingSelection(buildingId, options = {}) {
   }
 
   syncBuildingPhotoPreview();
+  renderLandlordFocusPanel();
+  renderBuildings(state.buildings);
   updateLandlordBranding();
 }
 
@@ -6065,6 +6281,7 @@ function renderMetrics() {
   metricOverdueEl.textContent = String(overdue);
   metricPaymentsEl.textContent = formatCurrency(paidTotal);
   metricBalanceEl.textContent = formatCurrency(outstanding);
+  renderLandlordFocusPanel();
 }
 
 function createUtilityBillPayload() {
@@ -7234,7 +7451,7 @@ createBuildingFormEl?.addEventListener("submit", (event) => {
 
       await loadBuildings();
       if (createdBuildingId) {
-        await activateBuilding(createdBuildingId, { view: "utilities" });
+        await activateBuilding(createdBuildingId, { view: "buildings" });
       }
       closeCreateBuildingDrawer();
       setStatus(`Created building ${buildingLabel}.`);
@@ -7342,10 +7559,10 @@ buildingsBodyEl.addEventListener("click", (event) => {
   target.disabled = true;
   clearError();
 
-  void activateBuilding(buildingId, { view: "utilities" })
+  void activateBuilding(buildingId)
     .then(() => {
       const buildingName = String(target.dataset.buildingName || buildingId).trim();
-      setStatus(`Switched to ${buildingName}.`);
+      setStatus(`Focused on ${buildingName}. The main landlord tools now follow this building.`);
     })
     .catch((error) => {
       handleLandlordError(error, "Failed to switch building.");
@@ -8449,6 +8666,42 @@ refreshBuildingsBtnEl.addEventListener("click", () => {
     ]);
   })().catch((error) => {
     handleLandlordError(error, "Unable to refresh buildings.");
+  });
+});
+
+buildingManagementSearchEl?.addEventListener("input", () => {
+  state.buildingManagementQuery = String(buildingManagementSearchEl.value || "").trim();
+  renderBuildings(state.buildings);
+});
+
+landlordFocusBuildingSelectEl?.addEventListener("change", () => {
+  const buildingId = String(landlordFocusBuildingSelectEl.value || "").trim();
+  if (!buildingId) {
+    return;
+  }
+
+  clearError();
+  void activateBuilding(buildingId)
+    .then(() => {
+      const buildingName = getBuildingNameById(buildingId) || buildingId;
+      setStatus(`Focused on ${buildingName}.`);
+    })
+    .catch((error) => {
+      handleLandlordError(error, "Failed to switch current building.");
+    });
+});
+
+landlordFocusTargetButtons.forEach((button) => {
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  button.addEventListener("click", () => {
+    setActiveLandlordView(String(button.dataset.landlordFocusTargetView || "overview"));
+    const sectionId = String(button.dataset.landlordFocusTargetSection || "").trim();
+    if (sectionId) {
+      scrollToLandlordSection(sectionId);
+    }
   });
 });
 

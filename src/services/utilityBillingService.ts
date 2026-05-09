@@ -84,6 +84,14 @@ export interface RecordUtilityPaymentResult {
   totalAppliedAmountKsh: number;
 }
 
+export interface UtilityPaymentPreview {
+  targetBill: UtilityBillSnapshot;
+  effectiveBill: UtilityBillSnapshot;
+  candidateBills: UtilityBillSnapshot[];
+  availableBalanceKsh: number;
+  requestedAmountKsh: number;
+}
+
 interface UtilityPaymentReferenceIndexEntry {
   events: UtilityPaymentEvent[];
   billIds: string[];
@@ -145,6 +153,15 @@ export interface CombinedUtilityChargeRoomAmount {
   buildingId: string;
   houseNumber: string;
   amountKsh: number;
+}
+
+interface ResolvedUtilityPaymentContext {
+  normalizedHouse: string;
+  candidateBills: UtilityBillRecord[];
+  targetBill: UtilityBillRecord;
+  effectiveBill: UtilityBillRecord;
+  availableBalanceKsh: number;
+  requestedAmountKsh: number;
 }
 
 type UtilityBillingStateChangeHandler = (
@@ -224,6 +241,47 @@ function monthSortDesc(a: string, b: string): number {
   return b.localeCompare(a);
 }
 
+function shiftBillingMonthLabel(billingMonth: string, offset: number): string | null {
+  const match = String(billingMonth ?? "").trim().match(/^(\d{4})-(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    return null;
+  }
+
+  const shifted = new Date(Date.UTC(year, month - 1 + offset, 1, 0, 0, 0, 0));
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function shiftIsoDateByMonths(value: string, offset: number): string | null {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  const targetMonthIndex = parsed.getUTCMonth() + offset;
+  const lastDayOfTargetMonth = new Date(
+    Date.UTC(parsed.getUTCFullYear(), targetMonthIndex + 1, 0, 0, 0, 0, 0)
+  ).getUTCDate();
+  const targetDay = Math.min(parsed.getUTCDate(), lastDayOfTargetMonth);
+
+  return new Date(
+    Date.UTC(
+      parsed.getUTCFullYear(),
+      targetMonthIndex,
+      targetDay,
+      parsed.getUTCHours(),
+      parsed.getUTCMinutes(),
+      parsed.getUTCSeconds(),
+      parsed.getUTCMilliseconds()
+    )
+  ).toISOString();
+}
+
 function subtractUtcDays(value: string, days: number): string | null {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
@@ -245,6 +303,17 @@ function isBaselineCutoverBill(record: UtilityBillRecord): boolean {
 
 function isCombinedUtilityFeeRecord(record: UtilityBillRecord): boolean {
   return String(record.note ?? "").trim().startsWith("Combined utility fee");
+}
+
+function isRecurringNonMeteredBill(record: UtilityBillRecord): boolean {
+  return (
+    String(record.meterNumber ?? "").trim().toUpperCase() === "NO-METER" &&
+    Math.max(0, Number(record.fixedChargeKsh ?? 0), Number(record.amountKsh ?? 0)) > 0 &&
+    Number(record.previousReading ?? 0) <= 0 &&
+    Number(record.currentReading ?? 0) <= 0 &&
+    Number(record.unitsConsumed ?? 0) <= 0 &&
+    Number(record.ratePerUnitKsh ?? 0) <= 0
+  );
 }
 
 function normalizeConfiguredMeterNumber(value: string | undefined): string {
@@ -722,6 +791,108 @@ export class UtilityBillingService {
     return this.toSnapshot(bill);
   }
 
+  backfillRecurringBills(options: {
+    utilityType?: UtilityType;
+    buildingId?: string;
+    houseNumber?: string;
+    visibleThroughDate?: string | Date;
+  } = {}): UtilityBillSnapshot[] {
+    const defaultVisibleThrough = new Date(
+      Date.now() + UTILITY_BALANCE_VISIBILITY_WINDOW_DAYS * 24 * 60 * 60 * 1000
+    );
+    const visibleThroughDate =
+      options.visibleThroughDate instanceof Date
+        ? options.visibleThroughDate
+        : options.visibleThroughDate
+          ? new Date(options.visibleThroughDate)
+          : defaultVisibleThrough;
+    const visibleThroughMs = Number.isNaN(visibleThroughDate.getTime())
+      ? defaultVisibleThrough.getTime()
+      : visibleThroughDate.getTime();
+    const normalizedBuildingId = options.buildingId
+      ? normalizeBuildingId(options.buildingId)
+      : undefined;
+    const normalizedHouse = options.houseNumber
+      ? normalizeHouseNumber(options.houseNumber)
+      : undefined;
+    const createdBills: UtilityBillSnapshot[] = [];
+
+    for (const records of this.billsByLedger.values()) {
+      if (records.length === 0) {
+        continue;
+      }
+
+      const sample = records[0];
+      if (options.utilityType && sample.utilityType !== options.utilityType) {
+        continue;
+      }
+      if (normalizedBuildingId && sample.buildingId !== normalizedBuildingId) {
+        continue;
+      }
+      if (normalizedHouse && sample.houseNumber !== normalizedHouse) {
+        continue;
+      }
+
+      let orderedRecords = [...records].sort((a, b) =>
+        monthSortAsc(a.billingMonth, b.billingMonth)
+      );
+      let cursor = [...orderedRecords]
+        .sort((a, b) => monthSortDesc(a.billingMonth, b.billingMonth))
+        .find((item) => isRecurringNonMeteredBill(item));
+
+      if (!cursor) {
+        continue;
+      }
+
+      while (true) {
+        const nextBillingMonth = shiftBillingMonthLabel(cursor.billingMonth, 1);
+        const nextDueDate = shiftIsoDateByMonths(cursor.dueDate, 1);
+        if (!nextBillingMonth || !nextDueDate) {
+          break;
+        }
+
+        const nextDueMs = Date.parse(nextDueDate);
+        if (!Number.isFinite(nextDueMs) || nextDueMs > visibleThroughMs) {
+          break;
+        }
+
+        const existing = orderedRecords.find((item) => item.billingMonth === nextBillingMonth);
+        if (existing) {
+          if (!isRecurringNonMeteredBill(existing)) {
+            break;
+          }
+          cursor = existing;
+          continue;
+        }
+
+        const fixedChargeKsh = Math.max(
+          0,
+          Math.round(Number(cursor.fixedChargeKsh ?? cursor.amountKsh ?? 0))
+        );
+        if (fixedChargeKsh <= 0) {
+          break;
+        }
+
+        const created = this.createBill(cursor.utilityType, cursor.buildingId, cursor.houseNumber, {
+          billingMonth: nextBillingMonth,
+          fixedChargeKsh,
+          dueDate: nextDueDate,
+          note: cursor.note?.trim() || undefined
+        });
+        createdBills.push(created);
+
+        orderedRecords = [...records].sort((a, b) => monthSortAsc(a.billingMonth, b.billingMonth));
+        const createdRecord = records.find((item) => item.billingMonth === nextBillingMonth);
+        if (!createdRecord) {
+          break;
+        }
+        cursor = createdRecord;
+      }
+    }
+
+    return createdBills;
+  }
+
   listBills(options: ListUtilityBillsOptions = {}): UtilityBillSnapshot[] {
     const limit = Number.isFinite(options.limit)
       ? Math.min(Math.max(options.limit ?? 300, 1), 1_000)
@@ -907,56 +1078,34 @@ export class UtilityBillingService {
     );
   }
 
+  previewPayment(
+    utilityType: UtilityType,
+    buildingId: string,
+    houseNumber: string,
+    input: Pick<RecordUtilityPaymentInput, "billingMonth" | "amountKsh">
+  ): UtilityPaymentPreview {
+    const context = this.resolvePaymentContext(utilityType, buildingId, houseNumber, input);
+    return {
+      targetBill: this.toSnapshot(context.targetBill),
+      effectiveBill: this.toSnapshot(context.effectiveBill),
+      candidateBills: context.candidateBills.map((item) => this.toSnapshot(item)),
+      availableBalanceKsh: context.availableBalanceKsh,
+      requestedAmountKsh: context.requestedAmountKsh
+    };
+  }
+
   recordPayment(
     utilityType: UtilityType,
     buildingId: string,
     houseNumber: string,
     input: RecordUtilityPaymentInput
   ): RecordUtilityPaymentResult {
-    const normalizedBuildingId = normalizeBuildingId(buildingId);
-    const normalizedHouse = normalizeHouseNumber(houseNumber);
-    const key = ledgerKey(utilityType, normalizedBuildingId, normalizedHouse);
-    const records = this.billsByLedger.get(key) ?? [];
-    const legacyRecords =
-      normalizedBuildingId === UTILITY_LEGACY_BUILDING_ID
-        ? []
-        : this.billsByLedger.get(
-            ledgerKey(utilityType, UTILITY_LEGACY_BUILDING_ID, normalizedHouse)
-          ) ?? [];
-    const mergedRecords = records.length > 0 ? records : legacyRecords;
-
-    if (mergedRecords.length === 0) {
-      throw new Error(`No ${utilityType} bills found for house ${normalizedHouse}.`);
-    }
-
-    const openBills = [...mergedRecords]
-      .filter((item) => item.balanceKsh > 0)
-      .sort((a, b) => monthSortAsc(a.billingMonth, b.billingMonth));
-
-    const target = input.billingMonth
-      ? mergedRecords.find((item) => item.billingMonth === input.billingMonth)
-      : openBills[0];
-
-    if (!target) {
-      throw new Error(
-        input.billingMonth
-          ? `${utilityType} bill for ${input.billingMonth} was not found.`
-          : `No outstanding ${utilityType} bill found for house ${normalizedHouse}.`
-      );
-    }
-
-    const candidateBills = input.billingMonth
-      ? [
-          target,
-          ...openBills.filter((item) => item.id !== target.id)
-        ]
-      : openBills;
-
-    const availableBalanceKsh = candidateBills.reduce(
-      (sum, item) => sum + Math.max(0, Math.round(item.balanceKsh)),
-      0
-    );
-    const requestedAmountKsh = Math.round(input.amountKsh);
+    const {
+      normalizedHouse,
+      candidateBills,
+      availableBalanceKsh,
+      requestedAmountKsh
+    } = this.resolvePaymentContext(utilityType, buildingId, houseNumber, input);
 
     if (requestedAmountKsh > availableBalanceKsh) {
       throw new Error(
@@ -1035,6 +1184,70 @@ export class UtilityBillingService {
     }
 
     return result;
+  }
+
+  private resolvePaymentContext(
+    utilityType: UtilityType,
+    buildingId: string,
+    houseNumber: string,
+    input: Pick<RecordUtilityPaymentInput, "billingMonth" | "amountKsh">
+  ): ResolvedUtilityPaymentContext {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const normalizedHouse = normalizeHouseNumber(houseNumber);
+    const key = ledgerKey(utilityType, normalizedBuildingId, normalizedHouse);
+    const records = this.billsByLedger.get(key) ?? [];
+    const legacyRecords =
+      normalizedBuildingId === UTILITY_LEGACY_BUILDING_ID
+        ? []
+        : this.billsByLedger.get(
+            ledgerKey(utilityType, UTILITY_LEGACY_BUILDING_ID, normalizedHouse)
+          ) ?? [];
+    const mergedRecords = records.length > 0 ? records : legacyRecords;
+
+    if (mergedRecords.length === 0) {
+      throw new Error(`No ${utilityType} bills found for house ${normalizedHouse}.`);
+    }
+
+    const openBills = [...mergedRecords]
+      .filter((item) => item.balanceKsh > 0)
+      .sort((a, b) => monthSortAsc(a.billingMonth, b.billingMonth));
+    const targetBill = input.billingMonth
+      ? mergedRecords.find((item) => item.billingMonth === input.billingMonth)
+      : openBills[0];
+
+    if (!targetBill) {
+      throw new Error(
+        input.billingMonth
+          ? `${utilityType} bill for ${input.billingMonth} was not found.`
+          : `No outstanding ${utilityType} bill found for house ${normalizedHouse}.`
+      );
+    }
+
+    const candidateBills = input.billingMonth
+      ? [targetBill, ...openBills.filter((item) => item.id !== targetBill.id)]
+      : openBills;
+    const availableBalanceKsh = candidateBills.reduce(
+      (sum, item) => sum + Math.max(0, Math.round(item.balanceKsh)),
+      0
+    );
+    const effectiveBill = candidateBills.find((item) => item.balanceKsh > 0) ?? targetBill;
+
+    if (availableBalanceKsh <= 0 || Number(effectiveBill.balanceKsh ?? 0) <= 0) {
+      throw new Error(
+        input.billingMonth
+          ? `${utilityType} bill for ${targetBill.billingMonth} is already cleared.`
+          : `No outstanding ${utilityType} bill found for house ${normalizedHouse}.`
+      );
+    }
+
+    return {
+      normalizedHouse,
+      candidateBills,
+      targetBill,
+      effectiveBill,
+      availableBalanceKsh,
+      requestedAmountKsh: Math.round(input.amountKsh)
+    };
   }
 
   collectAutoReminders(

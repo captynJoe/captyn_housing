@@ -5,6 +5,17 @@ const authStatusEl = document.getElementById("auth-status");
 const adminRoleEl = document.getElementById("admin-role");
 const adminLogoutBtnEl = document.getElementById("admin-logout-btn");
 const refreshAllBtnEl = document.getElementById("refresh-all-btn");
+const adminAccessPanelEl = document.getElementById("admin-access-panel");
+const adminAccessFormEl = document.getElementById("admin-access-form");
+const adminAccessSummaryEl = document.getElementById("admin-access-summary");
+const adminAccessCurrentUsernameEl = document.getElementById(
+  "admin-access-current-username"
+);
+const adminAccessUsernameEl = document.getElementById("admin-access-username");
+const adminAccessPasswordEl = document.getElementById("admin-access-password");
+const adminAccessConfirmPasswordEl = document.getElementById(
+  "admin-access-confirm-password"
+);
 
 const metricBuildingsEl = document.getElementById("metric-buildings");
 const metricActiveLandlordsEl = document.getElementById("metric-active-landlords");
@@ -96,7 +107,8 @@ const state = {
   buildings: [],
   selectedAdminBillingBuildingId: "",
   adminBillingRegistryRows: [],
-  adminUtilityPayments: []
+  adminUtilityPayments: [],
+  adminAccess: null
 };
 
 initResponsiveTables();
@@ -278,6 +290,47 @@ function handleAdminError(error, fallback) {
   showError(error instanceof Error ? error.message : fallback);
 }
 
+function syncRootAdminAccessPanel() {
+  if (!(adminAccessPanelEl instanceof HTMLElement)) {
+    return;
+  }
+
+  adminAccessPanelEl.classList.toggle("hidden", state.role !== "root_admin");
+}
+
+function renderAdminAccess() {
+  syncRootAdminAccessPanel();
+
+  if (state.role !== "root_admin") {
+    return;
+  }
+
+  const username = String(state.adminAccess?.username ?? "").trim();
+  const source =
+    state.adminAccess?.source === "app_state"
+      ? "housing app state override"
+      : state.adminAccess?.source === "environment"
+        ? "environment config"
+        : "not configured";
+  const updatedAt = state.adminAccess?.updatedAt
+    ? ` Updated ${formatDateTime(state.adminAccess.updatedAt)}.`
+    : "";
+
+  if (adminAccessCurrentUsernameEl instanceof HTMLElement) {
+    adminAccessCurrentUsernameEl.textContent = username || "Not configured";
+  }
+
+  if (adminAccessSummaryEl instanceof HTMLElement) {
+    adminAccessSummaryEl.textContent = username
+      ? `Standard admin sign-in currently uses "${username}" from ${source}.${updatedAt}`
+      : `Standard admin sign-in is not configured yet. Source: ${source}.${updatedAt}`;
+  }
+
+  if (adminAccessUsernameEl instanceof HTMLInputElement) {
+    adminAccessUsernameEl.value = username;
+  }
+}
+
 async function ensureAdminSession() {
   try {
     const payload = await requestJson("/api/auth/admin/session");
@@ -288,6 +341,7 @@ async function ensureAdminSession() {
       adminRoleEl.textContent = `role: ${role}`;
     }
 
+    renderAdminAccess();
     setStatus(`Signed in as ${role}.`);
     return true;
   } catch (error) {
@@ -1300,6 +1354,18 @@ async function loadAccountPasswordRecoveryRequests() {
   renderAccountPasswordRecoveryRequests(payload.data ?? []);
 }
 
+async function loadAdminAccess() {
+  if (state.role !== "root_admin") {
+    state.adminAccess = null;
+    renderAdminAccess();
+    return;
+  }
+
+  const payload = await requestJson("/api/admin/auth/access");
+  state.adminAccess = payload.data ?? null;
+  renderAdminAccess();
+}
+
 async function loadBuildings() {
   const payload = await requestJson("/api/admin/buildings");
   state.buildings = payload.data ?? [];
@@ -1320,7 +1386,8 @@ async function loadAdminData() {
       loadBuildings(),
       loadLandlordAccessRequests(),
       loadPasswordRecoveryRequests(),
-      loadAccountPasswordRecoveryRequests()
+      loadAccountPasswordRecoveryRequests(),
+      loadAdminAccess()
     ]);
     setStatus(`Signed in as ${state.role}. Platform data refreshed.`);
   } catch (error) {
@@ -1737,6 +1804,64 @@ if (adminUtilityPaymentFormEl instanceof HTMLFormElement) {
   });
 }
 
+if (adminAccessFormEl instanceof HTMLFormElement) {
+  adminAccessFormEl.addEventListener("submit", (event) => {
+    event.preventDefault();
+    clearError();
+
+    if (state.role !== "root_admin") {
+      showError("Root admin role required.");
+      return;
+    }
+
+    const username = String(adminAccessUsernameEl?.value ?? "").trim();
+    const password = String(adminAccessPasswordEl?.value ?? "").trim();
+    const confirmPassword = String(adminAccessConfirmPasswordEl?.value ?? "").trim();
+
+    if (!username || !password || !confirmPassword) {
+      showError("Provide the admin username, new password, and confirmation.");
+      return;
+    }
+
+    const submitButton = adminAccessFormEl.querySelector('button[type="submit"]');
+    if (submitButton instanceof HTMLButtonElement) {
+      submitButton.disabled = true;
+    }
+
+    void (async () => {
+      try {
+        const payload = await requestJson("/api/admin/auth/access", {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            username,
+            password,
+            confirmPassword
+          })
+        });
+
+        state.adminAccess = payload.data ?? null;
+        if (adminAccessPasswordEl instanceof HTMLInputElement) {
+          adminAccessPasswordEl.value = "";
+        }
+        if (adminAccessConfirmPasswordEl instanceof HTMLInputElement) {
+          adminAccessConfirmPasswordEl.value = "";
+        }
+        renderAdminAccess();
+        setStatus(`Standard admin sign-in updated to username "${username}".`);
+      } catch (error) {
+        handleAdminError(error, "Failed to update admin sign-in.");
+      } finally {
+        if (submitButton instanceof HTMLButtonElement) {
+          submitButton.disabled = false;
+        }
+      }
+    })();
+  });
+}
+
 adminBillingBuildingSelectEl?.addEventListener("change", () => {
   state.selectedAdminBillingBuildingId = getSelectedAdminBillingBuildingId();
   void loadAdminBillingConsole().catch((error) => {
@@ -1826,6 +1951,7 @@ adminLogoutBtnEl?.addEventListener("click", () => {
 
 void (async () => {
   clearError();
+  renderAdminAccess();
   const ok = await ensureAdminSession();
   if (!ok) {
     return;

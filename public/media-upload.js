@@ -1,4 +1,5 @@
 const DEFAULT_EMPTY_TEXT = "No photos selected.";
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
 
 function removePreviewUrls(container) {
   if (!(container instanceof HTMLElement)) {
@@ -43,8 +44,8 @@ export function validateImageFiles(
 
   const maxBytes = maxSizeMb * 1024 * 1024;
   files.forEach((file) => {
-    if (!String(file.type ?? "").startsWith("image/")) {
-      throw new Error(`${file.name} is not a supported image file.`);
+    if (!ALLOWED_IMAGE_TYPES.has(String(file.type ?? "").toLowerCase())) {
+      throw new Error(`${file.name} must be a JPEG, PNG, or WebP image.`);
     }
 
     if (file.size > maxBytes) {
@@ -120,58 +121,84 @@ export function createUploadedImageGallery(urls, { linkLabel = "Open photo" } = 
   return wrapper;
 }
 
-export async function uploadImageFiles(files, { getSignature }) {
+function applyUploadFields(formData, fields) {
+  if (!fields || typeof fields !== "object") {
+    return;
+  }
+
+  Object.entries(fields).forEach(([key, value]) => {
+    if (value === undefined || value === null) {
+      return;
+    }
+
+    const normalized =
+      typeof value === "string" ? value.trim() : String(value);
+    if (!normalized) {
+      return;
+    }
+
+    formData.set(key, normalized);
+  });
+}
+
+export async function uploadImageFiles(
+  files,
+  { createUploadRequest, getSignature } = {}
+) {
   if (!Array.isArray(files) || files.length === 0) {
     return [];
   }
 
-  if (typeof getSignature !== "function") {
-    throw new Error("Upload signature callback is required.");
-  }
+  const buildUploadRequest =
+    typeof createUploadRequest === "function"
+      ? createUploadRequest
+      : typeof getSignature === "function"
+        ? getSignature
+        : null;
 
-  const signature = await getSignature();
-  const uploadUrl = String(signature?.uploadUrl ?? "").trim();
-  const apiKey = String(signature?.apiKey ?? "").trim();
-  const folder = String(signature?.folder ?? "").trim();
-  const timestamp = String(signature?.timestamp ?? "").trim();
-  const signedValue = String(signature?.signature ?? "").trim();
-
-  if (!uploadUrl || !apiKey || !timestamp || !signedValue) {
-    throw new Error("Upload signing response is incomplete.");
+  if (!buildUploadRequest) {
+    throw new Error("Upload request callback is required.");
   }
 
   const uploadedUrls = [];
 
   for (const file of files) {
-    const formData = new FormData();
-    formData.set("file", file);
-    formData.set("api_key", apiKey);
-    formData.set("timestamp", timestamp);
-    formData.set("signature", signedValue);
-    if (folder) {
-      formData.set("folder", folder);
+    const uploadRequest = (await buildUploadRequest(file)) ?? {};
+    const uploadUrl = String(uploadRequest.url ?? uploadRequest.uploadUrl ?? "").trim();
+
+    if (!uploadUrl) {
+      throw new Error("Upload request is missing a destination URL.");
     }
 
+    const headers = new Headers(uploadRequest.headers ?? {});
+    headers.delete("content-type");
+
+    const formData = new FormData();
+    formData.set("file", file);
+    applyUploadFields(formData, uploadRequest.fields);
+
     const response = await fetch(uploadUrl, {
-      method: "POST",
-      body: formData
+      method: String(uploadRequest.method ?? "POST").toUpperCase(),
+      body: formData,
+      headers,
+      credentials: uploadRequest.credentials ?? "same-origin"
     });
     const payload = await response.json().catch(() => ({}));
 
     if (!response.ok) {
       const uploadError =
-        payload?.error?.message ??
-        payload?.error?.description ??
+        payload?.issues?.[0]?.message ??
+        payload?.error ??
         "Photo upload failed.";
       throw new Error(uploadError);
     }
 
-    const secureUrl = String(payload?.secure_url ?? payload?.url ?? "").trim();
-    if (!secureUrl) {
+    const uploadedUrl = String(payload?.data?.url ?? payload?.url ?? "").trim();
+    if (!uploadedUrl) {
       throw new Error("Photo upload succeeded without a public URL.");
     }
 
-    uploadedUrls.push(secureUrl);
+    uploadedUrls.push(uploadedUrl);
   }
 
   return uploadedUrls;

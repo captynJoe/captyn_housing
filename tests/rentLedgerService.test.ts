@@ -114,8 +114,30 @@ test("records admin rent payments with provider metadata against an existing pro
   assert.equal(outcome.snapshot.balanceKsh, 4500);
   assert.equal(outcome.event.provider, "cash");
   assert.equal(outcome.event.providerReference, "CASH-001");
+  assert.equal(outcome.snapshot.currentMonthPaidKsh, 7500);
+  assert.equal(outcome.snapshot.currentMonthOutstandingKsh, 4500);
+  assert.equal(outcome.snapshot.arrearsKsh, 0);
   assert.equal(service.listPayments({ buildingId: BUILDING_A, houseNumber: "M-2" })[0].provider, "cash");
   assert.equal(service.listCollectionStatus(10, BUILDING_A)[0]?.totalPaidKsh, 1500);
+});
+
+test("exposes current-month paid, current-month outstanding, and arrears separately", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.upsertRentDue(BUILDING_A, "AR-1", {
+    monthlyRentKsh: 10000,
+    balanceKsh: 18000,
+    dueDate
+  });
+
+  const snapshot = service.getRentDue(BUILDING_A, "AR-1");
+  assert.ok(snapshot);
+  assert.equal(snapshot.currentBillingMonth, dueDate.slice(0, 7));
+  assert.equal(snapshot.currentMonthPaidKsh, 0);
+  assert.equal(snapshot.currentMonthOutstandingKsh, 10000);
+  assert.equal(snapshot.arrearsKsh, 8000);
+  assert.equal(snapshot.totalPaidKsh, 0);
 });
 
 test("keeps unmatched admin payment pending until rent profile exists", () => {

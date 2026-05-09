@@ -65,3 +65,72 @@ test("rejects invalid admin credentials", () => {
   assert.equal(invalidToken, null);
   assert.equal(invalidCreds, null);
 });
+
+test("admin credential overrides replace environment credentials and persist", () => {
+  const service = new AdminAuthService({
+    adminToken: "admin-token",
+    adminUsername: "opsadmin",
+    adminPassword: "ops-secret",
+    rootAdminUsername: "rootadmin",
+    rootAdminPassword: "root-secret"
+  });
+
+  const summaryBefore = service.getAdminCredentialSummary();
+  assert.equal(summaryBefore.username, "opsadmin");
+  assert.equal(summaryBefore.source, "environment");
+
+  const updated = service.updateAdminCredentials({
+    username: "opslead",
+    password: "new-secret-123"
+  });
+  assert.equal(updated.username, "opslead");
+  assert.equal(updated.source, "app_state");
+
+  assert.equal(
+    service.login({ username: "opsadmin", password: "ops-secret" }),
+    null
+  );
+  const nextAdmin = service.login({
+    username: "opslead",
+    password: "new-secret-123"
+  });
+  assert.equal(nextAdmin?.role, "admin");
+
+  const restored = new AdminAuthService({
+    adminToken: "admin-token",
+    adminUsername: "opsadmin",
+    adminPassword: "ops-secret"
+  });
+  restored.importState(service.exportState());
+
+  assert.equal(
+    restored.login({ username: "opsadmin", password: "ops-secret" }),
+    null
+  );
+  assert.equal(
+    restored.login({ username: "opslead", password: "new-secret-123" })?.role,
+    "admin"
+  );
+});
+
+test("updating admin credentials revokes existing admin sessions but keeps root admin", () => {
+  const service = new AdminAuthService({
+    adminToken: "admin-token",
+    rootAdminToken: "root-token",
+    adminUsername: "opsadmin",
+    adminPassword: "ops-secret"
+  });
+
+  const admin = service.login({ accessToken: "admin-token" });
+  const root = service.login({ accessToken: "root-token" });
+  assert.ok(admin);
+  assert.ok(root);
+
+  service.updateAdminCredentials({
+    username: "opslead",
+    password: "new-secret-123"
+  });
+
+  assert.equal(service.getSession(admin?.token), null);
+  assert.equal(service.getSession(root?.token)?.role, "root_admin");
+});

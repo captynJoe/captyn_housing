@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=20260322b" />
-    <link rel="stylesheet" href="/landlord.css?v=20260508b" />
+    <link rel="stylesheet" href="/landlord.css?v=20260509b" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -126,8 +126,8 @@
           <button type="button" class="metric-card metric-card-btn" data-metric-target="posted-bills"><p>Posted Bills</p><strong id="metric-bills">-</strong></button>
           <button type="button" class="metric-card metric-card-btn" data-metric-target="unpaid-bills"><p>Unpaid Bills</p><strong id="metric-unpaid">-</strong></button>
           <button type="button" class="metric-card metric-card-btn" data-metric-target="overdue-bills"><p>Overdue Bills</p><strong id="metric-overdue">-</strong></button>
-          <button type="button" class="metric-card metric-card-btn" data-metric-target="payments"><p>Paid Total</p><strong id="metric-payments">-</strong></button>
-          <button type="button" class="metric-card metric-card-btn" data-metric-target="outstanding"><p>Outstanding</p><strong id="metric-balance">-</strong></button>
+          <button type="button" class="metric-card metric-card-btn" data-metric-target="payments"><p>Collected This Month</p><strong id="metric-payments">-</strong></button>
+          <button type="button" class="metric-card metric-card-btn" data-metric-target="outstanding"><p>Resident Outstanding</p><strong id="metric-balance">-</strong></button>
         </div>
       </section>
 
@@ -238,8 +238,9 @@
                   <th>House</th>
                   <th>Status</th>
                   <th>Monthly Rent</th>
-                  <th>Paid</th>
-                  <th>Balance</th>
+                  <th>Paid This Month</th>
+                  <th>Due This Month</th>
+                  <th>Total Outstanding</th>
                   <th>Latest Payment</th>
                   <th>Last Receipt</th>
                 </tr>
@@ -586,55 +587,58 @@
             <h2>Rent Collection Status</h2>
             <button id="refresh-rent-status" type="button">Refresh</button>
           </div>
-          <form id="rent-payment-form" class="package-card">
-            <div class="inline-fields compact-fields">
+          <details class="landlord-inline-details">
+            <summary>Record offline rent payment</summary>
+            <form id="rent-payment-form" class="package-card">
+              <div class="inline-fields compact-fields">
+                <label>
+                  Building
+                  <select id="rent-payment-building-select"></select>
+                </label>
+                <label>
+                  House
+                  <input id="rent-payment-house" type="text" maxlength="24" placeholder="A-12" required />
+                </label>
+                <label>
+                  Month (optional)
+                  <input id="rent-payment-month" type="month" />
+                </label>
+              </div>
+              <div class="inline-fields compact-fields">
+                <label>
+                  Amount (KSh)
+                  <input id="rent-payment-amount" type="number" min="1" required />
+                </label>
+                <label>
+                  Provider
+                  <select id="rent-payment-provider">
+                    <option value="cash">cash</option>
+                    <option value="mpesa">mpesa</option>
+                    <option value="bank">bank</option>
+                    <option value="card">card</option>
+                  </select>
+                </label>
+                <label>
+                  Paid At (optional)
+                  <input id="rent-payment-paid-at" type="datetime-local" />
+                </label>
+              </div>
               <label>
-                Building
-                <select id="rent-payment-building-select"></select>
+                Reference
+                <input
+                  id="rent-payment-reference"
+                  type="text"
+                  maxlength="120"
+                  placeholder="Optional for cash"
+                />
               </label>
-              <label>
-                House
-                <input id="rent-payment-house" type="text" maxlength="24" placeholder="A-12" required />
-              </label>
-              <label>
-                Month (optional)
-                <input id="rent-payment-month" type="month" />
-              </label>
-            </div>
-            <div class="inline-fields compact-fields">
-              <label>
-                Amount (KSh)
-                <input id="rent-payment-amount" type="number" min="1" required />
-              </label>
-              <label>
-                Provider
-                <select id="rent-payment-provider">
-                  <option value="cash">cash</option>
-                  <option value="mpesa">mpesa</option>
-                  <option value="bank">bank</option>
-                  <option value="card">card</option>
-                </select>
-              </label>
-              <label>
-                Paid At (optional)
-                <input id="rent-payment-paid-at" type="datetime-local" />
-              </label>
-            </div>
-            <label>
-              Reference
-              <input
-                id="rent-payment-reference"
-                type="text"
-                maxlength="120"
-                placeholder="Optional for cash"
-              />
-            </label>
-            <button id="rent-payment-submit" type="submit">Record Rent Payment</button>
-          </form>
-          <p id="rent-payment-help" class="status-text">
-            Landlord-only action. Posts a real rent payment record and refreshes the collection
-            status board.
-          </p>
+              <button id="rent-payment-submit" type="submit">Record Rent Payment</button>
+            </form>
+            <p id="rent-payment-help" class="status-text">
+              Landlord-only action. Posts a real rent payment record and refreshes the collection
+              status board.
+            </p>
+          </details>
 
           <div class="table-wrap">
             <table>
@@ -644,7 +648,9 @@
                   <th>House</th>
                   <th>Status</th>
                   <th>Monthly Rent</th>
-                  <th>Balance</th>
+                  <th>Paid This Month</th>
+                  <th>Due This Month</th>
+                  <th>Arrears</th>
                   <th>Due Date</th>
                   <th>Latest Reference</th>
                 </tr>
@@ -1463,6 +1469,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=20260508b"></script>
+    <script type="module" src="/landlord.js?v=20260509b"></script>
   </body>
 </html>

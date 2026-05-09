@@ -58,7 +58,12 @@ export interface RentDueRecord {
 export interface RentDueSnapshot extends Omit<RentDueRecord, "reminderState"> {
   status: "clear" | "due_soon" | "overdue";
   paymentStatus: "paid" | "partial" | "not_paid";
+  currentBillingMonth: string;
   paidAmountKsh: number;
+  currentMonthPaidKsh: number;
+  currentMonthOutstandingKsh: number;
+  arrearsKsh: number;
+  totalPaidKsh: number;
   daysToDue: number;
 }
 
@@ -731,10 +736,6 @@ export class RentLedgerService {
       .map((record) => {
         const snapshot = this.toSnapshot(record);
         const latestPayment = record.payments[0];
-        const totalPaidKsh = record.payments.reduce(
-          (sum, payment) => sum + Math.max(0, Number(payment.amountKsh ?? 0)),
-          0
-        );
         return {
           buildingId: snapshot.buildingId,
           houseNumber: snapshot.houseNumber,
@@ -743,7 +744,11 @@ export class RentLedgerService {
           dueDate: snapshot.dueDate,
           paymentStatus: snapshot.paymentStatus,
           paidAmountKsh: snapshot.paidAmountKsh,
-          totalPaidKsh,
+          currentBillingMonth: snapshot.currentBillingMonth,
+          currentMonthPaidKsh: snapshot.currentMonthPaidKsh,
+          currentMonthOutstandingKsh: snapshot.currentMonthOutstandingKsh,
+          arrearsKsh: snapshot.arrearsKsh,
+          totalPaidKsh: snapshot.totalPaidKsh,
           latestPaymentReference: latestPayment?.providerReference,
           latestPaymentAt: latestPayment?.paidAt,
           latestPaymentAmountKsh: latestPayment?.amountKsh
@@ -876,19 +881,36 @@ export class RentLedgerService {
   private toSnapshot(record: RentDueRecord): RentDueSnapshot {
     const dueDate = toUtcDate(record.dueDate);
     const daysToDue = dayDiff(new Date(), dueDate);
+    const balanceKsh = Math.max(0, Number(record.balanceKsh ?? 0));
+    const monthlyRentKsh = Math.max(0, Number(record.monthlyRentKsh ?? 0));
+    const currentMonthOutstandingKsh =
+      monthlyRentKsh > 0 ? Math.min(balanceKsh, monthlyRentKsh) : balanceKsh;
+    const currentMonthPaidKsh =
+      monthlyRentKsh > 0
+        ? Math.max(0, monthlyRentKsh - currentMonthOutstandingKsh)
+        : 0;
+    const totalPaidKsh = record.payments.reduce(
+      (sum, payment) => sum + Math.max(0, Number(payment.amountKsh ?? 0)),
+      0
+    );
 
     return {
       buildingId: record.buildingId,
       houseNumber: record.houseNumber,
-      monthlyRentKsh: record.monthlyRentKsh,
-      balanceKsh: record.balanceKsh,
+      monthlyRentKsh,
+      balanceKsh,
       dueDate: record.dueDate,
       note: record.note,
       updatedAt: record.updatedAt,
       payments: [...record.payments],
       status: getStatus(record.balanceKsh, daysToDue),
       paymentStatus: paymentStatusForRecord(record),
-      paidAmountKsh: Math.max(0, record.monthlyRentKsh - record.balanceKsh),
+      currentBillingMonth: billingMonthFromDateTime(record.dueDate),
+      paidAmountKsh: currentMonthPaidKsh,
+      currentMonthPaidKsh,
+      currentMonthOutstandingKsh,
+      arrearsKsh: Math.max(0, balanceKsh - currentMonthOutstandingKsh),
+      totalPaidKsh,
       daysToDue
     };
   }

@@ -85,6 +85,69 @@
           </p>
         </section>
 
+        <section id="admin-access-panel" class="panel wide-panel hidden">
+          <div class="panel-head">
+            <h2>Admin Access</h2>
+          </div>
+          <p class="panel-note">
+            Root-admin only. Reset the standard admin username and password here without changing
+            the separate root-admin recovery credentials.
+          </p>
+          <p id="admin-access-summary" class="status-text">
+            Admin sign-in details are loading.
+          </p>
+
+          <form id="admin-access-form" class="package-card">
+            <div class="panel-head">
+              <h3>Reset Standard Admin Sign-In</h3>
+            </div>
+            <p class="panel-note">
+              Current admin username:
+              <strong id="admin-access-current-username">-</strong>
+            </p>
+            <div class="inline-fields compact-fields">
+              <label>
+                Admin Username
+                <input
+                  id="admin-access-username"
+                  type="text"
+                  maxlength="80"
+                  autocomplete="username"
+                  placeholder="admin"
+                  required
+                />
+              </label>
+              <label>
+                New Password
+                <input
+                  id="admin-access-password"
+                  type="password"
+                  maxlength="120"
+                  autocomplete="new-password"
+                  placeholder="At least 8 characters"
+                  required
+                />
+              </label>
+            </div>
+            <label>
+              Confirm New Password
+              <input
+                id="admin-access-confirm-password"
+                type="password"
+                maxlength="120"
+                autocomplete="new-password"
+                placeholder="Repeat the new password"
+                required
+              />
+            </label>
+            <p class="status-text">
+              Saving new credentials signs out existing standard admin sessions. Root-admin access
+              remains separate for recovery.
+            </p>
+            <button type="submit">Update Admin Credentials</button>
+          </form>
+        </section>
+
         <section class="panel wide-panel">
           <div class="panel-head">
             <h2>Billing Console</h2>

@@ -4,7 +4,7 @@ import {
   renderSelectedImagePreviews,
   uploadImageFiles,
   validateImageFiles
-} from "./cloudinary-upload.js";
+} from "./media-upload.js";
 import {
   applyDocumentBranding,
   getLandlordPortalTitle,
@@ -662,12 +662,15 @@ function updateApplicationsIndicator() {
 
 function applyRoleCapabilities() {
   const caretaker = isCaretakerRole();
+  const rentPaymentDetailsEl = rentPaymentFormEl?.closest("details");
 
   if (caretakerManagementPanelEl instanceof HTMLElement) {
     caretakerManagementPanelEl.classList.toggle("hidden", caretaker);
   }
 
-  if (rentPaymentFormEl instanceof HTMLElement) {
+  if (rentPaymentDetailsEl instanceof HTMLElement) {
+    rentPaymentDetailsEl.classList.toggle("hidden", caretaker);
+  } else if (rentPaymentFormEl instanceof HTMLElement) {
     rentPaymentFormEl.classList.toggle("hidden", caretaker);
   }
 
@@ -815,14 +818,17 @@ function openMetricTarget(target) {
       scrollToLandlordSection("utilities-bills-section");
       break;
     case "payments":
-      setActiveLandlordView("utilities");
-      scrollToLandlordSection("utilities-payments-section");
+      setActiveLandlordView("overview");
+      scrollToLandlordSection("overview-collections-section");
       break;
     case "unpaid-bills":
     case "overdue-bills":
+      setActiveLandlordView("utilities");
+      scrollToLandlordSection("utilities-bills-section");
+      break;
     case "outstanding":
-      setActiveLandlordView("overview");
-      scrollToLandlordSection("overview-utility-arrears-section");
+      setActiveLandlordView("residents");
+      scrollToLandlordSection("residents-section");
       break;
     default:
       setActiveLandlordView("overview");
@@ -1072,6 +1078,20 @@ function utilityTypeLabel(value) {
 function currentBillingMonth() {
   const now = new Date();
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthKeyFromValue(value) {
+  const raw = String(value ?? "").trim();
+  if (/^\d{4}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  return `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 function previousBillingMonth(value = new Date()) {
@@ -1449,6 +1469,110 @@ function getResidentUtilityArrearsKsh(resident) {
   return 0;
 }
 
+function getResidentExpenseBalanceKsh(resident) {
+  if (!canDisplayResidentBilling(resident)) {
+    return 0;
+  }
+
+  const explicitExpense = Number(
+    resident?.expenseBalanceKsh ?? resident?.expenseArrearsKsh ?? 0
+  );
+  if (Number.isFinite(explicitExpense)) {
+    return Math.max(0, explicitExpense);
+  }
+
+  return 0;
+}
+
+function getResidentCurrentMonthRentPaidKsh(resident, agreement) {
+  if (!canDisplayResidentBilling(resident) || !isResidentRentEnabled(resident)) {
+    return 0;
+  }
+
+  const explicitPaid = Number(resident?.currentMonthRentPaidKsh ?? resident?.paidAmountKsh);
+  if (Number.isFinite(explicitPaid)) {
+    return Math.max(0, explicitPaid);
+  }
+
+  const monthlyRentKsh = getResidentMonthlyRentKsh(resident, agreement);
+  const currentRentDueKsh = getResidentCurrentRentDueKsh(resident, agreement);
+  if (monthlyRentKsh <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, monthlyRentKsh - currentRentDueKsh);
+}
+
+function compareIsoDateDesc(leftValue, rightValue) {
+  const left = new Date(leftValue || 0).getTime();
+  const right = new Date(rightValue || 0).getTime();
+  const safeLeft = Number.isFinite(left) ? left : 0;
+  const safeRight = Number.isFinite(right) ? right : 0;
+  return safeRight - safeLeft;
+}
+
+function matchesResidentRoomScope(item, resident) {
+  return (
+    item &&
+    resident &&
+    normalizeLookupBuildingId(item.buildingId) ===
+      normalizeLookupBuildingId(resident.buildingId) &&
+    normalizeHouse(item.houseNumber) === normalizeHouse(resident.houseNumber)
+  );
+}
+
+function getResidentUtilityBills(resident) {
+  return (Array.isArray(state.bills) ? state.bills : [])
+    .filter((item) => matchesResidentRoomScope(item, resident))
+    .sort(
+      (left, right) =>
+        compareIsoDateDesc(
+          left?.dueDate || left?.updatedAt || left?.createdAt,
+          right?.dueDate || right?.updatedAt || right?.createdAt
+        ) || String(right?.billingMonth || "").localeCompare(String(left?.billingMonth || ""))
+    );
+}
+
+function getResidentUtilityPayments(resident) {
+  return (Array.isArray(state.payments) ? state.payments : [])
+    .filter((item) => matchesResidentRoomScope(item, resident))
+    .sort((left, right) =>
+      compareIsoDateDesc(
+        left?.paidAt || left?.createdAt,
+        right?.paidAt || right?.createdAt
+      )
+    );
+}
+
+function getResidentRoomExpenditures(resident) {
+  return (Array.isArray(state.expenditures) ? state.expenditures : [])
+    .filter((item) => matchesResidentRoomScope(item, resident))
+    .sort((left, right) => compareIsoDateDesc(left?.createdAt, right?.createdAt));
+}
+
+function getResidentOverappliedUtilityBills(utilityBills) {
+  return (Array.isArray(utilityBills) ? utilityBills : []).filter((bill) => {
+    const billAmountKsh = Number(bill?.amountKsh ?? 0);
+    const paidAmountKsh = Array.isArray(bill?.payments)
+      ? bill.payments.reduce((sum, payment) => sum + Number(payment?.amountKsh ?? 0), 0)
+      : 0;
+    return paidAmountKsh > billAmountKsh && billAmountKsh >= 0;
+  });
+}
+
+function formatPaymentProvider(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) {
+    return "Unknown";
+  }
+
+  if (normalized === "mpesa") {
+    return "M-PESA";
+  }
+
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
 function getResidentCurrentChargeDueKsh(resident, agreement) {
   return (
     getResidentCurrentRentDueKsh(resident, agreement) +
@@ -1457,7 +1581,11 @@ function getResidentCurrentChargeDueKsh(resident, agreement) {
 }
 
 function getResidentArrearsBalanceKsh(resident, agreement) {
-  return getResidentRentArrearsKsh(resident, agreement) + getResidentUtilityArrearsKsh(resident);
+  return (
+    getResidentRentArrearsKsh(resident, agreement) +
+    getResidentUtilityArrearsKsh(resident) +
+    getResidentExpenseBalanceKsh(resident)
+  );
 }
 
 function getResidentNextDueDate(resident) {
@@ -1501,43 +1629,56 @@ function getResidentBillingStatusLabel(resident) {
     return "Verification pending";
   }
 
+  const expenseBalanceKsh = getResidentExpenseBalanceKsh(resident);
+
   if (!isResidentRentEnabled(resident)) {
     const utilityArrearsKsh = getResidentUtilityArrearsKsh(resident);
     const currentUtilityDueKsh = getResidentCurrentUtilityDueKsh(resident);
+    let label = "Clear";
 
     if (utilityArrearsKsh > 0 && currentUtilityDueKsh > 0) {
-      return "Utility overdue + due";
+      label = "Utility overdue + due";
+    } else if (utilityArrearsKsh > 0) {
+      label = "Utility overdue";
+    } else if (currentUtilityDueKsh > 0) {
+      label = "Utility due";
     }
-    if (utilityArrearsKsh > 0) {
-      return "Utility overdue";
+
+    if (expenseBalanceKsh > 0) {
+      return label === "Clear" ? "Charge overdue" : `${label} + charge`;
     }
-    if (currentUtilityDueKsh > 0) {
-      return "Utility due";
-    }
-    return "Clear";
+
+    return label;
   }
 
   const rentStatus = String(resident.rentStatus ?? "").trim();
   const currentRentDueKsh = getResidentCurrentRentDueKsh(resident);
   const rentArrearsKsh = getResidentRentArrearsKsh(resident);
+  let label = "";
   if (rentStatus === "overdue") {
     if (rentArrearsKsh > 0 && currentRentDueKsh > 0) {
-      return "Rent overdue + due";
+      label = "Rent overdue + due";
+    } else {
+      label = "Rent overdue";
     }
-    return "Rent overdue";
-  }
-  if (currentRentDueKsh > 0) {
-    return rentArrearsKsh > 0 ? "Rent overdue + due" : "Rent due";
+  } else if (currentRentDueKsh > 0) {
+    label = rentArrearsKsh > 0 ? "Rent overdue + due" : "Rent due";
+  } else {
+    const hasRentProfile = Boolean(
+      resident.rentPaymentStatus ||
+        resident.rentStatus ||
+        resident.rentDueDate ||
+        resident.latestRentPaymentReference ||
+        resident.latestRentPaymentAt
+    );
+    label = hasRentProfile ? "Clear" : "-";
   }
 
-  const hasRentProfile = Boolean(
-    resident.rentPaymentStatus ||
-      resident.rentStatus ||
-      resident.rentDueDate ||
-      resident.latestRentPaymentReference ||
-      resident.latestRentPaymentAt
-  );
-  return hasRentProfile ? "Clear" : "-";
+  if (expenseBalanceKsh > 0) {
+    return label === "Clear" || label === "-" ? "Charge overdue" : `${label} + charge`;
+  }
+
+  return label;
 }
 
 function getResidentTotalRentPaidKsh(resident) {
@@ -1656,17 +1797,39 @@ function findResidentDirectoryEntry(buildingId, houseNumber) {
   return getIndexedRoom(state.residentDirectoryByKey, buildingId, houseNumber);
 }
 
-function openResidentDirectoryEntry(buildingId, houseNumber) {
-  const resident = findResidentDirectoryEntry(buildingId, houseNumber);
-  if (!resident) {
-    showError("Resident details not found. Refresh and retry.");
+async function openResidentDirectoryEntry(buildingId, houseNumber) {
+  try {
+    const normalizedBuildingId = normalizeLookupBuildingId(buildingId);
+    const currentUtilityBuildingId = normalizeLookupBuildingId(getSelectedUtilityBuildingId());
+    const currentResidentsBuildingId = normalizeLookupBuildingId(
+      state.selectedResidentsBuildingId
+    );
+
+    if (
+      normalizedBuildingId &&
+      (normalizedBuildingId !== currentUtilityBuildingId ||
+        normalizedBuildingId !== currentResidentsBuildingId)
+    ) {
+      await activateBuilding(normalizedBuildingId, {
+        view: "residents",
+        includeResidents: true
+      });
+    }
+
+    const resident = findResidentDirectoryEntry(buildingId, houseNumber);
+    if (!resident) {
+      showError("Resident details not found. Refresh and retry.");
+      return false;
+    }
+
+    clearError();
+    setActiveLandlordView("residents");
+    openResidentDrawer(resident);
+    return true;
+  } catch (error) {
+    handleLandlordError(error, "Failed to load room details.");
     return false;
   }
-
-  clearError();
-  setActiveLandlordView("residents");
-  openResidentDrawer(resident);
-  return true;
 }
 
 function openResidentSearchMatch() {
@@ -1680,12 +1843,15 @@ function openResidentSearchMatch() {
 
   const exactMatches = getResidentLookupExactMatches(visibleRows, query);
   if (exactMatches.length === 1) {
-    openResidentDirectoryEntry(exactMatches[0].buildingId, exactMatches[0].houseNumber);
+    void openResidentDirectoryEntry(
+      exactMatches[0].buildingId,
+      exactMatches[0].houseNumber
+    );
     return;
   }
 
   if (visibleRows.length === 1) {
-    openResidentDirectoryEntry(visibleRows[0].buildingId, visibleRows[0].houseNumber);
+    void openResidentDirectoryEntry(visibleRows[0].buildingId, visibleRows[0].houseNumber);
     return;
   }
 
@@ -1799,6 +1965,10 @@ function renderResidentsOverview(rows) {
     (sum, resident) => sum + getResidentArrearsBalanceKsh(resident),
     0
   );
+  const totalCurrentMonthRentPaid = items.reduce(
+    (sum, resident) => sum + getResidentCurrentMonthRentPaidKsh(resident),
+    0
+  );
 
   residentsOverviewEl.innerHTML = `
     <article class="resident-overview-card">
@@ -1815,6 +1985,11 @@ function renderResidentsOverview(rows) {
       <p>Arrears</p>
       <strong>${formatCurrency(totalArrears)}</strong>
       <small>${withArrears.length} room${withArrears.length === 1 ? "" : "s"} overdue.</small>
+    </article>
+    <article class="resident-overview-card">
+      <p>Rent Collected This Month</p>
+      <strong>${formatCurrency(totalCurrentMonthRentPaid)}</strong>
+      <small>Based on each room's current month balance.</small>
     </article>
     <article class="resident-overview-card">
       <p>Occupancy</p>
@@ -2049,11 +2224,17 @@ function getResidentOutstandingBalanceKsh(resident) {
 
   const rentBalance = Number(resident?.rentBalanceKsh);
   const utilityBalance = Number(resident?.utilityBalanceKsh);
-  if (Number.isFinite(rentBalance) || Number.isFinite(utilityBalance)) {
+  const expenseBalance = Number(resident?.expenseBalanceKsh ?? resident?.expenseArrearsKsh);
+  if (
+    Number.isFinite(rentBalance) ||
+    Number.isFinite(utilityBalance) ||
+    Number.isFinite(expenseBalance)
+  ) {
     return Math.max(
       0,
       (Number.isFinite(rentBalance) ? rentBalance : 0) +
-        (Number.isFinite(utilityBalance) ? utilityBalance : 0)
+        (Number.isFinite(utilityBalance) ? utilityBalance : 0) +
+        (Number.isFinite(expenseBalance) ? expenseBalance : 0)
     );
   }
 
@@ -2079,7 +2260,8 @@ function getResidentUtilityBalanceKsh(resident) {
 
   const outstandingBalanceKsh = getResidentOutstandingBalanceKsh(resident);
   const rentBalanceKsh = Math.max(0, Number(resident?.rentBalanceKsh ?? 0));
-  return Math.max(0, outstandingBalanceKsh - rentBalanceKsh);
+  const expenseBalanceKsh = getResidentExpenseBalanceKsh(resident);
+  return Math.max(0, outstandingBalanceKsh - rentBalanceKsh - expenseBalanceKsh);
 }
 
 function getResidentMonthlyRentKsh(resident, agreement) {
@@ -3789,19 +3971,15 @@ function getBuildingPhotoUrls(buildingId) {
     : [];
 }
 
-async function signBuildingPhotoUpload(buildingId) {
-  const payload = await requestJson("/api/media/sign-upload", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
+function createBuildingPhotoUploadRequest(buildingId) {
+  return {
+    url: "/api/media/upload",
+    fields: {
       category: "building_profile",
       buildingId: buildingId || undefined
-    })
-  });
-
-  return payload.data ?? {};
+    },
+    credentials: "same-origin"
+  };
 }
 
 function syncBuildingPhotoPreview() {
@@ -3957,18 +4135,29 @@ function getFocusedBuildingSummary(buildingId) {
   const units = Array.isArray(building.houseNumbers)
     ? building.houseNumbers.length
     : Number(building.units ?? 0);
+  const residentRows = dedupeResidentDirectoryRows(state.residentDirectory).filter(
+    (item) => normalizeLookupBuildingId(item.buildingId) === buildingId
+  );
   const utilityBills = getActionableUtilityBills(state.bills).filter(
     (item) => normalizeLookupBuildingId(item.buildingId) === buildingId
   );
   let openBills = 0;
-  let outstanding = 0;
+  const outstanding =
+    residentRows.length > 0
+      ? residentRows.reduce(
+          (sum, item) => sum + getResidentOutstandingBalanceKsh(item),
+          0
+        )
+      : utilityBills.reduce(
+          (sum, item) => sum + utilityAmount(item.balanceKsh),
+          0
+        );
 
   utilityBills.forEach((item) => {
     const balanceKsh = utilityAmount(item.balanceKsh);
     if (balanceKsh > 0) {
       openBills += 1;
     }
-    outstanding += balanceKsh;
   });
 
   return {
@@ -5124,7 +5313,7 @@ function renderRentStatus(rows) {
 
   if (!Array.isArray(rows) || rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="7">No rent status data available.</td>';
+    row.innerHTML = '<td colspan="9">No rent status data available.</td>';
     rentStatusBodyEl.append(row);
     return;
   }
@@ -5137,7 +5326,9 @@ function renderRentStatus(rows) {
       <td>${item.houseNumber}</td>
       <td>${item.paymentStatus}</td>
       <td>${formatCurrency(item.monthlyRentKsh)}</td>
-      <td>${formatCurrency(item.balanceKsh)}</td>
+      <td>${formatCurrency(item.currentMonthPaidKsh ?? item.paidAmountKsh ?? 0)}</td>
+      <td>${formatCurrency(item.currentMonthOutstandingKsh ?? item.balanceKsh)}</td>
+      <td>${formatCurrency(item.arrearsKsh ?? 0)}</td>
       <td>${formatDateTime(item.dueDate)}</td>
       <td>${item.latestPaymentReference ?? "-"}</td>
     `;
@@ -5154,7 +5345,7 @@ function renderOverviewCollections(rows) {
 
   if (!Array.isArray(rows) || rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="8">No rent collection records found yet.</td>';
+    row.innerHTML = '<td colspan="9">No rent collection records found yet.</td>';
     overviewCollectionsBodyEl.append(row);
     return;
   }
@@ -5179,7 +5370,8 @@ function renderOverviewCollections(rows) {
       <td>${escapeHtml(item.houseNumber)}</td>
       <td>${escapeHtml(item.paymentStatus ?? "-")}</td>
       <td>${escapeHtml(formatCurrency(item.monthlyRentKsh))}</td>
-      <td>${escapeHtml(formatCurrency(item.paidAmountKsh ?? 0))}</td>
+      <td>${escapeHtml(formatCurrency(item.currentMonthPaidKsh ?? item.paidAmountKsh ?? 0))}</td>
+      <td>${escapeHtml(formatCurrency(item.currentMonthOutstandingKsh ?? item.balanceKsh))}</td>
       <td>${escapeHtml(formatCurrency(item.balanceKsh))}</td>
       <td>${escapeHtml(latestPayment)}</td>
       <td>${escapeHtml(item.latestPaymentReference ?? "-")}</td>
@@ -5370,6 +5562,46 @@ function renderResidentDrawer(resident) {
           + (roomIssues.length > 4
             ? `<p class="status-text">Showing 4 of ${roomIssues.length} issue(s) for this room.</p>`
             : "");
+  const roomUtilityBills = getResidentUtilityBills(resident);
+  const roomUtilityPayments = getResidentUtilityPayments(resident);
+  const roomExpenditures = getResidentRoomExpenditures(resident);
+  const overappliedUtilityBills = getResidentOverappliedUtilityBills(roomUtilityBills);
+  const roomUtilityPaidKsh = roomUtilityPayments.reduce(
+    (sum, item) => sum + Number(item?.amountKsh ?? 0),
+    0
+  );
+  const roomExpenditureTotalKsh = roomExpenditures.reduce(
+    (sum, item) => sum + Number(item?.amountKsh ?? 0),
+    0
+  );
+  const latestLedgerBillingMonth = roomUtilityBills
+    .map((item) => toBillingMonth(item?.billingMonth))
+    .filter(Boolean)
+    .sort()
+    .at(-1);
+  const latestLedgerBillingLabel = latestLedgerBillingMonth
+    ? formatBillingMonth(latestLedgerBillingMonth)
+    : "No posted utility bills";
+  const roomLedgerSummary = [
+    `${roomUtilityBills.length} bill${roomUtilityBills.length === 1 ? "" : "s"}`,
+    `${roomUtilityPayments.length} payment${roomUtilityPayments.length === 1 ? "" : "s"}`,
+    `${roomExpenditures.length} charge${roomExpenditures.length === 1 ? "" : "s"}`
+  ].join(" • ");
+  const roomLedgerFlags = [];
+  if (overappliedUtilityBills.length > 0) {
+    roomLedgerFlags.push(
+      `${overappliedUtilityBills.length} utility bill${
+        overappliedUtilityBills.length === 1 ? "" : "s"
+      } ${overappliedUtilityBills.length === 1 ? "has" : "have"} payments above the posted charge. Review allocation history.`
+    );
+  }
+  if (roomExpenditureTotalKsh > 0) {
+    roomLedgerFlags.push(
+      `Room-specific charges total ${formatCurrency(
+        roomExpenditureTotalKsh
+      )} and should count toward the resident outstanding balance.`
+    );
+  }
   const agreementPayload =
     sameResidentKey(state.selectedResident, resident) && state.selectedResidentAgreement
       ? state.selectedResidentAgreement
@@ -5427,6 +5659,8 @@ function renderResidentDrawer(resident) {
   const utilityBalanceKsh = getResidentUtilityBalanceKsh(resident);
   const currentUtilityDueKsh = getResidentCurrentUtilityDueKsh(resident);
   const utilityArrearsKsh = getResidentUtilityArrearsKsh(resident);
+  const expenseBalanceKsh = getResidentExpenseBalanceKsh(resident);
+  const currentMonthRentPaidKsh = getResidentCurrentMonthRentPaidKsh(resident, agreement);
   const monthlyRent =
     hasResident && monthlyRentKsh > 0 ? formatCurrency(monthlyRentKsh) : "-";
   const currentRentDue =
@@ -5440,7 +5674,11 @@ function renderResidentDrawer(resident) {
   const currentUtilityDue = hasResident ? formatCurrency(currentUtilityDueKsh) : "-";
   const utilityArrears = hasResident ? formatCurrency(utilityArrearsKsh) : "-";
   const utilityBalance = hasResident ? formatCurrency(utilityBalanceKsh) : "-";
+  const expenseBalance = hasResident ? formatCurrency(expenseBalanceKsh) : "-";
   const totalRentPaidKsh = getResidentTotalRentPaidKsh(resident);
+  const currentMonthRentPaid = hasResident && rentEnabled
+    ? formatCurrency(currentMonthRentPaidKsh)
+    : "-";
   const totalRentPaid = hasResident && rentEnabled
     ? formatCurrency(totalRentPaidKsh)
     : "-";
@@ -5450,6 +5688,7 @@ function renderResidentDrawer(resident) {
     window.matchMedia("(max-width: 680px)").matches;
   const roomProfileOpenAttr = compactDrawer ? "" : "open";
   const roomIssuesOpenAttr = compactDrawer ? "" : "open";
+  const roomLedgerOpenAttr = compactDrawer ? "" : "open";
   const rentPaymentsOpenAttr = compactDrawer ? "" : "open";
   const rentProfileOpenAttr = compactDrawer ? "" : "open";
   const agreementOpenAttr = compactDrawer ? "" : "open";
@@ -5503,6 +5742,7 @@ function renderResidentDrawer(resident) {
       )}</strong></div>
       <div><span>Utility Balance</span><strong>${escapeHtml(utilityBalance)}</strong></div>`
       }
+      <div><span>Charge Overdue</span><strong>${escapeHtml(expenseBalance)}</strong></div>
       <div><span>Outstanding</span><strong>${escapeHtml(totalOutstanding)}</strong></div>
       <div><span>Billing Status</span><strong>${escapeHtml(billingStatus)}</strong></div>
       <div><span>Next Due</span><strong>${escapeHtml(nextDue)}</strong></div>
@@ -5518,9 +5758,11 @@ function renderResidentDrawer(resident) {
             rentEnabled
               ? `<div><span>Latest Receipt</span><strong>${escapeHtml(latestReceipt)}</strong></div>
           <div><span>Latest Payment</span><strong>${escapeHtml(latestPaidAt)}</strong></div>
-          <div><span>Total Rent Paid</span><strong>${escapeHtml(totalRentPaid)}</strong></div>`
+          <div><span>This Month Paid</span><strong>${escapeHtml(currentMonthRentPaid)}</strong></div>
+          <div><span>All-Time Paid</span><strong>${escapeHtml(totalRentPaid)}</strong></div>`
               : `<div><span>Current Utility Due</span><strong>${escapeHtml(currentUtilityDue)}</strong></div>
-          <div><span>Utility Arrears</span><strong>${escapeHtml(utilityArrears)}</strong></div>`
+          <div><span>Utility Arrears</span><strong>${escapeHtml(utilityArrears)}</strong></div>
+          <div><span>Charge Overdue</span><strong>${escapeHtml(expenseBalance)}</strong></div>`
           }
           <div><span>Water Meter</span><strong>${escapeHtml(waterMeter)}</strong></div>
           <div><span>Electric Meter</span><strong>${escapeHtml(electricityMeter)}</strong></div>
@@ -5547,6 +5789,169 @@ function renderResidentDrawer(resident) {
       </summary>
       <div class="resident-drawer-panel-body">
         ${roomIssuesSummary}
+      </div>
+    </details>
+    <details class="resident-drawer-panel" ${roomLedgerOpenAttr}>
+      <summary>
+        <span>Room Ledger</span>
+        <small>${escapeHtml(roomLedgerSummary)}</small>
+      </summary>
+      <div class="resident-drawer-panel-body">
+        <p class="status-text resident-agreement-note">
+          One place for room utility bills, utility payments, and room-specific charges.
+        </p>
+        <div class="resident-agreement-overview resident-ledger-overview">
+          <div><span>Utility Outstanding</span><strong>${escapeHtml(utilityBalance)}</strong></div>
+          <div><span>Utility Paid</span><strong>${escapeHtml(
+            formatCurrency(roomUtilityPaidKsh)
+          )}</strong></div>
+          <div><span>Room Charges</span><strong>${escapeHtml(
+            formatCurrency(roomExpenditureTotalKsh)
+          )}</strong></div>
+          <div><span>Latest Bill Month</span><strong>${escapeHtml(
+            latestLedgerBillingLabel
+          )}</strong></div>
+        </div>
+        ${
+          roomLedgerFlags.length > 0
+            ? `<div class="resident-ledger-flags">${roomLedgerFlags
+                .map(
+                  (message) =>
+                    `<p class="status-text resident-ledger-flag">${escapeHtml(message)}</p>`
+                )
+                .join("")}</div>`
+            : ""
+        }
+        <div class="resident-ledger-columns">
+          <section class="resident-ledger-section">
+            <div class="resident-ledger-head">
+              <h4>Utility Bills</h4>
+              <small>${roomUtilityBills.length} item(s)</small>
+            </div>
+            ${
+              roomUtilityBills.length > 0
+                ? `<div class="stack-list">${roomUtilityBills
+                    .slice(0, 8)
+                    .map((bill) => {
+                      const billAmountKsh = Number(bill?.amountKsh ?? 0);
+                      const billBalanceKsh = Number(bill?.balanceKsh ?? 0);
+                      const paidAmountKsh = Array.isArray(bill?.payments)
+                        ? bill.payments.reduce(
+                            (sum, payment) => sum + Number(payment?.amountKsh ?? 0),
+                            0
+                          )
+                        : 0;
+                      const dueLabel = bill?.dueDate ? formatDateOnly(bill.dueDate) : "-";
+                      const billStatus = String(bill?.status ?? "open").trim() || "open";
+                      return `
+                        <article class="package-card resident-ledger-card">
+                          <p class="status-text">${escapeHtml(
+                            utilityTypeLabel(bill?.utilityType)
+                          )} • ${escapeHtml(formatBillingMonth(bill?.billingMonth))} • Due ${escapeHtml(
+                            dueLabel
+                          )}</p>
+                          <h4>${escapeHtml(formatCurrency(billBalanceKsh))} open of ${escapeHtml(
+                            formatCurrency(billAmountKsh)
+                          )}</h4>
+                          <p class="status-text">Status ${escapeHtml(
+                            billStatus
+                          )} • Paid ${escapeHtml(formatCurrency(paidAmountKsh))}</p>
+                          ${
+                            bill?.note
+                              ? `<p class="status-text">${escapeHtml(bill.note)}</p>`
+                              : ""
+                          }
+                        </article>
+                      `;
+                    })
+                    .join("")}</div>
+                  ${
+                    roomUtilityBills.length > 8
+                      ? `<p class="status-text">Showing 8 of ${roomUtilityBills.length} utility bill entries.</p>`
+                      : ""
+                  }`
+                : '<p class="status-text">No utility bills loaded for this room yet.</p>'
+            }
+          </section>
+          <section class="resident-ledger-section">
+            <div class="resident-ledger-head">
+              <h4>Utility Payments</h4>
+              <small>${roomUtilityPayments.length} item(s)</small>
+            </div>
+            ${
+              roomUtilityPayments.length > 0
+                ? `<div class="stack-list">${roomUtilityPayments
+                    .slice(0, 8)
+                    .map(
+                      (payment) => `
+                        <article class="package-card resident-ledger-card">
+                          <p class="status-text">${escapeHtml(
+                            formatPaymentProvider(payment?.provider)
+                          )} • ${escapeHtml(
+                        payment?.paidAt ? formatDateTime(payment.paidAt) : "-"
+                      )}</p>
+                          <h4>${escapeHtml(
+                            formatCurrency(Number(payment?.amountKsh ?? 0))
+                          )}</h4>
+                          <p class="status-text">${escapeHtml(
+                            utilityTypeLabel(payment?.utilityType)
+                          )} • ${escapeHtml(
+                        formatUtilityPaymentCoverage(payment, payment?.billingMonth) || "-"
+                      )}</p>
+                          <p class="status-text">${escapeHtml(
+                            payment?.providerReference || payment?.note || "No reference recorded."
+                          )}</p>
+                        </article>
+                      `
+                    )
+                    .join("")}</div>
+                  ${
+                    roomUtilityPayments.length > 8
+                      ? `<p class="status-text">Showing 8 of ${roomUtilityPayments.length} utility payment entries.</p>`
+                      : ""
+                  }`
+                : '<p class="status-text">No utility payments recorded for this room yet.</p>'
+            }
+          </section>
+          <section class="resident-ledger-section">
+            <div class="resident-ledger-head">
+              <h4>Room Charges</h4>
+              <small>${roomExpenditures.length} item(s)</small>
+            </div>
+            ${
+              roomExpenditures.length > 0
+                ? `<div class="stack-list">${roomExpenditures
+                    .slice(0, 8)
+                    .map(
+                      (item) => `
+                        <article class="package-card resident-ledger-card">
+                          <p class="status-text">${escapeHtml(
+                            formatExpenditureCategory(item?.category)
+                          )} • ${escapeHtml(
+                        item?.createdAt ? formatDateTime(item.createdAt) : "-"
+                      )}</p>
+                          <h4>${escapeHtml(
+                            formatCurrency(Number(item?.amountKsh ?? 0))
+                          )}</h4>
+                          <p class="status-text">${escapeHtml(item?.title || "Room charge")}</p>
+                          ${
+                            item?.note
+                              ? `<p class="status-text">${escapeHtml(item.note)}</p>`
+                              : ""
+                          }
+                        </article>
+                      `
+                    )
+                    .join("")}</div>
+                  ${
+                    roomExpenditures.length > 8
+                      ? `<p class="status-text">Showing 8 of ${roomExpenditures.length} room-charge entries.</p>`
+                      : ""
+                  }`
+                : '<p class="status-text">No room-specific charges posted for this room.</p>'
+            }
+          </section>
+        </div>
       </div>
     </details>
     ${
@@ -6253,14 +6658,26 @@ function renderUtilityPayments(rows) {
 }
 
 function renderMetrics() {
-  const actionableBills = getActionableUtilityBills(state.bills);
-  const meters = state.meters.length;
-  const residentUsers = Number(state.residentUsersCount ?? 0);
+  const metricBuildingId = getFocusedBuildingId();
+  const actionableBills = getActionableUtilityBills(state.bills).filter(
+    (item) =>
+      !metricBuildingId || normalizeLookupBuildingId(item.buildingId) === metricBuildingId
+  );
+  const meters = state.meters.filter(
+    (item) =>
+      !metricBuildingId || normalizeLookupBuildingId(item.buildingId) === metricBuildingId
+  ).length;
+  const residentRows = dedupeResidentDirectoryRows(state.residentDirectory).filter(
+    (item) =>
+      !metricBuildingId || normalizeLookupBuildingId(item.buildingId) === metricBuildingId
+  );
+  const residentUsers = metricBuildingId
+    ? Number(getBuildingRecord(metricBuildingId)?.residentUsers ?? 0)
+    : Number(state.residentUsersCount ?? 0);
   const bills = actionableBills.length;
+  const currentMonthKey = currentBillingMonth();
   let unpaid = 0;
   let overdue = 0;
-  let paidTotal = 0;
-  let outstanding = 0;
 
   actionableBills.forEach((item) => {
     const balanceKsh = utilityAmount(item.balanceKsh);
@@ -6270,9 +6687,27 @@ function renderMetrics() {
     if (String(item.status) === "overdue") {
       overdue += 1;
     }
-    paidTotal += getUtilityPaidAmount(item);
-    outstanding += balanceKsh;
   });
+
+  const rentCollectedThisMonth = residentRows.reduce(
+    (sum, item) => sum + getResidentCurrentMonthRentPaidKsh(item),
+    0
+  );
+  const utilityCollectedThisMonth = (Array.isArray(state.payments) ? state.payments : [])
+    .filter(
+      (item) =>
+        (!metricBuildingId || normalizeLookupBuildingId(item.buildingId) === metricBuildingId) &&
+        monthKeyFromValue(item.paidAt || item.billingMonth) === currentMonthKey
+    )
+    .reduce((sum, item) => sum + Math.max(0, Number(item.amountKsh ?? 0)), 0);
+  const paidTotal = rentCollectedThisMonth + utilityCollectedThisMonth;
+  const outstanding =
+    residentRows.length > 0
+      ? residentRows.reduce(
+          (sum, item) => sum + getResidentOutstandingBalanceKsh(item),
+          0
+        )
+      : actionableBills.reduce((sum, item) => sum + utilityAmount(item.balanceKsh), 0);
 
   metricMetersEl.textContent = String(meters);
   metricUsersEl.textContent = String(residentUsers);
@@ -7400,7 +7835,7 @@ createBuildingFormEl?.addEventListener("submit", (event) => {
         if (selectedFiles.length > 0) {
           setStatus("Uploading building photo...");
           imageUrls = await uploadImageFiles(selectedFiles, {
-            getSignature: () => signBuildingPhotoUpload()
+            createUploadRequest: () => createBuildingPhotoUploadRequest()
           });
         }
       }
@@ -7496,7 +7931,7 @@ buildingPhotoFormEl?.addEventListener("submit", (event) => {
 
       setStatus("Uploading building photo...");
       const imageUrls = await uploadImageFiles(selectedFiles, {
-        getSignature: () => signBuildingPhotoUpload(buildingId)
+        createUploadRequest: () => createBuildingPhotoUploadRequest(buildingId)
       });
 
       await requestJson(`/api/landlord/buildings/${encodeURIComponent(buildingId)}/media`, {
@@ -7766,7 +8201,7 @@ residentsBodyEl?.addEventListener("click", (event) => {
     return;
   }
 
-  openResidentDirectoryEntry(buildingId, houseNumber);
+  void openResidentDirectoryEntry(buildingId, houseNumber);
 });
 
 residentDrawerBodyEl?.addEventListener("submit", (event) => {

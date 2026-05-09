@@ -452,6 +452,45 @@
   color: rgba(16, 35, 49, 0.7);
 }
 
+.landlord-inline-details {
+  margin: 14px 0;
+  border: 1px solid rgba(15, 62, 87, 0.12);
+  border-radius: 16px;
+  background: rgba(247, 251, 251, 0.94);
+  overflow: hidden;
+}
+
+.landlord-inline-details summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 14px 16px;
+  font-weight: 700;
+  color: #102331;
+}
+
+.landlord-inline-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.landlord-inline-details[open] summary {
+  border-bottom: 1px solid rgba(15, 62, 87, 0.1);
+}
+
+.landlord-inline-details form,
+.landlord-inline-details .status-text {
+  margin: 0;
+}
+
+.landlord-inline-details form {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.landlord-inline-details .status-text {
+  padding: 0 16px 16px;
+}
+
 .sidebar-note {
   margin: 6px 0 0;
   font-size: 0.86rem;
@@ -771,6 +810,62 @@
   margin: 0;
   color: #8a1c1c;
   font-weight: 600;
+}
+
+.resident-ledger-overview {
+  margin-bottom: 12px;
+}
+
+.resident-ledger-flags {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.resident-ledger-flag {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 245, 214, 0.8);
+  border: 1px solid rgba(180, 132, 34, 0.24);
+  color: #6f4a0a;
+}
+
+.resident-ledger-columns {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.resident-ledger-section {
+  display: grid;
+  gap: 10px;
+}
+
+.resident-ledger-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.resident-ledger-head h4 {
+  margin: 0;
+  font-size: 1rem;
+  font-family: "Fraunces", Georgia, serif;
+  color: #102331;
+}
+
+.resident-ledger-head small {
+  color: rgba(16, 35, 49, 0.68);
+}
+
+.resident-ledger-card h4 {
+  margin: 0 0 6px;
+}
+
+.resident-ledger-card .status-text:last-child {
+  margin-bottom: 0;
 }
 
 .landlord-generator {
@@ -1108,7 +1203,8 @@
   }
 
   .resident-agreement-overview,
-  .resident-agreement-grid {
+  .resident-agreement-grid,
+  .resident-ledger-columns {
     grid-template-columns: 1fr;
   }
 }

@@ -2,8 +2,10 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
 import { ZodError } from "zod";
 import type {
   LandlordAccessRequestStatus,
@@ -72,6 +74,7 @@ import {
   type ResidentNotificationPreferencePersistedState
 } from "./services/residentNotificationPreferenceService.js";
 import {
+  adminAccessCredentialUpdateSchema,
   adminLoginSchema,
   deleteResidentPushSubscriptionSchema,
   confirmWifiPaymentSchema,
@@ -146,13 +149,23 @@ import {
 
 const port = Number(process.env.PORT ?? 4000);
 const publicDir = path.resolve(process.cwd(), "public");
+const uploadsDir = path.resolve(process.cwd(), "uploads");
 const adminSessionCookieName = "captyn_admin_session";
 const userSessionCookieName = "captyn_user_session";
 const TERMINAL_MPESA_FAILURE_CODES = new Set([1, 17, 26, 1032, 1037, 2001]);
 const MPESA_VERIFY_RATE_WINDOW_MS = 60 * 1000;
 const MPESA_VERIFY_RATE_MAX_PER_ID = 80;
 const AUTH_ROUTE_RATE_WINDOW_MS = 10 * 60 * 1000;
-const CLOUDINARY_UPLOAD_FOLDER = process.env.CLOUDINARY_UPLOAD_FOLDER ?? "captyn-housing";
+const RECURRING_UTILITY_VISIBILITY_WINDOW_DAYS = 7;
+const HOUSING_DIAGNOSTIC_LOGS_ENABLED =
+  process.env.HOUSING_DIAGNOSTIC_LOGS_ENABLED !== "false";
+const LOCAL_MEDIA_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+const LOCAL_MEDIA_UPLOAD_EXTENSION_BY_TYPE = new Map<string, string>([
+  ["image/jpeg", "jpg"],
+  ["image/jpg", "jpg"],
+  ["image/png", "png"],
+  ["image/webp", "webp"]
+]);
 const RESIDENT_BILLING_LOCKED_MESSAGE =
   "Payments and balances unlock after landlord verification.";
 const CAPTYN_HOUSING_WALLET_FEE_BPS = Math.max(
@@ -161,6 +174,19 @@ const CAPTYN_HOUSING_WALLET_FEE_BPS = Math.max(
 );
 const CAPTYN_HOUSING_WALLET_COLLECTION_ACCOUNT_CODE =
   process.env.CAPTYN_HOUSING_WALLET_COLLECTION_ACCOUNT_CODE?.trim() || undefined;
+
+function logHousingEvent(event: string, details?: Record<string, unknown>) {
+  if (!HOUSING_DIAGNOSTIC_LOGS_ENABLED) {
+    return;
+  }
+
+  if (!details || Object.keys(details).length === 0) {
+    console.log(`[housing-api] ${event}`);
+    return;
+  }
+
+  console.log(`[housing-api] ${event}`, details);
+}
 
 function normalizeUploadFolderSegment(value: string | undefined, fallback: string): string {
   const normalized = String(value ?? "")
@@ -171,37 +197,40 @@ function normalizeUploadFolderSegment(value: string | undefined, fallback: strin
   return normalized || fallback;
 }
 
-function getCloudinaryUploadConfig() {
-  const cloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim();
-  const apiKey = process.env.CLOUDINARY_API_KEY?.trim();
-  const apiSecret = process.env.CLOUDINARY_API_SECRET?.trim();
+interface MultipartFileLike {
+  arrayBuffer(): Promise<ArrayBuffer>;
+  readonly name?: string;
+  readonly size?: number;
+  readonly type?: string;
+}
 
-  if (!cloudName || !apiKey || !apiSecret) {
-    return null;
+function isMultipartFileLike(value: unknown): value is MultipartFileLike {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "arrayBuffer" in value &&
+      typeof (value as { arrayBuffer?: unknown }).arrayBuffer === "function"
+  );
+}
+
+function resolveMediaUploadExtension(fileName: string | undefined, mimeType: string | undefined) {
+  const normalizedType = String(mimeType ?? "")
+    .trim()
+    .toLowerCase();
+  const mapped = LOCAL_MEDIA_UPLOAD_EXTENSION_BY_TYPE.get(normalizedType);
+  if (mapped) {
+    return mapped;
   }
 
-  return {
-    cloudName,
-    apiKey,
-    apiSecret,
-    uploadUrl: `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`
-  };
+  const extension = path.extname(String(fileName ?? ""))
+    .trim()
+    .toLowerCase()
+    .replace(/^\./, "");
+  return [...LOCAL_MEDIA_UPLOAD_EXTENSION_BY_TYPE.values()].includes(extension)
+    ? extension
+    : null;
 }
 
-function createCloudinarySignature(
-  params: Record<string, string | number>,
-  apiSecret: string
-): string {
-  const serialized = Object.entries(params)
-    .filter(([, value]) => value !== "")
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, value]) => `${key}=${value}`)
-    .join("&");
-
-  return createHash("sha1")
-    .update(`${serialized}${apiSecret}`)
-    .digest("hex");
-}
 const AUTH_ROUTE_RATE_MAX_PER_IP = 20;
 const PASSWORD_RECOVERY_RATE_WINDOW_MS = 15 * 60 * 1000;
 const PASSWORD_RECOVERY_RATE_MAX_PER_KEY = 3;
@@ -416,9 +445,13 @@ interface LandlordUtilityRegistryRow {
   currentRentDueKsh: number;
   rentArrearsKsh: number;
   rentDueDate?: string;
+  currentMonthRentPaidKsh: number;
+  currentMonthRentOutstandingKsh: number;
   totalRentPaidKsh: number;
   currentUtilityDueKsh: number;
   utilityArrearsKsh: number;
+  expenseBalanceKsh: number;
+  expenseArrearsKsh: number;
   nextUtilityDueDate?: string;
   latestRentPaymentReference?: string;
   latestRentPaymentAt?: string;
@@ -2382,6 +2415,7 @@ async function bootstrap() {
     process.env.CORS_ORIGIN,
     process.env.BASE_URL
   );
+  const configuredBaseUrl = normalizeOriginValue(process.env.BASE_URL);
 
   const shouldUseSecureCookies = (req: express.Request): boolean => {
     if (secureCookieOverride !== null) {
@@ -2455,6 +2489,37 @@ async function bootstrap() {
     }
 
     return expected;
+  };
+
+  const resolvePublicRequestOrigin = (req: express.Request): string | null => {
+    const host = req.header("host");
+    if (host) {
+      const normalized = normalizeOriginValue(`${req.protocol}://${host}`);
+      if (normalized) {
+        return normalized;
+      }
+    }
+
+    return configuredBaseUrl;
+  };
+
+  const createPublicAssetUrl = (req: express.Request, relativePath: string): string => {
+    const origin = resolvePublicRequestOrigin(req);
+    return origin ? new URL(relativePath, origin).toString() : relativePath;
+  };
+
+  const parseMultipartFormData = async (req: express.Request): Promise<FormData> => {
+    const origin = resolvePublicRequestOrigin(req) ?? `http://localhost:${port}`;
+    const requestInit = {
+      method: req.method,
+      headers: req.headers as HeadersInit,
+      body: Readable.toWeb(req) as unknown as BodyInit,
+      duplex: "half"
+    } as RequestInit & { duplex: "half" };
+
+    const requestUrl = new URL(req.originalUrl || req.url || "/", origin);
+    const webRequest = new Request(requestUrl, requestInit);
+    return webRequest.formData();
   };
 
   const rememberRentStkRequest = (
@@ -3502,6 +3567,10 @@ async function bootstrap() {
       return null;
     }
 
+    if (context.role === "landlord" && !context.userSession) {
+      return null;
+    }
+
     if (context.role === "caretaker") {
       if (!context.userSession) {
         return new Set<string>();
@@ -4096,6 +4165,18 @@ async function bootstrap() {
     const memberRegistryByHouse = await listHouseholdMembersForBuilding(buildingId);
     const utilityDefaultsByHouse = listUtilityChargeDefaultsForBuilding(buildingId);
     const paymentAccess = paymentAccessService.getForBuilding(buildingId);
+    const chargeableExpenditureByHouse = new Map<string, number>();
+    for (const item of buildingExpenditures.values()) {
+      if (item.buildingId !== normalizeBuildingId(buildingId) || !item.houseNumber) {
+        continue;
+      }
+
+      const houseNumber = normalizeHouseNumber(item.houseNumber);
+      const nextTotal =
+        (chargeableExpenditureByHouse.get(houseNumber) ?? 0) +
+        Math.max(0, Number(item.amountKsh ?? 0));
+      chargeableExpenditureByHouse.set(houseNumber, nextTotal);
+    }
     const utilityBalanceByHouse = new Map<
       string,
       {
@@ -4154,15 +4235,34 @@ async function bootstrap() {
       const rentBalanceKsh = paymentAccess.rentEnabled
         ? Math.max(0, Number(rent?.balanceKsh ?? fallbackRentBalanceKsh))
         : 0;
-      const currentRentDueKsh =
-        monthlyRentKsh > 0
-          ? Math.min(rentBalanceKsh, monthlyRentKsh)
-          : rentBalanceKsh;
+      const currentRentDueKsh = paymentAccess.rentEnabled
+        ? Math.max(
+            0,
+            Number(
+              rent?.currentMonthOutstandingKsh ??
+                (monthlyRentKsh > 0
+                  ? Math.min(rentBalanceKsh, monthlyRentKsh)
+                  : rentBalanceKsh)
+            )
+          )
+        : 0;
+      const currentMonthRentPaidKsh = paymentAccess.rentEnabled
+        ? Math.max(
+            0,
+            Number(
+              rent?.currentMonthPaidKsh ??
+                (monthlyRentKsh > 0
+                  ? Math.max(0, monthlyRentKsh - currentRentDueKsh)
+                  : 0)
+            )
+          )
+        : 0;
       const rentArrearsKsh = Math.max(0, rentBalanceKsh - currentRentDueKsh);
       const utilitySummary = utilityBalanceByHouse.get(houseNumber);
       const utilityBalanceKsh = utilitySummary?.totalOpenKsh ?? 0;
       const currentUtilityDueKsh = utilitySummary?.currentDueKsh ?? 0;
       const utilityArrearsKsh = utilitySummary?.arrearsKsh ?? 0;
+      const expenseBalanceKsh = chargeableExpenditureByHouse.get(houseNumber) ?? 0;
       const visibleRentPaymentStatus =
         paymentAccess.rentEnabled && billingVisible
           ? rent?.paymentStatus ?? (monthlyRentKsh > 0 ? "NOT_PAID" : undefined)
@@ -4170,12 +4270,14 @@ async function bootstrap() {
       const visibleRentBalanceKsh = billingVisible ? rentBalanceKsh : 0;
       const visibleCurrentRentDueKsh = billingVisible ? currentRentDueKsh : 0;
       const visibleRentArrearsKsh = billingVisible ? rentArrearsKsh : 0;
+      const visibleCurrentMonthRentPaidKsh = billingVisible ? currentMonthRentPaidKsh : 0;
       const visibleRentDueDate =
         paymentAccess.rentEnabled && billingVisible
           ? rent?.dueDate ?? fallbackRentDueDate
           : undefined;
       const visibleCurrentUtilityDueKsh = billingVisible ? currentUtilityDueKsh : 0;
       const visibleUtilityArrearsKsh = billingVisible ? utilityArrearsKsh : 0;
+      const visibleExpenseBalanceKsh = billingVisible ? expenseBalanceKsh : 0;
       const visibleNextUtilityDueDate = billingVisible ? utilitySummary?.nextDueDate : undefined;
       const visibleLatestRentPaymentReference =
         paymentAccess.rentEnabled && billingVisible
@@ -4213,13 +4315,18 @@ async function bootstrap() {
         currentRentDueKsh: visibleCurrentRentDueKsh,
         rentArrearsKsh: visibleRentArrearsKsh,
         rentDueDate: visibleRentDueDate,
+        currentMonthRentPaidKsh: visibleCurrentMonthRentPaidKsh,
+        currentMonthRentOutstandingKsh: visibleCurrentRentDueKsh,
         totalRentPaidKsh: visibleTotalRentPaidKsh,
         currentUtilityDueKsh: visibleCurrentUtilityDueKsh,
         utilityArrearsKsh: visibleUtilityArrearsKsh,
+        expenseBalanceKsh: visibleExpenseBalanceKsh,
+        expenseArrearsKsh: visibleExpenseBalanceKsh,
         nextUtilityDueDate: visibleNextUtilityDueDate,
         latestRentPaymentReference: visibleLatestRentPaymentReference,
         latestRentPaymentAt: visibleLatestRentPaymentAt,
-        roomBalanceKsh: visibleRentBalanceKsh + visibleUtilityBalanceKsh,
+        roomBalanceKsh:
+          visibleRentBalanceKsh + visibleUtilityBalanceKsh + visibleExpenseBalanceKsh,
         utilityBalanceKsh: visibleUtilityBalanceKsh,
         householdMembers: registryRecord?.members ?? defaultMembers,
         waterFixedChargeKsh: utilityDefaults?.waterFixedChargeKsh ?? 0,
@@ -4337,6 +4444,9 @@ async function bootstrap() {
       monthlyRentKsh: number;
       balanceKsh: number;
       paidAmountKsh: number;
+      currentMonthPaidKsh: number;
+      currentMonthOutstandingKsh: number;
+      arrearsKsh: number;
       totalPaidKsh: number;
       dueDate: string;
       latestPaymentReference?: string;
@@ -4353,6 +4463,9 @@ async function bootstrap() {
         monthlyRentKsh: item.monthlyRentKsh,
         balanceKsh: item.balanceKsh,
         paidAmountKsh: item.paidAmountKsh,
+        currentMonthPaidKsh: item.currentMonthPaidKsh,
+        currentMonthOutstandingKsh: item.currentMonthOutstandingKsh,
+        arrearsKsh: item.arrearsKsh,
         totalPaidKsh: item.totalPaidKsh,
         dueDate: item.dueDate,
         latestPaymentReference: item.latestPaymentReference,
@@ -4413,6 +4526,9 @@ async function bootstrap() {
           monthlyRentKsh,
           balanceKsh: monthlyRentKsh,
           paidAmountKsh: 0,
+          currentMonthPaidKsh: 0,
+          currentMonthOutstandingKsh: monthlyRentKsh,
+          arrearsKsh: 0,
           totalPaidKsh: 0,
           dueDate: buildAgreementFallbackRentDueDate(
             agreement.paymentDueDay ?? undefined,
@@ -4433,6 +4549,7 @@ async function bootstrap() {
     userId?: string;
     userSession: Awaited<ReturnType<typeof resolveOptionalUserSession>>;
   }) => {
+    await ensureRecurringUtilityBillsCurrent("landlord.startup");
     const buildings = await listLandlordBuildingSummaries(context);
     const visibleBuildingIds = new Set(buildings.map((item) => item.id));
     const applicationStatus: TenantApplicationStatus = "pending";
@@ -4663,6 +4780,42 @@ async function bootstrap() {
     );
   };
 
+  const ensureRecurringUtilityBillsCurrent = async (
+    reason: string,
+    scope: {
+      buildingId?: string;
+      houseNumber?: string;
+      utilityType?: "water" | "electricity";
+    } = {}
+  ) => {
+    const createdBills = utilityBillingService.backfillRecurringBills({
+      ...scope,
+      visibleThroughDate: new Date(
+        Date.now() + RECURRING_UTILITY_VISIBILITY_WINDOW_DAYS * 24 * 60 * 60 * 1000
+      )
+    });
+
+    if (createdBills.length === 0) {
+      return [];
+    }
+
+    await persistUtilityBillingStateNow();
+    logHousingEvent("utility.recurring_backfill", {
+      reason,
+      scope,
+      createdCount: createdBills.length,
+      createdMonths: createdBills.map((item) => ({
+        utilityType: item.utilityType,
+        buildingId: item.buildingId,
+        houseNumber: item.houseNumber,
+        billingMonth: item.billingMonth,
+        amountKsh: item.amountKsh,
+        dueDate: item.dueDate
+      }))
+    });
+    return createdBills;
+  };
+
   const recordResidentUtilityPaymentAndNotify = async (
     utilityType: "water" | "electricity",
     buildingId: string,
@@ -4789,7 +4942,46 @@ async function bootstrap() {
     })
   );
   app.use(express.json({ limit: "1mb" }));
+  await mkdir(uploadsDir, { recursive: true });
+  app.use("/uploads", express.static(uploadsDir));
   app.use(express.static(publicDir));
+  app.use((req, res, next) => {
+    const pathValue = req.path ?? "";
+    const shouldLog =
+      pathValue === "/api/user/utility-bills" ||
+      pathValue === "/api/landlord/startup" ||
+      pathValue === "/api/landlord/utilities/bills" ||
+      pathValue === "/api/payments/mpesa/rent-callback" ||
+      /^\/api\/user\/rent\/payments\/mpesa\/(initialize|verify)$/.test(pathValue) ||
+      /^\/api\/user\/utilities\/[^/]+\/payments(?:\/mpesa\/(?:initialize|verify))?$/.test(
+        pathValue
+      );
+
+    if (!shouldLog) {
+      next();
+      return;
+    }
+
+    const requestId = randomUUID().slice(0, 8);
+    const startedAt = Date.now();
+    logHousingEvent("request.start", {
+      requestId,
+      method: req.method,
+      path: pathValue,
+      ip: req.ip || req.socket.remoteAddress || "unknown"
+    });
+    res.on("finish", () => {
+      logHousingEvent("request.finish", {
+        requestId,
+        method: req.method,
+        path: pathValue,
+        statusCode: res.statusCode,
+        durationMs: Date.now() - startedAt
+      });
+    });
+
+    next();
+  });
   app.use((req, res, next) => {
     const pathValue = req.path ?? "";
     if (
@@ -5919,6 +6111,42 @@ async function bootstrap() {
         expiresAt: session.expiresAt
       }
     });
+  });
+
+  app.get("/api/admin/auth/access", (req, res) => {
+    const admin = getAdminSession(req, res, "root_admin");
+    if (!admin) {
+      return;
+    }
+
+    return res.json({
+      data: adminAuthService.getAdminCredentialSummary(),
+      role: admin.role
+    });
+  });
+
+  app.patch("/api/admin/auth/access", (req, res, next) => {
+    try {
+      const admin = getAdminSession(req, res, "root_admin");
+      if (!admin) {
+        return;
+      }
+
+      const parsed = adminAccessCredentialUpdateSchema.parse(req.body ?? {});
+      const data = adminAuthService.updateAdminCredentials(parsed);
+
+      logHousingEvent("admin.access_credentials_updated", {
+        actorRole: admin.role,
+        username: data.username
+      });
+
+      return res.json({
+        data,
+        role: admin.role
+      });
+    } catch (error) {
+      return next(error);
+    }
   });
 
   app.post("/api/auth/admin/logout", (req, res) => {
@@ -7882,17 +8110,41 @@ async function bootstrap() {
     }
   });
 
-  app.post("/api/media/sign-upload", async (req, res, next) => {
+  app.post("/api/media/upload", async (req, res, next) => {
     try {
-      const config = getCloudinaryUploadConfig();
-      if (!config) {
-        return res.status(503).json({
-          error: "Cloud image uploads are not configured on this server."
+      const formData = await parseMultipartFormData(req);
+      const parsed = mediaUploadSignatureRequestSchema.parse({
+        category: formData.get("category"),
+        buildingId: String(formData.get("buildingId") ?? "").trim() || undefined
+      });
+      const fileEntry = formData.get("file");
+
+      if (!isMultipartFileLike(fileEntry)) {
+        return res.status(400).json({ error: "Image file is required." });
+      }
+
+      const mimeType = String(fileEntry.type ?? "")
+        .trim()
+        .toLowerCase();
+      const extension = resolveMediaUploadExtension(fileEntry.name, mimeType);
+      if (!extension) {
+        return res.status(400).json({
+          error: "Only JPEG, PNG, and WebP images are supported."
         });
       }
 
-      const parsed = mediaUploadSignatureRequestSchema.parse(req.body ?? {});
-      let folder = `${CLOUDINARY_UPLOAD_FOLDER}/misc`;
+      const sizeBytes = Math.round(Number(fileEntry.size ?? 0));
+      if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+        return res.status(400).json({ error: "Uploaded image is empty." });
+      }
+
+      if (sizeBytes > LOCAL_MEDIA_UPLOAD_MAX_BYTES) {
+        return res.status(400).json({
+          error: "Image is larger than 10 MB."
+        });
+      }
+
+      let targetDirectorySegments = ["misc"];
 
       if (parsed.category === "support_evidence") {
         const session = await getResidentSession(req, res);
@@ -7906,12 +8158,11 @@ async function bootstrap() {
           });
         }
 
-        folder = [
-          CLOUDINARY_UPLOAD_FOLDER,
+        targetDirectorySegments = [
           "support",
           normalizeUploadFolderSegment(session.buildingId, "building"),
           normalizeUploadFolderSegment(session.houseNumber, "house")
-        ].join("/");
+        ];
       } else {
         const context = await resolveLandlordAccessContext(req, res);
         if (!context) {
@@ -7934,30 +8185,42 @@ async function bootstrap() {
           }
         }
 
-        folder = [
-          CLOUDINARY_UPLOAD_FOLDER,
+        targetDirectorySegments = [
           "buildings",
           normalizeUploadFolderSegment(parsed.buildingId, "pending")
-        ].join("/");
+        ];
       }
 
-      const timestamp = Math.floor(Date.now() / 1000);
-      const signature = createCloudinarySignature(
-        {
-          folder,
-          timestamp
-        },
-        config.apiSecret
-      );
+      const targetDirectory = path.join(uploadsDir, ...targetDirectorySegments);
+      await mkdir(targetDirectory, { recursive: true });
 
-      return res.json({
+      const filename = `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}.${extension}`;
+      const filePath = path.join(targetDirectory, filename);
+      const buffer = Buffer.from(await fileEntry.arrayBuffer());
+
+      await writeFile(filePath, buffer);
+
+      const relativeUrl = `/${path.posix.join(
+        "uploads",
+        ...targetDirectorySegments,
+        filename
+      )}`;
+      const url = createPublicAssetUrl(req, relativeUrl);
+
+      logHousingEvent("media.uploaded", {
+        category: parsed.category,
+        buildingId: parsed.buildingId ?? null,
+        relativeUrl,
+        sizeBytes: buffer.byteLength,
+        mimeType
+      });
+
+      return res.status(201).json({
         data: {
-          apiKey: config.apiKey,
-          cloudName: config.cloudName,
-          folder,
-          signature,
-          timestamp,
-          uploadUrl: config.uploadUrl
+          url,
+          relativeUrl,
+          mimeType,
+          sizeBytes: buffer.byteLength
         }
       });
     } catch (error) {
@@ -8140,10 +8403,31 @@ async function bootstrap() {
 
     enqueueResidentBillingNotifications(session.buildingId, session.houseNumber);
 
-    const data = rentLedgerService.getRentDue(
+    const rentDue = rentLedgerService.getRentDue(
       session.buildingId,
       session.houseNumber
     );
+    const expenseBalanceKsh = [...buildingExpenditures.values()].reduce((sum, item) => {
+      const itemHouseNumber = item.houseNumber
+        ? normalizeHouseNumber(item.houseNumber)
+        : "";
+      if (
+        item.buildingId !== normalizeBuildingId(session.buildingId) ||
+        itemHouseNumber !== normalizeHouseNumber(session.houseNumber)
+      ) {
+        return sum;
+      }
+
+      return sum + Math.max(0, Number(item.amountKsh ?? 0));
+    }, 0);
+    const data = rentDue
+      ? {
+          ...rentDue,
+          expenseBalanceKsh,
+          expenseArrearsKsh: expenseBalanceKsh,
+          totalRoomBalanceKsh: Math.max(0, Number(rentDue.balanceKsh ?? 0)) + expenseBalanceKsh
+        }
+      : null;
     return res.json({
       data,
       message: data
@@ -8650,6 +8934,12 @@ async function bootstrap() {
           ? utilityTypeSchema.parse(req.query.utilityType)
           : undefined;
 
+      await ensureRecurringUtilityBillsCurrent("resident.utility_bills", {
+        buildingId: session.buildingId,
+        houseNumber: session.houseNumber,
+        utilityType
+      });
+
       const data = utilityBillingService.listResidentVisibleBillsForHouse(
         session.buildingId,
         session.houseNumber,
@@ -8737,60 +9027,75 @@ async function bootstrap() {
         }
 
         const parsed = initializeUtilityMpesaPaymentSchema.parse(req.body);
-        const bills = utilityBillingService.listBillsForHouse(
-          session.buildingId,
-          session.houseNumber,
-          utilityType,
-          120
-        );
+        await ensureRecurringUtilityBillsCurrent("resident.utility_mpesa_initialize", {
+          buildingId: session.buildingId,
+          houseNumber: session.houseNumber,
+          utilityType
+        });
 
-        if (bills.length === 0) {
-          return res.status(404).json({
-            error: `No ${utilityType} bills found for house ${session.houseNumber}.`
+        let preview;
+        try {
+          preview = utilityBillingService.previewPayment(
+            utilityType,
+            session.buildingId,
+            session.houseNumber,
+            {
+              billingMonth: parsed.billingMonth,
+              amountKsh: parsed.amountKsh
+            }
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Utility payment unavailable.";
+          const status = message.includes("No ") ? 404 : 409;
+          logHousingEvent("utility.mpesa_initialize.rejected", {
+            buildingId: session.buildingId,
+            houseNumber: session.houseNumber,
+            utilityType,
+            requestedBillingMonth: parsed.billingMonth ?? null,
+            requestedAmountKsh: Math.round(parsed.amountKsh),
+            reason: message
           });
+          return res.status(status).json({ error: message });
         }
 
-        const openBills = [...bills]
-          .filter((item) => item.balanceKsh > 0)
-          .sort((a, b) => a.billingMonth.localeCompare(b.billingMonth));
-        const targetBill = parsed.billingMonth
-          ? bills.find((item) => item.billingMonth === parsed.billingMonth)
-          : openBills[0];
-
-        if (!targetBill) {
-          return res.status(409).json({
-            error: parsed.billingMonth
-              ? `${utilityType} bill for ${parsed.billingMonth} is not available.`
-              : `No outstanding ${utilityType} bill found for house ${session.houseNumber}.`
-          });
-        }
-
-        const candidateBills = parsed.billingMonth
-          ? [targetBill, ...openBills.filter((item) => item.id !== targetBill.id)]
-          : openBills;
-        const availableBalanceKsh = candidateBills.reduce(
-          (sum, item) => sum + Math.max(0, Math.round(item.balanceKsh)),
-          0
-        );
         const amountKsh = Math.round(parsed.amountKsh);
-        const effectiveBill =
-          candidateBills.find((item) => item.balanceKsh > 0) ?? null;
-
-        if (!effectiveBill || availableBalanceKsh <= 0) {
-          return res.status(409).json({
-            error: parsed.billingMonth
-              ? `${utilityType} bill for ${targetBill.billingMonth} is already cleared.`
-              : `No outstanding ${utilityType} bill found for house ${session.houseNumber}.`
-          });
-        }
+        const targetBill = preview.targetBill;
+        const effectiveBill = preview.effectiveBill;
+        const availableBalanceKsh = preview.availableBalanceKsh;
 
         if (amountKsh > availableBalanceKsh) {
+          logHousingEvent("utility.mpesa_initialize.over_limit", {
+            buildingId: session.buildingId,
+            houseNumber: session.houseNumber,
+            utilityType,
+            requestedBillingMonth: parsed.billingMonth ?? null,
+            requestedAmountKsh: amountKsh,
+            availableBalanceKsh,
+            candidateBillingMonths: preview.candidateBills.map((item) => ({
+              billingMonth: item.billingMonth,
+              balanceKsh: Math.round(Number(item.balanceKsh ?? 0))
+            }))
+          });
           return res.status(400).json({
             error: `Amount exceeds remaining ${utilityType} balance of KSh ${Math.round(
               availableBalanceKsh
             ).toLocaleString("en-US")}.`
           });
         }
+
+        logHousingEvent("utility.mpesa_initialize.accepted", {
+          buildingId: session.buildingId,
+          houseNumber: session.houseNumber,
+          utilityType,
+          requestedBillingMonth: parsed.billingMonth ?? null,
+          appliedStartingMonth: effectiveBill.billingMonth,
+          requestedAmountKsh: amountKsh,
+          availableBalanceKsh,
+          candidateBillingMonths: preview.candidateBills.map((item) => ({
+            billingMonth: item.billingMonth,
+            balanceKsh: Math.round(Number(item.balanceKsh ?? 0))
+          }))
+        });
 
         const mpesaConfig = getMpesaConfig("/api/payments/mpesa/rent-callback");
         if (!mpesaConfig.enabled) {
@@ -9066,6 +9371,11 @@ async function bootstrap() {
       }
 
       const parsed = recordUtilityPaymentSchema.parse(req.body);
+      await ensureRecurringUtilityBillsCurrent("resident.utility_payment_direct", {
+        buildingId: session.buildingId,
+        houseNumber: session.houseNumber,
+        utilityType
+      });
       const data = await recordResidentUtilityPaymentAndNotify(
         utilityType,
         session.buildingId,
@@ -10845,6 +11155,12 @@ async function bootstrap() {
         ? Math.min(Math.max(limitRaw, 1), 2_000)
         : 500;
 
+      await ensureRecurringUtilityBillsCurrent("landlord.utility_bills", {
+        buildingId,
+        houseNumber,
+        utilityType
+      });
+
       const data = utilityBillingService.listBills({
         utilityType,
         buildingId,
@@ -11385,14 +11701,14 @@ async function bootstrap() {
 
   app.delete("/api/landlord/buildings/:buildingId", async (req, res, next) => {
     try {
-      const session = await getUserSession(req, res, "landlord");
-      if (!session) {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) {
         return;
       }
 
-      if (!userAccountService) {
-        return res.status(503).json({
-          error: "User account service unavailable. Database connection is required."
+      if (context.role === "caretaker") {
+        return res.status(403).json({
+          error: "Caretaker accounts cannot delete buildings."
         });
       }
 
@@ -11401,7 +11717,10 @@ async function bootstrap() {
         return res.status(400).json({ error: "Building id is required." });
       }
 
-      const hasAccess = await userAccountService.canAccessBuilding(session, buildingId);
+      const hasAccess = await canManageBuildingFromLandlordContext(
+        context,
+        buildingId
+      );
       if (!hasAccess) {
         return res.status(403).json({ error: "Building access denied" });
       }
@@ -11423,6 +11742,11 @@ async function bootstrap() {
 
       purgeRuntimeStateForBuilding(deleted.id);
       await syncDerivedBuildingConfigurationState();
+      logHousingEvent("building.delete", {
+        buildingId: deleted.id,
+        actorRole: context.role,
+        actorUserId: context.userId ?? null
+      });
 
       return res.json({
         data: {
@@ -11430,7 +11754,7 @@ async function bootstrap() {
           name: deleted.name,
           deletedAt: new Date().toISOString()
         },
-        role: session.role
+        role: context.role
       });
     } catch (error) {
       return next(error);

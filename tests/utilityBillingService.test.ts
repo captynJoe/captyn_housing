@@ -523,6 +523,68 @@ test("spreads utility payment across the selected month and the next open month"
   );
 });
 
+test("previews utility payment across the selected month and later open bills", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.createBill("water", BUILDING_A, "B-7", {
+    billingMonth: "2026-02",
+    fixedChargeKsh: 215,
+    dueDate
+  });
+
+  service.createBill("water", BUILDING_A, "B-7", {
+    billingMonth: "2026-03",
+    fixedChargeKsh: 350,
+    dueDate
+  });
+
+  const preview = service.previewPayment("water", BUILDING_A, "B-7", {
+    billingMonth: "2026-02",
+    amountKsh: 500
+  });
+
+  assert.equal(preview.availableBalanceKsh, 565);
+  assert.equal(preview.targetBill.billingMonth, "2026-02");
+  assert.equal(preview.effectiveBill.billingMonth, "2026-02");
+  assert.deepEqual(
+    preview.candidateBills.map((item) => item.billingMonth),
+    ["2026-02", "2026-03"]
+  );
+});
+
+test("backfills the next visible recurring fixed-charge utility month", () => {
+  const service = new UtilityBillingService();
+
+  service.createBill("water", BUILDING_A, "B-8", {
+    billingMonth: "2026-02",
+    fixedChargeKsh: 350,
+    dueDate: "2026-03-06T00:00:00.000Z"
+  });
+
+  service.createBill("water", BUILDING_A, "B-8", {
+    billingMonth: "2026-03",
+    fixedChargeKsh: 350,
+    dueDate: "2026-04-06T00:00:00.000Z"
+  });
+
+  const created = service.backfillRecurringBills({
+    buildingId: BUILDING_A,
+    houseNumber: "B-8",
+    utilityType: "water",
+    visibleThroughDate: "2026-05-09T00:00:00.000Z"
+  });
+
+  assert.deepEqual(created.map((item) => item.billingMonth), ["2026-04"]);
+  assert.deepEqual(
+    service
+      .listBills({ buildingId: BUILDING_A, houseNumber: "B-8", utilityType: "water", limit: 12 })
+      .map((item) => item.billingMonth)
+      .sort(),
+    ["2026-02", "2026-03", "2026-04"]
+  );
+});
+
 test("does not apply the same provider reference twice", () => {
   const service = new UtilityBillingService();
   const dueDate = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();

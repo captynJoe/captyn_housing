@@ -1,5 +1,8 @@
-import { randomBytes } from "node:crypto";
-import type { AdminLoginInput } from "../validation/schemas.js";
+import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import type {
+  AdminAccessCredentialUpdateInput,
+  AdminLoginInput
+} from "../validation/schemas.js";
 
 export type AdminRole = "landlord" | "admin" | "root_admin";
 
@@ -10,8 +13,22 @@ export interface AdminSession {
   expiresAt: string;
 }
 
+export interface AdminCredentialOverridePersistedState {
+  username: string;
+  passwordHash: string;
+  passwordSalt: string;
+  updatedAt: string;
+}
+
+export interface AdminCredentialSummary {
+  username: string | null;
+  source: "environment" | "app_state" | "unset";
+  updatedAt?: string;
+}
+
 export interface AdminAuthPersistedState {
   sessions: AdminSession[];
+  adminCredentials?: AdminCredentialOverridePersistedState | null;
 }
 
 type AdminAuthStateChangeHandler = (
@@ -47,6 +64,10 @@ function normalize(value: string | undefined): string {
   return value?.trim() ?? "";
 }
 
+function hashPassword(password: string, salt: string): string {
+  return scryptSync(password, salt, 64).toString("hex");
+}
+
 export class AdminAuthService {
   private readonly sessions = new Map<string, AdminSession>();
   private readonly landlordToken?: string;
@@ -54,12 +75,13 @@ export class AdminAuthService {
   private readonly rootAdminToken?: string;
   private readonly landlordUsername?: string;
   private readonly landlordPassword?: string;
-  private readonly adminUsername?: string;
-  private readonly adminPassword?: string;
+  private readonly envAdminUsername?: string;
+  private readonly envAdminPassword?: string;
   private readonly rootAdminUsername?: string;
   private readonly rootAdminPassword?: string;
   private readonly sessionTtlHours: number;
   private stateChangeHandler?: AdminAuthStateChangeHandler;
+  private adminCredentialOverride: AdminCredentialOverridePersistedState | null = null;
 
   constructor(options: AdminAuthServiceOptions) {
     this.landlordToken = options.landlordToken;
@@ -67,8 +89,8 @@ export class AdminAuthService {
     this.rootAdminToken = options.rootAdminToken;
     this.landlordUsername = options.landlordUsername;
     this.landlordPassword = options.landlordPassword;
-    this.adminUsername = options.adminUsername;
-    this.adminPassword = options.adminPassword;
+    this.envAdminUsername = options.adminUsername;
+    this.envAdminPassword = options.adminPassword;
     this.rootAdminUsername = options.rootAdminUsername;
     this.rootAdminPassword = options.rootAdminPassword;
     this.sessionTtlHours = options.sessionTtlHours ?? 12;
@@ -80,12 +102,19 @@ export class AdminAuthService {
 
   exportState(): AdminAuthPersistedState {
     return {
-      sessions: [...this.sessions.values()].map((session) => ({ ...session }))
+      sessions: [...this.sessions.values()].map((session) => ({ ...session })),
+      adminCredentials: this.adminCredentialOverride
+        ? { ...this.adminCredentialOverride }
+        : null
     };
   }
 
   importState(state: AdminAuthPersistedState | null | undefined): void {
     this.sessions.clear();
+    this.adminCredentialOverride = this.normalizeAdminCredentialOverride(
+      state?.adminCredentials
+    );
+
     if (!state || !Array.isArray(state.sessions)) {
       return;
     }
@@ -135,12 +164,7 @@ export class AdminAuthService {
         password === this.rootAdminPassword
       ) {
         role = "root_admin";
-      } else if (
-        this.adminUsername &&
-        this.adminPassword &&
-        username === this.adminUsername &&
-        password === this.adminPassword
-      ) {
+      } else if (this.matchesAdminUsernameAndPassword(username, password)) {
         role = "admin";
       } else if (
         this.landlordUsername &&
@@ -217,6 +241,96 @@ export class AdminAuthService {
     }
 
     return session.role === "root_admin";
+  }
+
+  getAdminCredentialSummary(): AdminCredentialSummary {
+    const username = this.adminCredentialOverride?.username ?? normalize(this.envAdminUsername);
+    if (username) {
+      return {
+        username,
+        source: this.adminCredentialOverride ? "app_state" : "environment",
+        updatedAt: this.adminCredentialOverride?.updatedAt
+      };
+    }
+
+    return {
+      username: null,
+      source: "unset"
+    };
+  }
+
+  updateAdminCredentials(
+    input: Pick<AdminAccessCredentialUpdateInput, "username" | "password">
+  ): AdminCredentialSummary {
+    const username = normalize(input.username);
+    const password = normalize(input.password);
+    const passwordSalt = randomBytes(16).toString("hex");
+
+    this.adminCredentialOverride = {
+      username,
+      passwordHash: hashPassword(password, passwordSalt),
+      passwordSalt,
+      updatedAt: new Date().toISOString()
+    };
+
+    for (const [token, session] of this.sessions) {
+      if (session.role === "admin") {
+        this.sessions.delete(token);
+      }
+    }
+
+    this.emitStateChange();
+    return this.getAdminCredentialSummary();
+  }
+
+  private matchesAdminUsernameAndPassword(username: string, password: string): boolean {
+    if (this.adminCredentialOverride) {
+      if (username !== this.adminCredentialOverride.username) {
+        return false;
+      }
+
+      const expected = Buffer.from(this.adminCredentialOverride.passwordHash, "hex");
+      const actual = Buffer.from(
+        hashPassword(password, this.adminCredentialOverride.passwordSalt),
+        "hex"
+      );
+
+      if (expected.length === 0 || expected.length !== actual.length) {
+        return false;
+      }
+
+      return timingSafeEqual(expected, actual);
+    }
+
+    return Boolean(
+      this.envAdminUsername &&
+        this.envAdminPassword &&
+        username === this.envAdminUsername &&
+        password === this.envAdminPassword
+    );
+  }
+
+  private normalizeAdminCredentialOverride(
+    value: AdminAuthPersistedState["adminCredentials"]
+  ): AdminCredentialOverridePersistedState | null {
+    if (!value || typeof value !== "object") {
+      return null;
+    }
+
+    const username = normalize(value.username);
+    const passwordHash = normalize(value.passwordHash);
+    const passwordSalt = normalize(value.passwordSalt);
+    const updatedAt = normalize(value.updatedAt);
+    if (!username || !passwordHash || !passwordSalt || !updatedAt) {
+      return null;
+    }
+
+    return {
+      username,
+      passwordHash,
+      passwordSalt,
+      updatedAt
+    };
   }
 
   private emitStateChange(): void {

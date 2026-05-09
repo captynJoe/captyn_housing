@@ -510,6 +510,30 @@ export const adminLoginSchema = z
     });
   });
 
+export const adminAccessCredentialUpdateSchema = z
+  .object({
+    username: z
+      .string()
+      .trim()
+      .min(3)
+      .max(80)
+      .regex(/^[A-Za-z0-9._-]+$/, {
+        message:
+          "Username can only include letters, numbers, dots, underscores, and hyphens."
+      }),
+    password: z.string().trim().min(8).max(120),
+    confirmPassword: z.string().trim().min(8).max(120)
+  })
+  .superRefine((value, context) => {
+    if (value.password !== value.confirmPassword) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["confirmPassword"],
+        message: "Confirmation password must match the new password."
+      });
+    }
+  });
+
 export const userRoleSchema = z.enum(["tenant", "landlord", "admin", "root_admin"]);
 
 export const userRegisterSchema = z.object({
@@ -973,6 +997,9 @@ export type CreateUtilityBillInput = z.infer<typeof createUtilityBillSchema>;
 export type RecordUtilityPaymentInput = z.infer<typeof recordUtilityPaymentSchema>;
 export type RecordAdminRentPaymentInput = z.infer<typeof recordAdminRentPaymentSchema>;
 export type UpdateTicketStatusInput = z.infer<typeof updateTicketStatusSchema>;
+export type AdminAccessCredentialUpdateInput = z.infer<
+  typeof adminAccessCredentialUpdateSchema
+>;
 export type MediaUploadCategoryInput = z.infer<typeof mediaUploadCategorySchema>;
 export type MediaUploadSignatureRequestInput = z.infer<
   typeof mediaUploadSignatureRequestSchema

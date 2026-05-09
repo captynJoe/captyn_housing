@@ -4,7 +4,7 @@ import {
   renderSelectedImagePreviews,
   uploadImageFiles,
   validateImageFiles
-} from "./cloudinary-upload.js";
+} from "./media-upload.js";
 import {
   applyDocumentBranding,
   getResidentPortalTitle,
@@ -104,6 +104,7 @@ const paymentsSummaryActionEl = document.getElementById("payments-summary-action
 const paymentsTotalOutstandingEl = document.getElementById("payments-total-outstanding");
 const paymentsRentOutstandingEl = document.getElementById("payments-rent-outstanding");
 const paymentsUtilityOutstandingEl = document.getElementById("payments-utility-outstanding");
+const paymentsMonthPaidEl = document.getElementById("payments-month-paid");
 const paymentShortcutButtons = [...document.querySelectorAll("[data-payment-shortcut]")];
 const utilityBillsSummaryEl = document.getElementById("utility-bills-summary");
 const utilityBillsListEl = document.getElementById("utility-bills-list");
@@ -303,6 +304,7 @@ const REQUIRED_DOM_BINDINGS = Object.freeze([
   ["payments-total-outstanding", paymentsTotalOutstandingEl],
   ["payments-rent-outstanding", paymentsRentOutstandingEl],
   ["payments-utility-outstanding", paymentsUtilityOutstandingEl],
+  ["payments-month-paid", paymentsMonthPaidEl],
   ["utility-bills-summary", utilityBillsSummaryEl],
   ["utility-bills-list", utilityBillsListEl],
   ["rent-payment-section", rentPaymentSectionEl],
@@ -932,8 +934,30 @@ function isUtilityPaymentEnabled(utilityType) {
   return Boolean(state.paymentAccess?.[key]);
 }
 
+function monthKeyFromValue(value) {
+  const raw = String(value ?? "").trim();
+  if (/^\d{4}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  return `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function currentMonthKey() {
+  return monthKeyFromValue(new Date().toISOString());
+}
+
 function getRentOutstandingBalance() {
   return toPositiveNumber(state.rentDue?.balanceKsh);
+}
+
+function getExpenseOutstandingBalance() {
+  return toPositiveNumber(state.rentDue?.expenseBalanceKsh ?? state.rentDue?.expenseArrearsKsh);
 }
 
 function getTotalUtilityOutstandingBalance() {
@@ -943,7 +967,22 @@ function getTotalUtilityOutstandingBalance() {
 }
 
 function getTotalOutstandingBalance() {
-  return getRentOutstandingBalance() + getTotalUtilityOutstandingBalance();
+  return (
+    getRentOutstandingBalance() +
+    getTotalUtilityOutstandingBalance() +
+    getExpenseOutstandingBalance()
+  );
+}
+
+function getPaidThisMonthTotal() {
+  const monthKey = currentMonthKey();
+  const rentPaid = (Array.isArray(state.rentPayments) ? state.rentPayments : [])
+    .filter((item) => monthKeyFromValue(item.paidAt || item.billingMonth) === monthKey)
+    .reduce((sum, item) => sum + toPositiveNumber(item.amountKsh), 0);
+  const utilityPaid = (Array.isArray(state.utilityPayments) ? state.utilityPayments : [])
+    .filter((item) => monthKeyFromValue(item.paidAt || item.billingMonth) === monthKey)
+    .reduce((sum, item) => sum + toPositiveNumber(item.amountKsh), 0);
+  return rentPaid + utilityPaid;
 }
 
 function getUtilityOutstandingBalance(utilityType) {
@@ -1013,6 +1052,7 @@ function updatePaymentsSummaryCard() {
     paymentsTotalOutstandingEl.textContent = formatCurrency(0);
     paymentsRentOutstandingEl.textContent = formatCurrency(0);
     paymentsUtilityOutstandingEl.textContent = formatCurrency(0);
+    paymentsMonthPaidEl.textContent = formatCurrency(0);
     paymentsSummaryActionEl.textContent = getPendingReviewBillingMessage();
     syncPaymentShortcutButtons();
     return;
@@ -1021,10 +1061,12 @@ function updatePaymentsSummaryCard() {
   const rentOutstanding = getRentOutstandingBalance();
   const utilityOutstanding = getTotalUtilityOutstandingBalance();
   const totalOutstanding = getTotalOutstandingBalance();
+  const paidThisMonth = getPaidThisMonthTotal();
 
   paymentsTotalOutstandingEl.textContent = formatCurrency(totalOutstanding);
   paymentsRentOutstandingEl.textContent = formatCurrency(rentOutstanding);
   paymentsUtilityOutstandingEl.textContent = formatCurrency(utilityOutstanding);
+  paymentsMonthPaidEl.textContent = formatCurrency(paidThisMonth);
 
   if (totalOutstanding <= 0) {
     paymentsSummaryActionEl.textContent =
@@ -2167,22 +2209,21 @@ async function requestJson(url, options = {}, { auth = false } = {}) {
   return payload;
 }
 
-async function signResidentSupportUpload() {
-  const payload = await requestJson(
-    "/api/media/sign-upload",
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({
-        category: "support_evidence"
-      })
-    },
-    { auth: true }
-  );
+function createResidentSupportUploadRequest() {
+  const headers = {};
+  const token = getResidentToken();
+  if (token) {
+    headers.authorization = `Bearer ${token}`;
+  }
 
-  return payload.data ?? {};
+  return {
+    url: "/api/media/upload",
+    headers,
+    fields: {
+      category: "support_evidence"
+    },
+    credentials: "same-origin"
+  };
 }
 
 function renderPwaControls() {
@@ -2940,6 +2981,14 @@ function renderRentDue(rentDue, fallbackMessage) {
       <dd>${formatCurrency(rentDue.balanceKsh)}</dd>
     </div>
     <div>
+      <dt>Paid This Month</dt>
+      <dd>${formatCurrency(rentDue.currentMonthPaidKsh ?? rentDue.paidAmountKsh ?? 0)}</dd>
+    </div>
+    <div>
+      <dt>Charge Overdue</dt>
+      <dd>${formatCurrency(rentDue.expenseBalanceKsh ?? rentDue.expenseArrearsKsh ?? 0)}</dd>
+    </div>
+    <div>
       <dt>Due Date</dt>
       <dd>${formatDateTime(rentDue.dueDate)}</dd>
     </div>
@@ -3505,6 +3554,16 @@ async function loadResidentSession() {
   }
 }
 
+async function refreshRentDueCard(fallbackMessage) {
+  try {
+    const payload = await requestJson("/api/user/rent-due", {}, { auth: true });
+    state.rentDue = payload.data ?? null;
+    renderRentDue(state.rentDue, payload.message ?? fallbackMessage);
+  } catch (_error) {
+    renderRentDue(state.rentDue, fallbackMessage);
+  }
+}
+
 async function loadTenantData() {
   if (isPasswordChangeRequired()) {
     return;
@@ -3529,7 +3588,7 @@ async function loadTenantData() {
 
     renderReports(state.reports);
     renderNotifications(state.notifications);
-    renderRentDue(state.rentDue, messages.rentDue);
+    await refreshRentDueCard(messages.rentDue);
     state.rentPayments = data.rentPayments ?? [];
     renderRentPayments(state.rentPayments, messages.rentPayments);
     state.utilityBills = data.utilityBills ?? [];
@@ -3906,7 +3965,7 @@ async function submitTicket(event) {
       if (selectedFiles.length > 0) {
         showFeedback("Uploading selected photos...", "info");
         evidenceAttachments = await uploadImageFiles(selectedFiles, {
-          getSignature: signResidentSupportUpload
+          createUploadRequest: createResidentSupportUploadRequest
         });
       }
     }

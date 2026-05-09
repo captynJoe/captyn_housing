@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=20260322b" />
-    <link rel="stylesheet" href="/landlord.css?v=20260509b" />
+    <link rel="stylesheet" href="/landlord.css?v=20260509e" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -691,13 +691,14 @@
                   placeholder="Name, phone, house, status"
                 />
               </label>
-              <button id="residents-open-match-btn" type="button">Open Match</button>
+              <button id="residents-open-match-btn" type="button">Open Account</button>
               <button id="refresh-residents" type="button">Refresh</button>
             </div>
           </div>
           <p class="status-text">
-            All rooms for the selected buildings. Click a room to open the side panel with status
-            details, profile, balances, and room issues. Vacant rooms can be removed.
+            Use `View` for a quick side preview, or open the full room account page when you need
+            one place for balances, bills, charges, and anomalies. Vacant rooms can still be
+            removed here.
           </p>
           <div id="residents-overview" class="resident-overview-cards"></div>
           <p id="residents-search-summary" class="status-text">
@@ -755,6 +756,9 @@
             buildings like Village Inn. Use Readings Month to inspect saved room readings
             for a specific billing month.
           </p>
+          <div id="registry-charge-summary" class="landlord-generator registry-charge-summary">
+            Select a building to review default and custom room charge rules.
+          </div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -770,6 +774,7 @@
                   <th>Water Fixed (KSh)</th>
                   <th>Electric Fixed (KSh)</th>
                   <th>Room Utility Amount (KSh)</th>
+                  <th>Charge Setup</th>
                   <th>Resident Action</th>
                   <th>Room Action</th>
                 </tr>
@@ -1469,6 +1474,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=20260509b"></script>
+    <script type="module" src="/landlord.js?v=20260509e"></script>
   </body>
 </html>

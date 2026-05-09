@@ -166,6 +166,7 @@ const registryReadingMonthEl = document.getElementById("registry-reading-month")
 const registryLoadBtnEl = document.getElementById("registry-load-btn");
 const registrySaveBtnEl = document.getElementById("registry-save-btn");
 const openUtilitySheetBtnEl = document.getElementById("open-utility-sheet-btn");
+const registryChargeSummaryEl = document.getElementById("registry-charge-summary");
 const registryBodyEl = document.getElementById("registry-body");
 const utilitySheetBackdropEl = document.getElementById("utility-sheet-backdrop");
 const utilitySheetModalEl = document.getElementById("utility-sheet-modal");
@@ -339,6 +340,7 @@ const state = {
   registryReadingMonth: "",
   registryReadingBills: [],
   registryReadingBillByKey: new Map(),
+  registryMonthlyCombinedCharge: null,
   payments: [],
   expenditures: []
 };
@@ -1797,6 +1799,24 @@ function findResidentDirectoryEntry(buildingId, houseNumber) {
   return getIndexedRoom(state.residentDirectoryByKey, buildingId, houseNumber);
 }
 
+function buildRoomAccountPath(buildingId, houseNumber) {
+  return `/landlord/rooms/${encodeURIComponent(String(buildingId ?? "").trim())}/${encodeURIComponent(
+    normalizeHouse(houseNumber)
+  )}`;
+}
+
+function openRoomAccountPage(buildingId, houseNumber) {
+  const normalizedBuildingId = String(buildingId ?? "").trim();
+  const normalizedHouseNumber = normalizeHouse(houseNumber);
+  if (!normalizedBuildingId || !normalizedHouseNumber) {
+    showError("Room details missing. Refresh and retry.");
+    return false;
+  }
+
+  window.location.href = buildRoomAccountPath(normalizedBuildingId, normalizedHouseNumber);
+  return true;
+}
+
 async function openResidentDirectoryEntry(buildingId, houseNumber) {
   try {
     const normalizedBuildingId = normalizeLookupBuildingId(buildingId);
@@ -1843,7 +1863,7 @@ function openResidentSearchMatch() {
 
   const exactMatches = getResidentLookupExactMatches(visibleRows, query);
   if (exactMatches.length === 1) {
-    void openResidentDirectoryEntry(
+    openRoomAccountPage(
       exactMatches[0].buildingId,
       exactMatches[0].houseNumber
     );
@@ -1851,12 +1871,12 @@ function openResidentSearchMatch() {
   }
 
   if (visibleRows.length === 1) {
-    void openResidentDirectoryEntry(visibleRows[0].buildingId, visibleRows[0].houseNumber);
+    openRoomAccountPage(visibleRows[0].buildingId, visibleRows[0].houseNumber);
     return;
   }
 
   if (!query) {
-    showError("Enter a resident name, phone, or house number to open one room directly.");
+    showError("Enter a resident name, phone, or house number to open one room account directly.");
     return;
   }
 
@@ -3082,6 +3102,267 @@ function syncRegistryReadingMonthInput() {
   }
 }
 
+function getRegistryBuildingConfiguration(buildingId) {
+  const normalizedBuildingId = String(buildingId ?? "").trim();
+  const configuration = state.utilitySheetBuildingConfiguration;
+  if (
+    !configuration ||
+    String(configuration.buildingId ?? "").trim() !== normalizedBuildingId
+  ) {
+    return null;
+  }
+
+  return configuration;
+}
+
+function getRegistryMonthlyCombinedCharge(buildingId, billingMonth) {
+  const normalizedBuildingId = String(buildingId ?? "").trim();
+  const normalizedMonth = toBillingMonth(billingMonth);
+  const record = state.registryMonthlyCombinedCharge;
+  if (
+    !record ||
+    String(record.buildingId ?? "").trim() !== normalizedBuildingId ||
+    toBillingMonth(record.billingMonth) !== normalizedMonth
+  ) {
+    return null;
+  }
+
+  return record;
+}
+
+function describeRegistryChargeSetup(item, buildingId, billingMonth) {
+  const configuration = getRegistryBuildingConfiguration(buildingId);
+  const monthlyCombinedCharge = getRegistryMonthlyCombinedCharge(buildingId, billingMonth);
+  const billingMode = String(configuration?.utilityBillingMode ?? "metered").trim() || "metered";
+  const hasWaterMeter = hasUsableMeterNumber(item?.waterMeterNumber);
+  const hasElectricityMeter = hasUsableMeterNumber(item?.electricityMeterNumber);
+  const hasBothMeters = hasWaterMeter && hasElectricityMeter;
+  const roomCombinedChargeKsh = Math.max(0, Number(item?.combinedUtilityChargeKsh ?? 0));
+  const monthlyOverrideKsh = Math.max(0, Number(monthlyCombinedCharge?.amountKsh ?? 0));
+  const buildingDefaultCombinedKsh = Math.max(
+    0,
+    Number(configuration?.defaultCombinedUtilityChargeKsh ?? 0)
+  );
+  const resolvedWaterFixedKsh = getRoomUtilityFixedChargeDefault(
+    "water",
+    buildingId,
+    item?.houseNumber
+  );
+  const resolvedElectricityFixedKsh = getRoomUtilityFixedChargeDefault(
+    "electricity",
+    buildingId,
+    item?.houseNumber
+  );
+  const fixedParts = [];
+  if (Number.isFinite(Number(resolvedWaterFixedKsh)) && Number(resolvedWaterFixedKsh) > 0) {
+    fixedParts.push(`Water ${formatCurrency(Number(resolvedWaterFixedKsh))}`);
+  }
+  if (
+    Number.isFinite(Number(resolvedElectricityFixedKsh)) &&
+    Number(resolvedElectricityFixedKsh) > 0
+  ) {
+    fixedParts.push(`Electric ${formatCurrency(Number(resolvedElectricityFixedKsh))}`);
+  }
+
+  if (billingMode === "disabled") {
+    return {
+      tone: "warning",
+      mode: "disabled",
+      label: "Utility billing disabled",
+      detail: "This building is not currently posting utility charges."
+    };
+  }
+
+  if (hasBothMeters) {
+    return {
+      tone: "metered",
+      mode: "metered",
+      label: "Metered room",
+      detail: "Both meters are active. Combined-charge defaults do not apply here."
+    };
+  }
+
+  if (billingMode === "combined_charge") {
+    if (roomCombinedChargeKsh > 0) {
+      return {
+        tone: "custom",
+        mode: "room_custom_combined",
+        label: `Room custom ${formatCurrency(roomCombinedChargeKsh)}`,
+        detail: "This room overrides the building-level combined utility charge."
+      };
+    }
+
+    if (monthlyOverrideKsh > 0) {
+      return {
+        tone: "default",
+        mode: "monthly_override_combined",
+        label: `Month override ${formatCurrency(monthlyOverrideKsh)}`,
+        detail: `Applied for ${formatBillingMonth(
+          billingMonth
+        )} when the room has no custom combined charge.`
+      };
+    }
+
+    if (buildingDefaultCombinedKsh > 0) {
+      return {
+        tone: "default",
+        mode: "building_default_combined",
+        label: `Building default ${formatCurrency(buildingDefaultCombinedKsh)}`,
+        detail: "Used when the room has no custom combined charge."
+      };
+    }
+  }
+
+  if (fixedParts.length > 0) {
+    return {
+      tone: "fixed",
+      mode: "fixed_charge",
+      label: "Fixed-charge fallback",
+      detail: fixedParts.join(" • ")
+    };
+  }
+
+  return {
+    tone: "warning",
+    mode: "unconfigured",
+    label: "Needs charge setup",
+    detail: "Add meter readings, fixed charges, or a combined amount before posting bills."
+  };
+}
+
+function formatRegistryChargeSetupMarkup(item, buildingId, billingMonth) {
+  const setup = describeRegistryChargeSetup(item, buildingId, billingMonth);
+  return `
+    <div class="charge-setup-copy">
+      <span class="charge-mode-badge is-${escapeHtml(setup.tone)}">${escapeHtml(
+        setup.label
+      )}</span>
+      <small>${escapeHtml(setup.detail)}</small>
+    </div>
+  `;
+}
+
+function renderRegistryChargeSummary(rows) {
+  if (!(registryChargeSummaryEl instanceof HTMLElement)) {
+    return;
+  }
+
+  const buildingId = getSelectedUtilityBuildingId();
+  const billingMonth = getSelectedRegistryReadingMonth();
+  const configuration = getRegistryBuildingConfiguration(buildingId);
+  const monthlyCombinedCharge = getRegistryMonthlyCombinedCharge(buildingId, billingMonth);
+  const buildingMode = String(configuration?.utilityBillingMode ?? "metered").trim() || "metered";
+  const setupRows = Array.isArray(rows) ? rows : [];
+  const setupSummary = setupRows.map((item) =>
+    describeRegistryChargeSetup(item, buildingId, billingMonth)
+  );
+  const countByMode = (mode) => setupSummary.filter((item) => item.mode === mode).length;
+  const meteredCount = countByMode("metered");
+  const customCombinedCount = countByMode("room_custom_combined");
+  const monthlyOverrideCount = countByMode("monthly_override_combined");
+  const buildingDefaultCount = countByMode("building_default_combined");
+  const fixedChargeCount = countByMode("fixed_charge");
+  const needsSetupCount = countByMode("unconfigured");
+  const buildingDefaultCombinedKsh = Math.max(
+    0,
+    Number(configuration?.defaultCombinedUtilityChargeKsh ?? 0)
+  );
+  const buildingWaterFixedKsh = Number(configuration?.defaultWaterFixedChargeKsh ?? 0);
+  const buildingElectricFixedKsh = Number(configuration?.defaultElectricityFixedChargeKsh ?? 0);
+  const summaryLines = [];
+
+  if (!buildingId) {
+    registryChargeSummaryEl.textContent =
+      "Select a building to review default and custom room charge rules.";
+    return;
+  }
+
+  if (buildingMode === "combined_charge") {
+    summaryLines.push(
+      `Charge order: room custom amount -> ${formatBillingMonth(
+        billingMonth
+      )} override -> building default.`
+    );
+    summaryLines.push(
+      monthlyCombinedCharge && Number(monthlyCombinedCharge.amountKsh) > 0
+        ? `${formatBillingMonth(billingMonth)} override is ${formatCurrency(
+            Number(monthlyCombinedCharge.amountKsh)
+          )}.`
+        : `${formatBillingMonth(billingMonth)} override is not set.`
+    );
+    summaryLines.push(
+      buildingDefaultCombinedKsh > 0
+        ? `Building default combined charge is ${formatCurrency(
+            buildingDefaultCombinedKsh
+          )}.`
+        : "Building default combined charge is not set."
+    );
+  } else if (buildingMode === "fixed_charge") {
+    summaryLines.push(
+      "This building posts fixed-charge utility bills unless a room is fully metered."
+    );
+    summaryLines.push(
+      `Building defaults: water ${
+        buildingWaterFixedKsh > 0 ? formatCurrency(buildingWaterFixedKsh) : "not set"
+      } • electricity ${
+        buildingElectricFixedKsh > 0 ? formatCurrency(buildingElectricFixedKsh) : "not set"
+      }.`
+    );
+  } else if (buildingMode === "disabled") {
+    summaryLines.push("Utility billing is disabled for this building.");
+  } else {
+    summaryLines.push(
+      "This building relies on meter readings by default, with fixed-charge fallback where needed."
+    );
+    summaryLines.push(
+      `Building defaults: water ${
+        buildingWaterFixedKsh > 0 ? formatCurrency(buildingWaterFixedKsh) : "not set"
+      } • electricity ${
+        buildingElectricFixedKsh > 0 ? formatCurrency(buildingElectricFixedKsh) : "not set"
+      }.`
+    );
+  }
+
+  registryChargeSummaryEl.innerHTML = `
+    <h3>Charge Setup</h3>
+    <p class="status-text">${escapeHtml(summaryLines.join(" "))}</p>
+    <div class="registry-charge-summary-grid">
+      <div>
+        <span>Mode</span>
+        <strong>${escapeHtml(buildingMode.replaceAll("_", " "))}</strong>
+      </div>
+      <div>
+        <span>Month In View</span>
+        <strong>${escapeHtml(formatBillingMonth(billingMonth))}</strong>
+      </div>
+      <div>
+        <span>Room Custom Charges</span>
+        <strong>${customCombinedCount}</strong>
+      </div>
+      <div>
+        <span>Month Override Rooms</span>
+        <strong>${monthlyOverrideCount}</strong>
+      </div>
+      <div>
+        <span>Building Default Rooms</span>
+        <strong>${buildingDefaultCount}</strong>
+      </div>
+      <div>
+        <span>Metered Rooms</span>
+        <strong>${meteredCount}</strong>
+      </div>
+      <div>
+        <span>Fixed-Charge Rooms</span>
+        <strong>${fixedChargeCount}</strong>
+      </div>
+      <div>
+        <span>Needs Setup</span>
+        <strong>${needsSetupCount}</strong>
+      </div>
+    </div>
+  `;
+}
+
 function formatRegistryReadingMarkup(item, billingMonth) {
   const emptyDetail = billingMonth ? `${billingMonth} unread` : "No reading";
   if (!item) {
@@ -3160,6 +3441,24 @@ async function loadUtilitySheetMonthlyCombinedCharge() {
   );
   state.utilitySheetMonthlyCombinedCharge = payload.data ?? null;
   syncUtilitySheetCombinedCharge();
+}
+
+async function loadRegistryMonthlyCombinedCharge() {
+  const buildingId = getSelectedUtilityBuildingId();
+  const billingMonth = getSelectedRegistryReadingMonth();
+
+  state.registryMonthlyCombinedCharge = null;
+
+  if (!buildingId || !billingMonth) {
+    return;
+  }
+
+  const payload = await requestJson(
+    `/api/landlord/buildings/${encodeURIComponent(buildingId)}/monthly-combined-utility-charge?billingMonth=${encodeURIComponent(
+      billingMonth
+    )}`
+  );
+  state.registryMonthlyCombinedCharge = payload.data ?? null;
 }
 
 function meterNumberForHouse(utilityType, buildingId, houseNumber, fallbackValue) {
@@ -5045,10 +5344,11 @@ function handleDeleteExpenditureClick(target, expenditureId, title) {
 
 function renderRegistryRows(rows) {
   registryBodyEl.replaceChildren();
+  renderRegistryChargeSummary(rows);
 
   if (!Array.isArray(rows) || rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="13">No houses found for this building.</td>';
+    row.innerHTML = '<td colspan="14">No houses found for this building.</td>';
     registryBodyEl.append(row);
     return;
   }
@@ -5148,6 +5448,7 @@ function renderRegistryRows(rows) {
           value="${escapeHtml(numberToInputString(item.combinedUtilityChargeKsh ?? 0))}"
         />
       </td>
+      <td>${formatRegistryChargeSetupMarkup(item, buildingId, billingMonth)}</td>
       <td>
         ${
           item.residentUserId && !isCaretakerRole()
@@ -5454,14 +5755,24 @@ function renderResidentDirectory(rows) {
       <td>${escapeHtml(outstandingBalance)}</td>
       <td>${escapeHtml(dueDate)}</td>
       <td>
-        <button
-          type="button"
-          data-action="open-resident-drawer"
-          data-building-id="${escapeHtml(resident.buildingId)}"
-          data-house-number="${escapeHtml(resident.houseNumber)}"
-        >
-          View
-        </button>
+        <div class="resident-row-actions">
+          <button
+            type="button"
+            data-action="open-resident-drawer"
+            data-building-id="${escapeHtml(resident.buildingId)}"
+            data-house-number="${escapeHtml(resident.houseNumber)}"
+          >
+            View
+          </button>
+          <button
+            type="button"
+            data-action="open-room-account"
+            data-building-id="${escapeHtml(resident.buildingId)}"
+            data-house-number="${escapeHtml(resident.houseNumber)}"
+          >
+            Account
+          </button>
+        </div>
       </td>
       <td>
         ${
@@ -5717,6 +6028,16 @@ function renderResidentDrawer(resident) {
       )}</p>
       <h3>${escapeHtml(residentName)}</h3>
       <p class="status-text">Phone ${escapeHtml(residentPhone)}</p>
+      <div class="resident-row-actions resident-drawer-actions">
+        <button
+          type="button"
+          data-action="open-room-account"
+          data-building-id="${escapeHtml(resident.buildingId)}"
+          data-house-number="${escapeHtml(resident.houseNumber)}"
+        >
+          Open Full Room Account
+        </button>
+      </div>
     </div>
     <div class="resident-grid resident-grid-primary">
       <div><span>Occupancy</span><strong>${escapeHtml(occupancyLabel)}</strong></div>
@@ -7058,6 +7379,7 @@ async function loadRegistryRows() {
     setRegistryRows([]);
     setRegistryReadingBills([]);
     setUtilityPricingState(null, null, "");
+    state.registryMonthlyCombinedCharge = null;
     syncUtilitySheetRateDefaults();
     syncUtilitySheetBuildingFixedDefaults();
     syncUtilitySheetBuildingCombinedCharge();
@@ -7075,8 +7397,10 @@ async function loadRegistryRows() {
     payload.rateDefaults ?? { buildingId },
     buildingId
   );
+  await loadRegistryMonthlyCombinedCharge();
   syncUtilitySheetRateDefaults();
   syncUtilitySheetBuildingFixedDefaults();
+  syncUtilitySheetBuildingCombinedCharge();
   syncUtilityBillInputMode();
   renderRegistryRows(state.registryRows);
   if (
@@ -8197,11 +8521,31 @@ residentsBodyEl?.addEventListener("click", (event) => {
     return;
   }
 
+  if (action === "open-room-account") {
+    openRoomAccountPage(buildingId, houseNumber);
+    return;
+  }
+
   if (action !== "open-resident-drawer") {
     return;
   }
 
   void openResidentDirectoryEntry(buildingId, houseNumber);
+});
+
+residentDrawerBodyEl?.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  if (String(target.dataset.action || "").trim() !== "open-room-account") {
+    return;
+  }
+
+  const buildingId = String(target.dataset.buildingId || "").trim();
+  const houseNumber = String(target.dataset.houseNumber || "").trim();
+  openRoomAccountPage(buildingId, houseNumber);
 });
 
 residentDrawerBodyEl?.addEventListener("submit", (event) => {
@@ -8360,9 +8704,13 @@ utilitySheetBillingMonthEl?.addEventListener("change", () => {
 
 registryReadingMonthEl?.addEventListener("change", () => {
   state.registryReadingMonth = toBillingMonth(registryReadingMonthEl.value);
-  void loadRegistryReadingBills().catch((error) => {
-    handleLandlordError(error, "Failed to load monthly utility readings.");
-  });
+  void Promise.all([loadRegistryReadingBills(), loadRegistryMonthlyCombinedCharge()])
+    .then(() => {
+      renderRegistryRows(state.registryRows);
+    })
+    .catch((error) => {
+      handleLandlordError(error, "Failed to load monthly utility readings.");
+    });
 });
 
 registryBuildingSelectEl.addEventListener("change", () => {

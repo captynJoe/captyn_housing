@@ -4433,6 +4433,292 @@ async function bootstrap() {
     );
   };
 
+  const hasUsableRoomMeterNumber = (value: string | undefined) => {
+    const normalized = String(value ?? "").trim();
+    if (!normalized) {
+      return false;
+    }
+
+    return normalized !== "NO-METER" && normalized !== "METER-UNSET";
+  };
+
+  const billingMonthFromDate = (value: Date) =>
+    `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, "0")}`;
+
+  const shiftBillingMonth = (billingMonth: string, delta: number) => {
+    const [yearRaw, monthRaw] = billingMonth.split("-");
+    const year = Number(yearRaw);
+    const month = Number(monthRaw);
+    if (!Number.isFinite(year) || !Number.isFinite(month)) {
+      return "";
+    }
+
+    const cursor = new Date(Date.UTC(year, month - 1 + delta, 1));
+    return billingMonthFromDate(cursor);
+  };
+
+  const latestVisibleRecurringBillingMonth = (now: Date = new Date()) => {
+    const cursor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+    return billingMonthFromDate(cursor);
+  };
+
+  const listMissingRecurringBillingMonths = (
+    billingMonths: string[],
+    visibleThroughMonth: string
+  ) => {
+    const normalizedMonths = [...new Set(
+      billingMonths
+        .map((item) => String(item ?? "").trim())
+        .filter(Boolean)
+    )].sort();
+    if (normalizedMonths.length === 0) {
+      return [];
+    }
+
+    const latestMonth = normalizedMonths[normalizedMonths.length - 1];
+    if (!latestMonth || latestMonth >= visibleThroughMonth) {
+      return [];
+    }
+
+    const monthSet = new Set(normalizedMonths);
+    const results: string[] = [];
+    let cursor = shiftBillingMonth(latestMonth, 1);
+    while (cursor && cursor <= visibleThroughMonth) {
+      if (!monthSet.has(cursor)) {
+        results.push(cursor);
+      }
+      cursor = shiftBillingMonth(cursor, 1);
+    }
+
+    return results;
+  };
+
+  const buildLandlordRoomLedgerPayload = async (
+    building: Awaited<ReturnType<typeof store.getBuilding>>,
+    houseNumber: string
+  ) => {
+    if (!building) {
+      throw new Error("Building not found");
+    }
+
+    const normalizedHouseNumber = normalizeHouseNumber(houseNumber);
+    const [roomRows, visibleHouseNumbers, buildingConfiguration] = await Promise.all([
+      buildLandlordUtilityRegistryRows(building.id, [normalizedHouseNumber]),
+      listVisibleHouseNumbersForBuildings([building]),
+      buildingConfigurationService
+        ? buildingConfigurationService.getForBuilding(building.id)
+        : Promise.resolve(null)
+    ]);
+
+    const room =
+      roomRows.find((item) => normalizeHouseNumber(item.houseNumber) === normalizedHouseNumber) ??
+      null;
+
+    if (!room) {
+      throw new Error("Room not found");
+    }
+
+    const utilityBills = utilityBillingService
+      .listBills({
+        buildingId: building.id,
+        houseNumber: normalizedHouseNumber,
+        limit: 600
+      })
+      .sort((a, b) =>
+        (b.dueDate || b.updatedAt || b.createdAt).localeCompare(
+          a.dueDate || a.updatedAt || a.createdAt
+        )
+      );
+    const utilityPayments = utilityBillingService
+      .listPayments({
+        buildingId: building.id,
+        houseNumber: normalizedHouseNumber,
+        limit: 600
+      })
+      .sort((a, b) => (b.paidAt || b.createdAt).localeCompare(a.paidAt || a.createdAt));
+    const expenditures = [...buildingExpenditures.values()]
+      .filter(
+        (item) =>
+          item.buildingId === normalizeBuildingId(building.id) &&
+          normalizeHouseNumber(item.houseNumber ?? "") === normalizedHouseNumber
+      )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const tickets = userSupportService
+      .listAllReports({ limit: 300 })
+      .filter(
+        (item) =>
+          item.buildingId === building.id &&
+          normalizeHouseNumber(item.houseNumber) === normalizedHouseNumber
+      )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+    const visibleThroughBillingMonth = latestVisibleRecurringBillingMonth();
+    const monthlyCombinedCharge = getMonthlyCombinedUtilityCharge(
+      building.id,
+      visibleThroughBillingMonth
+    );
+    const positiveUtilityBills = utilityBills.filter(
+      (item) => Math.max(0, Number(item.amountKsh ?? 0)) > 0
+    );
+    const postedBillingMonths = [...new Set(
+      positiveUtilityBills.map((item) => item.billingMonth).filter(Boolean)
+    )].sort();
+    const latestPostedBillingMonth =
+      postedBillingMonths.length > 0
+        ? postedBillingMonths[postedBillingMonths.length - 1]
+        : null;
+    const latestPostedMonthlyChargeKsh = latestPostedBillingMonth
+      ? positiveUtilityBills
+          .filter((item) => item.billingMonth === latestPostedBillingMonth)
+          .reduce((sum, item) => sum + Math.max(0, Number(item.amountKsh ?? 0)), 0)
+      : 0;
+    const possibleMissingBillingMonths = listMissingRecurringBillingMonths(
+      postedBillingMonths,
+      visibleThroughBillingMonth
+    );
+    const hasBothMeters =
+      hasUsableRoomMeterNumber(room.waterMeterNumber) &&
+      hasUsableRoomMeterNumber(room.electricityMeterNumber);
+    const resolvedWaterFixedChargeKsh =
+      Math.max(0, Number(room.waterFixedChargeKsh ?? 0)) ||
+      Math.max(0, Number(buildingConfiguration?.defaultWaterFixedChargeKsh ?? 0));
+    const resolvedElectricityFixedChargeKsh =
+      Math.max(0, Number(room.electricityFixedChargeKsh ?? 0)) ||
+      Math.max(0, Number(buildingConfiguration?.defaultElectricityFixedChargeKsh ?? 0));
+    const roomCombinedChargeKsh = Math.max(0, Number(room.combinedUtilityChargeKsh ?? 0));
+    const buildingDefaultCombinedChargeKsh = Math.max(
+      0,
+      Number(buildingConfiguration?.defaultCombinedUtilityChargeKsh ?? 0)
+    );
+    const monthlyCombinedChargeKsh = Math.max(0, Number(monthlyCombinedCharge?.amountKsh ?? 0));
+    let estimatedRecurringMonthlyChargeKsh = Math.max(0, latestPostedMonthlyChargeKsh);
+    let resolvedChargeSource:
+      | "disabled"
+      | "metered"
+      | "room_custom_combined"
+      | "monthly_override_combined"
+      | "building_default_combined"
+      | "fixed_charge"
+      | "unconfigured" = "unconfigured";
+
+    const utilityBillingMode =
+      (buildingConfiguration?.utilityBillingMode as string | undefined) ?? "metered";
+    if (utilityBillingMode === "disabled") {
+      resolvedChargeSource = "disabled";
+      estimatedRecurringMonthlyChargeKsh = 0;
+    } else if (hasBothMeters) {
+      resolvedChargeSource = "metered";
+    } else if (roomCombinedChargeKsh > 0) {
+      resolvedChargeSource = "room_custom_combined";
+      if (estimatedRecurringMonthlyChargeKsh <= 0) {
+        estimatedRecurringMonthlyChargeKsh = roomCombinedChargeKsh;
+      }
+    } else if (monthlyCombinedChargeKsh > 0) {
+      resolvedChargeSource = "monthly_override_combined";
+      if (estimatedRecurringMonthlyChargeKsh <= 0) {
+        estimatedRecurringMonthlyChargeKsh = monthlyCombinedChargeKsh;
+      }
+    } else if (buildingDefaultCombinedChargeKsh > 0) {
+      resolvedChargeSource = "building_default_combined";
+      if (estimatedRecurringMonthlyChargeKsh <= 0) {
+        estimatedRecurringMonthlyChargeKsh = buildingDefaultCombinedChargeKsh;
+      }
+    } else if (
+      resolvedWaterFixedChargeKsh > 0 ||
+      resolvedElectricityFixedChargeKsh > 0
+    ) {
+      resolvedChargeSource = "fixed_charge";
+      if (estimatedRecurringMonthlyChargeKsh <= 0) {
+        estimatedRecurringMonthlyChargeKsh =
+          resolvedWaterFixedChargeKsh + resolvedElectricityFixedChargeKsh;
+      }
+    }
+
+    const estimatedRecurringBackfillKsh =
+      possibleMissingBillingMonths.length * Math.max(0, estimatedRecurringMonthlyChargeKsh);
+    const overappliedBills = utilityBills
+      .map((bill) => {
+        const paidKsh = (bill.payments ?? []).reduce(
+          (sum, payment) => sum + Math.max(0, Number(payment.amountKsh ?? 0)),
+          0
+        );
+        return {
+          utilityType: bill.utilityType,
+          billingMonth: bill.billingMonth,
+          amountKsh: Math.max(0, Number(bill.amountKsh ?? 0)),
+          balanceKsh: Math.max(0, Number(bill.balanceKsh ?? 0)),
+          paidKsh,
+          paymentCount: bill.payments?.length ?? 0
+        };
+      })
+      .filter((item) => item.paidKsh > item.amountKsh && item.amountKsh >= 0);
+
+    return {
+      building: {
+        id: building.id,
+        name: building.name,
+        address: building.address,
+        county: building.county,
+        houseRegistered: (building.houseNumbers ?? [])
+          .map((item) => normalizeHouseNumber(item))
+          .includes(normalizedHouseNumber),
+        visibleToLandlord: visibleHouseNumbers.has(normalizedHouseNumber)
+      },
+      room: {
+        ...room,
+        buildingId: building.id,
+        buildingName: building.name
+      },
+      utilityBillingMode,
+      chargeSetup: {
+        source: resolvedChargeSource,
+        hasBothMeters,
+        roomCombinedChargeKsh,
+        monthlyCombinedChargeKsh,
+        buildingDefaultCombinedChargeKsh,
+        resolvedWaterFixedChargeKsh,
+        resolvedElectricityFixedChargeKsh
+      },
+      summary: {
+        displayedOutstandingKsh: Math.max(0, Number(room.roomBalanceKsh ?? 0)),
+        rentOutstandingKsh: Math.max(0, Number(room.rentBalanceKsh ?? 0)),
+        utilityOutstandingKsh: Math.max(0, Number(room.utilityBalanceKsh ?? 0)),
+        expenseChargesKsh: Math.max(0, Number(room.expenseBalanceKsh ?? 0)),
+        currentUtilityDueKsh: Math.max(0, Number(room.currentUtilityDueKsh ?? 0)),
+        utilityArrearsKsh: Math.max(0, Number(room.utilityArrearsKsh ?? 0)),
+        currentMonthRentPaidKsh: Math.max(0, Number(room.currentMonthRentPaidKsh ?? 0)),
+        currentMonthRentOutstandingKsh: Math.max(
+          0,
+          Number(room.currentMonthRentOutstandingKsh ?? 0)
+        ),
+        totalRentPaidKsh: Math.max(0, Number(room.totalRentPaidKsh ?? 0)),
+        projectedOutstandingKsh:
+          Math.max(0, Number(room.roomBalanceKsh ?? 0)) + estimatedRecurringBackfillKsh
+      },
+      anomalies: {
+        visibleThroughBillingMonth,
+        postedBillingMonths,
+        latestPostedBillingMonth,
+        latestPostedMonthlyChargeKsh,
+        possibleMissingBillingMonths,
+        estimatedRecurringMonthlyChargeKsh,
+        estimatedRecurringBackfillKsh,
+        overstatedOrphanedRoom: !(
+          (building.houseNumbers ?? [])
+            .map((item) => normalizeHouseNumber(item))
+            .includes(normalizedHouseNumber)
+        ),
+        overappliedBills
+      },
+      utilityBills,
+      utilityPayments,
+      expenditures,
+      tickets,
+      monthlyCombinedCharge,
+      buildingConfiguration
+    };
+  };
+
   const listLandlordRentCollectionStatusRows = async (
     visibleBuildingIds: Set<string>,
     limit: number
@@ -5026,6 +5312,7 @@ async function bootstrap() {
     const pathValue = req.path ?? "";
     if (
       pathValue === "/landlord" ||
+      pathValue.startsWith("/landlord/rooms/") ||
       pathValue === "/landlord/login" ||
       pathValue === "/admin" ||
       pathValue === "/admin/login" ||
@@ -5079,6 +5366,28 @@ async function bootstrap() {
           listCaretakerBuildingIdsForUser(userSession.userId).size > 0)
       ) {
         return res.sendFile(path.join(publicDir, "landlord.html"));
+      }
+    }
+
+    return res.redirect("/landlord/login");
+  });
+
+  app.get("/landlord/rooms/:buildingId/:houseNumber", async (req, res) => {
+    const token = readAdminSessionToken(req);
+    const session = adminAuthService.getSession(token);
+
+    if (session && adminAuthService.hasRole(session, "landlord")) {
+      return res.sendFile(path.join(publicDir, "room-account.html"));
+    }
+
+    if (userAccountService) {
+      const userSession = await userAccountService.getSession(readUserSessionToken(req));
+      if (
+        userSession &&
+        (hasUserRoleAtLeast(userSession.role, "landlord") ||
+          listCaretakerBuildingIdsForUser(userSession.userId).size > 0)
+      ) {
+        return res.sendFile(path.join(publicDir, "room-account.html"));
       }
     }
 
@@ -10816,6 +11125,59 @@ async function bootstrap() {
         }
 
         const data = await listLandlordResidentDirectoryRows(buildings);
+
+        return res.json({
+          data,
+          role: context.role
+        });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
+  app.get(
+    "/api/landlord/buildings/:buildingId/rooms/:houseNumber/ledger",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) {
+          return;
+        }
+
+        const buildingId = req.params.buildingId?.trim();
+        const normalizedHouseNumber = houseNumberQuerySchema.parse({
+          houseNumber: req.params.houseNumber
+        }).houseNumber;
+        const building = buildingId ? await store.getBuilding(buildingId) : null;
+        if (!building) {
+          return res.status(404).json({ error: "Building not found" });
+        }
+
+        const hasAccess = await canManageBuildingFromLandlordContext(context, building.id);
+        if (!hasAccess) {
+          return res.status(403).json({ error: "Building access denied" });
+        }
+
+        await ensureRecurringUtilityBillsCurrent("landlord.room_ledger", {
+          buildingId: building.id,
+          houseNumber: normalizedHouseNumber
+        });
+
+        const visibleHouseNumbers = await listVisibleHouseNumbersForBuildings([building]);
+        if (
+          !visibleHouseNumbers.has(normalizeHouseNumber(normalizedHouseNumber)) &&
+          !(building.houseNumbers ?? [])
+            .map((item) => normalizeHouseNumber(item))
+            .includes(normalizeHouseNumber(normalizedHouseNumber))
+        ) {
+          return res.status(404).json({ error: "Room not found" });
+        }
+
+        const data = await buildLandlordRoomLedgerPayload(
+          building,
+          normalizedHouseNumber
+        );
 
         return res.json({
           data,

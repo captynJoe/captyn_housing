@@ -2,6 +2,94 @@
   margin-top: 14px;
 }
 
+.resident-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.resident-drawer-actions {
+  margin-top: 10px;
+}
+
+.room-account-shell {
+  gap: 18px;
+}
+
+.room-account-hero {
+  padding-bottom: 24px;
+}
+
+.room-account-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.room-account-grid-panel .package-card {
+  height: 100%;
+}
+
+.room-account-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.room-account-grid .resident-agreement-overview,
+.room-account-shell .resident-agreement-overview {
+  gap: 12px;
+}
+
+.room-account-shell .resident-agreement-overview div {
+  min-height: 88px;
+}
+
+.room-account-shell .resident-agreement-overview strong {
+  line-height: 1.45;
+}
+
+.room-account-shell .table-wrap table td,
+.room-account-shell .table-wrap table th {
+  vertical-align: top;
+}
+
+.room-account-shell .resident-ledger-flags {
+  margin-top: 0;
+}
+
+.room-account-issue-card {
+  margin-bottom: 0;
+}
+
+@media (max-width: 960px) {
+  .room-account-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .room-account-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .resident-row-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .resident-row-actions button,
+  .resident-row-actions a {
+    width: 100%;
+  }
+
+  .room-account-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .room-account-shell .resident-agreement-overview div {
+    min-height: auto;
+  }
+}
+
 .landlord-view[id] {
   scroll-margin-top: 20px;
 }
@@ -881,6 +969,92 @@
   font-family: "Fraunces", Georgia, serif;
 }
 
+.registry-charge-summary {
+  margin-bottom: 14px;
+}
+
+.registry-charge-summary-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.registry-charge-summary-grid div {
+  border: 1px solid rgba(16, 35, 49, 0.12);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.registry-charge-summary-grid span {
+  display: block;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(16, 35, 49, 0.7);
+}
+
+.registry-charge-summary-grid strong {
+  font-size: 0.95rem;
+  color: #102331;
+}
+
+.charge-setup-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 180px;
+}
+
+.charge-setup-copy small {
+  color: rgba(16, 35, 49, 0.72);
+  line-height: 1.35;
+}
+
+.charge-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  border: 1px solid rgba(16, 35, 49, 0.14);
+  background: rgba(255, 255, 255, 0.92);
+  color: #17374a;
+}
+
+.charge-mode-badge.is-custom {
+  background: rgba(220, 248, 240, 0.9);
+  border-color: rgba(17, 112, 91, 0.28);
+  color: #0f5d4e;
+}
+
+.charge-mode-badge.is-default {
+  background: rgba(233, 243, 255, 0.9);
+  border-color: rgba(39, 90, 160, 0.24);
+  color: #1b4f93;
+}
+
+.charge-mode-badge.is-metered {
+  background: rgba(242, 246, 250, 0.92);
+  border-color: rgba(16, 35, 49, 0.14);
+  color: #244055;
+}
+
+.charge-mode-badge.is-fixed {
+  background: rgba(255, 243, 226, 0.92);
+  border-color: rgba(186, 123, 27, 0.28);
+  color: #885412;
+}
+
+.charge-mode-badge.is-warning {
+  background: rgba(255, 237, 237, 0.94);
+  border-color: rgba(168, 42, 42, 0.22);
+  color: #8a1c1c;
+}
+
 .ghost-btn {
   background: transparent;
   color: #244055;
@@ -1011,6 +1185,10 @@
   .landlord-manage-tools {
     grid-template-columns: 1fr;
   }
+
+  .registry-charge-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 680px) {
@@ -1020,6 +1198,10 @@
 
   .panel {
     padding: 16px 14px;
+  }
+
+  .registry-charge-summary-grid {
+    grid-template-columns: 1fr;
   }
 
   .metrics-grid {

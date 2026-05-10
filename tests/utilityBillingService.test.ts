@@ -311,7 +311,7 @@ test("room-level combined utility override recalculates existing combined-charge
   assert.equal(electricity.balanceKsh, 0);
 });
 
-test("room-level combined utility override is ignored for rooms with both meters", () => {
+test("room-level combined utility override still recalculates combined-charge rooms with both meters", () => {
   const service = new UtilityBillingService();
   const dueDate = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
   const createdAt = new Date().toISOString();
@@ -401,12 +401,13 @@ test("room-level combined utility override is ignored for rooms with both meters
   const electricity = bills.find((item) => item.utilityType === "electricity");
 
   assert.ok(water);
-  assert.equal(water.amountKsh, 350);
-  assert.equal(water.balanceKsh, 350);
+  assert.equal(water.amountKsh, 180);
+  assert.equal(water.balanceKsh, 180);
+  assert.equal(water.fixedChargeKsh, 180);
 
   assert.ok(electricity);
-  assert.equal(electricity.amountKsh, 350);
-  assert.equal(electricity.balanceKsh, 350);
+  assert.equal(electricity.amountKsh, 0);
+  assert.equal(electricity.balanceKsh, 0);
 });
 
 test("purges room-scoped utility state when a room is removed", () => {

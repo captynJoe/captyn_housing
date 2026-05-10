@@ -1482,19 +1482,6 @@ export class UtilityBillingService {
   }
 
   private normalizeBaselineCombinedCharges(): void {
-    const configuredMetersByRoom = new Map<string, Set<UtilityType>>();
-
-    for (const meter of this.meters.values()) {
-      if (!hasUsableMeterNumber(meter.meterNumber)) {
-        continue;
-      }
-
-      const roomKey = `${meter.buildingId}::${meter.houseNumber}`;
-      const bucket = configuredMetersByRoom.get(roomKey) ?? new Set<UtilityType>();
-      bucket.add(meter.utilityType);
-      configuredMetersByRoom.set(roomKey, bucket);
-    }
-
     const baselineGroups = new Map<string, UtilityBillRecord[]>();
     for (const records of this.billsByLedger.values()) {
       for (const record of records) {
@@ -1521,11 +1508,6 @@ export class UtilityBillingService {
 
       const roomKey = `${reference.buildingId}::${reference.houseNumber}`;
       if (!this.combinedChargeBuildingIds.has(reference.buildingId)) {
-        continue;
-      }
-
-      const configuredMeters = configuredMetersByRoom.get(roomKey);
-      if (configuredMeters && configuredMeters.has("water") && configuredMeters.has("electricity")) {
         continue;
       }
 
@@ -1558,19 +1540,6 @@ export class UtilityBillingService {
   }
 
   private normalizeCombinedMonthlyCharges(): void {
-    const configuredMetersByRoom = new Map<string, Set<UtilityType>>();
-
-    for (const meter of this.meters.values()) {
-      if (!hasUsableMeterNumber(meter.meterNumber)) {
-        continue;
-      }
-
-      const roomKey = `${meter.buildingId}::${meter.houseNumber}`;
-      const bucket = configuredMetersByRoom.get(roomKey) ?? new Set<UtilityType>();
-      bucket.add(meter.utilityType);
-      configuredMetersByRoom.set(roomKey, bucket);
-    }
-
     const combinedGroups = new Map<string, UtilityBillRecord[]>();
     for (const records of this.billsByLedger.values()) {
       for (const record of records) {
@@ -1583,11 +1552,6 @@ export class UtilityBillingService {
         }
 
         const roomKey = `${record.buildingId}::${record.houseNumber}`;
-        const configuredMeters = configuredMetersByRoom.get(roomKey);
-        if (configuredMeters && configuredMeters.has("water") && configuredMeters.has("electricity")) {
-          continue;
-        }
-
         const key = `${roomKey}::${record.billingMonth}`;
         const bucket = combinedGroups.get(key) ?? [];
         bucket.push(record);

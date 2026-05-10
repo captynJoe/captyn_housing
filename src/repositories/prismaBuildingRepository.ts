@@ -389,6 +389,14 @@ export class PrismaBuildingRepository implements BuildingRepository {
         where: { buildingId: id }
       });
 
+      await tx.buildingConfiguration.deleteMany({
+        where: { buildingId: id }
+      });
+
+      await tx.buildingWifiPackage.deleteMany({
+        where: { buildingId: id }
+      });
+
       await tx.building.delete({
         where: { id }
       });

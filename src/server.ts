@@ -2352,6 +2352,8 @@ async function bootstrap() {
       runtimeQueuesChanged = true;
     }
 
+    paymentAccessService.removeBuilding(normalizedBuildingId);
+
     if (runtimeQueuesChanged) {
       syncCombinedUtilityChargeDefaultsToService();
       persistRuntimeQueuesState();
@@ -4606,8 +4608,6 @@ async function bootstrap() {
     if (utilityBillingMode === "disabled") {
       resolvedChargeSource = "disabled";
       estimatedRecurringMonthlyChargeKsh = 0;
-    } else if (hasBothMeters) {
-      resolvedChargeSource = "metered";
     } else if (roomCombinedChargeKsh > 0) {
       resolvedChargeSource = "room_custom_combined";
       if (estimatedRecurringMonthlyChargeKsh <= 0) {
@@ -4632,6 +4632,8 @@ async function bootstrap() {
         estimatedRecurringMonthlyChargeKsh =
           resolvedWaterFixedChargeKsh + resolvedElectricityFixedChargeKsh;
       }
+    } else if (hasBothMeters) {
+      resolvedChargeSource = "metered";
     }
 
     const estimatedRecurringBackfillKsh =

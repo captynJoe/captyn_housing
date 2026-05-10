@@ -3173,15 +3173,6 @@ function describeRegistryChargeSetup(item, buildingId, billingMonth) {
     };
   }
 
-  if (hasBothMeters) {
-    return {
-      tone: "metered",
-      mode: "metered",
-      label: "Metered room",
-      detail: "Both meters are active. Combined-charge defaults do not apply here."
-    };
-  }
-
   if (billingMode === "combined_charge") {
     if (roomCombinedChargeKsh > 0) {
       return {
@@ -3219,6 +3210,15 @@ function describeRegistryChargeSetup(item, buildingId, billingMonth) {
       mode: "fixed_charge",
       label: "Fixed-charge fallback",
       detail: fixedParts.join(" • ")
+    };
+  }
+
+  if (hasBothMeters) {
+    return {
+      tone: "metered",
+      mode: "metered",
+      label: "Metered room",
+      detail: "No room-specific or combined default is configured, so meter-based posting still applies."
     };
   }
 
@@ -4002,7 +4002,7 @@ function buildUtilitySheetBillRequests(
       electricityFixedChargeKsh > 0;
 
     if (
-      !hasActiveResident &&
+      hasActiveResident &&
       !hasRoomSpecificUtilityEntry &&
       Number(combinedUtilityChargeKsh ?? 0) > 0
     ) {

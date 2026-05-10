@@ -10,6 +10,7 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --import tsx --test tests/*.test.ts",
+    "repair:missing-combined-utility-charges": "tsx scripts/backfill-missing-combined-utility-charges.ts",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres",

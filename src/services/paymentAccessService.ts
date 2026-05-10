@@ -188,6 +188,22 @@ export class PaymentAccessService {
     return updated;
   }
 
+  removeBuilding(buildingId: string): boolean {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    if (!normalizedBuildingId) {
+      return false;
+    }
+
+    const deleted = this.records.delete(normalizedBuildingId);
+    if (!deleted) {
+      return false;
+    }
+
+    this.persistToDisk();
+    this.emitStateChange();
+    return true;
+  }
+
   private emitStateChange(): void {
     if (!this.stateChangeHandler) {
       return;

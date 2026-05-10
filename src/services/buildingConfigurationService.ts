@@ -208,8 +208,25 @@ export class BuildingConfigurationService {
       return;
     }
 
+    const knownBuildingIds = new Set(
+      (
+        await this.prisma.building.findMany({
+          where: {
+            id: {
+              in: records.map((row) => row.buildingId)
+            }
+          },
+          select: { id: true }
+        })
+      ).map((item) => item.id)
+    );
+    const validRecords = records.filter((row) => knownBuildingIds.has(row.buildingId));
+    if (validRecords.length === 0) {
+      return;
+    }
+
     await this.prisma.$transaction(
-      records.map((row) =>
+      validRecords.map((row) =>
         this.prisma.buildingConfiguration.upsert({
           where: { buildingId: row.buildingId },
           update: {

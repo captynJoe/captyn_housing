@@ -844,6 +844,7 @@ export const landlordExpenditureCreateSchema = z.object({
   ]),
   title: z.string().trim().min(3).max(120),
   amountKsh: z.number().positive().max(2_000_000),
+  chargeableToResident: z.boolean().optional().default(false),
   note: z.string().trim().max(500).optional()
 });
 

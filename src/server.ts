@@ -395,6 +395,7 @@ interface BuildingExpenditureRecord {
     | "other";
   title: string;
   amountKsh: number;
+  chargeableToResident?: boolean;
   note?: string;
   createdAt: string;
   createdByRole: "landlord" | "caretaker" | "admin" | "root_admin";
@@ -1306,6 +1307,7 @@ async function bootstrap() {
 
       buildingExpenditures.set(item.id, {
         ...item,
+        chargeableToResident: Boolean(item.chargeableToResident),
         buildingId: normalizeBuildingId(item.buildingId),
         houseNumber: item.houseNumber
           ? normalizeHouseNumber(item.houseNumber)
@@ -1313,6 +1315,9 @@ async function bootstrap() {
       });
     });
   };
+
+  const isResidentChargeableExpenditure = (item: BuildingExpenditureRecord) =>
+    Boolean(item.chargeableToResident && item.houseNumber);
 
   const exportCaretakerAccessState = (): CaretakerAccessPersistedState => ({
     records: [...caretakerAccessByBuilding.values()]
@@ -4178,11 +4183,14 @@ async function bootstrap() {
     const paymentAccess = paymentAccessService.getForBuilding(buildingId);
     const chargeableExpenditureByHouse = new Map<string, number>();
     for (const item of buildingExpenditures.values()) {
-      if (item.buildingId !== normalizeBuildingId(buildingId) || !item.houseNumber) {
+      if (
+        item.buildingId !== normalizeBuildingId(buildingId) ||
+        !isResidentChargeableExpenditure(item)
+      ) {
         continue;
       }
 
-      const houseNumber = normalizeHouseNumber(item.houseNumber);
+      const houseNumber = normalizeHouseNumber(item.houseNumber ?? "");
       const nextTotal =
         (chargeableExpenditureByHouse.get(houseNumber) ?? 0) +
         Math.max(0, Number(item.amountKsh ?? 0));
@@ -8254,6 +8262,7 @@ async function bootstrap() {
         category: parsed.category,
         title: parsed.title,
         amountKsh: parsed.amountKsh,
+        chargeableToResident: Boolean(parsed.chargeableToResident),
         note: parsed.note,
         createdAt,
         createdByRole:
@@ -8771,6 +8780,7 @@ async function bootstrap() {
               : "";
             if (
               item.buildingId !== normalizeBuildingId(session.buildingId) ||
+              !isResidentChargeableExpenditure(item) ||
               itemHouseNumber !== normalizeHouseNumber(session.houseNumber)
             ) {
               return sum;
@@ -8890,6 +8900,7 @@ async function bootstrap() {
         : "";
       if (
         item.buildingId !== normalizeBuildingId(session.buildingId) ||
+        !isResidentChargeableExpenditure(item) ||
         itemHouseNumber !== normalizeHouseNumber(session.houseNumber)
       ) {
         return sum;

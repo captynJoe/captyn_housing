@@ -288,6 +288,7 @@ const expenditureCategoryEl = document.getElementById("expenditure-category");
 const expenditureAmountEl = document.getElementById("expenditure-amount");
 const expenditureTitleEl = document.getElementById("expenditure-title");
 const expenditureNoteEl = document.getElementById("expenditure-note");
+const expenditureChargeableEl = document.getElementById("expenditure-chargeable");
 const expenditureSubmitBtnEl = document.getElementById("expenditure-submit-btn");
 const expendituresBodyEl = document.getElementById("expenditures-body");
 const refreshExpendituresBtnEl = document.getElementById("refresh-expenditures");
@@ -5268,7 +5269,7 @@ function renderExpenditures(rows) {
   expendituresBodyEl.replaceChildren();
   if (!Array.isArray(rows) || rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="9">No expenditure recorded for this building yet.</td>';
+    row.innerHTML = '<td colspan="10">No expenditure recorded for this building yet.</td>';
     expendituresBodyEl.append(row);
     return;
   }
@@ -5288,6 +5289,7 @@ function renderExpenditures(rows) {
       <td>${escapeHtml(formatExpenditureCategory(item.category))}</td>
       <td>${escapeHtml(item.title)}</td>
       <td>${escapeHtml(formatCurrency(item.amountKsh))}</td>
+      <td>${escapeHtml(item.chargeableToResident ? "Yes" : "No")}</td>
       <td>${escapeHtml(actorLabel)}</td>
       <td>${escapeHtml(item.note ?? "-")}</td>
       <td>
@@ -9756,6 +9758,10 @@ expenditureFormEl?.addEventListener("submit", (event) => {
   const title = String(expenditureTitleEl?.value || "").trim();
   const amountKsh = Number(expenditureAmountEl?.value ?? Number.NaN);
   const note = String(expenditureNoteEl?.value || "").trim() || undefined;
+  const chargeableToResident =
+    expenditureChargeableEl instanceof HTMLInputElement
+      ? expenditureChargeableEl.checked
+      : false;
 
   if (!buildingId) {
     showError("Select a building first.");
@@ -9789,6 +9795,7 @@ expenditureFormEl?.addEventListener("submit", (event) => {
           category,
           title,
           amountKsh,
+          chargeableToResident,
           note
         })
       });
@@ -9804,6 +9811,9 @@ expenditureFormEl?.addEventListener("submit", (event) => {
       }
       if (expenditureNoteEl instanceof HTMLTextAreaElement) {
         expenditureNoteEl.value = "";
+      }
+      if (expenditureChargeableEl instanceof HTMLInputElement) {
+        expenditureChargeableEl.checked = false;
       }
 
       setStatus(`Expenditure recorded for ${buildingId}.`);

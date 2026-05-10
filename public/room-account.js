@@ -655,7 +655,7 @@ function renderRoomCharges(payload) {
 
   if (rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="5">No room-specific charges posted yet.</td>';
+    row.innerHTML = '<td colspan="6">No room-specific charges posted yet.</td>';
     roomChargesBodyEl.append(row);
     return;
   }
@@ -667,6 +667,7 @@ function renderRoomCharges(payload) {
       <td>${escapeHtml(formatExpenditureCategory(item?.category))}</td>
       <td>${escapeHtml(item?.title || "Room charge")}</td>
       <td>${escapeHtml(formatCurrency(item?.amountKsh ?? 0))}</td>
+      <td>${escapeHtml(item?.chargeableToResident ? "Yes" : "No")}</td>
       <td>${escapeHtml(item?.note || "-")}</td>
     `;
     roomChargesBodyEl.append(row);

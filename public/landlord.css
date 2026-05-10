@@ -12,6 +12,16 @@
   margin-top: 10px;
 }
 
+.checkbox-row {
+  align-items: center;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: auto;
+}
+
 .room-account-shell {
   gap: 18px;
 }

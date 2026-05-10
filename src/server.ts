@@ -3086,6 +3086,15 @@ async function bootstrap() {
 
   if (appStateService) {
     try {
+      const loadAppStateJsonSafely = async <T>(key: string) => {
+        try {
+          return await appStateService.getJson<T>(key);
+        } catch (error) {
+          console.error(`Failed to load AppState key ${key}.`, error);
+          return null;
+        }
+      };
+
       const [
         adminAuthState,
         rentState,
@@ -3099,27 +3108,27 @@ async function bootstrap() {
         pushSubscriptionState,
         residentNotificationPreferenceState
       ] = await Promise.all([
-        appStateService.getJson<AdminAuthPersistedState>(ADMIN_AUTH_STATE_KEY),
-        appStateService.getJson<RentLedgerPersistedState>(RENT_LEDGER_STATE_KEY),
-        appStateService.getJson<UtilityBillingPersistedState>(
+        loadAppStateJsonSafely<AdminAuthPersistedState>(ADMIN_AUTH_STATE_KEY),
+        loadAppStateJsonSafely<RentLedgerPersistedState>(RENT_LEDGER_STATE_KEY),
+        loadAppStateJsonSafely<UtilityBillingPersistedState>(
           UTILITY_BILLING_STATE_KEY
         ),
-        appStateService.getJson<UserSupportPersistedState>(USER_SUPPORT_STATE_KEY),
-        appStateService.getJson<WifiAccessPersistedState>(WIFI_ACCESS_STATE_KEY),
-        appStateService.getJson<PaymentAccessPersistedState>(
+        loadAppStateJsonSafely<UserSupportPersistedState>(USER_SUPPORT_STATE_KEY),
+        loadAppStateJsonSafely<WifiAccessPersistedState>(WIFI_ACCESS_STATE_KEY),
+        loadAppStateJsonSafely<PaymentAccessPersistedState>(
           PAYMENT_ACCESS_STATE_KEY
         ),
-        appStateService.getJson<CaretakerAccessPersistedState>(
+        loadAppStateJsonSafely<CaretakerAccessPersistedState>(
           CARETAKER_ACCESS_STATE_KEY
         ),
-        appStateService.getJson<BuildingExpenditurePersistedState>(
+        loadAppStateJsonSafely<BuildingExpenditurePersistedState>(
           BUILDING_EXPENDITURE_STATE_KEY
         ),
-        appStateService.getJson<RuntimeQueuesPersistedState>(RUNTIME_QUEUES_STATE_KEY),
-        appStateService.getJson<PushSubscriptionPersistedState>(
+        loadAppStateJsonSafely<RuntimeQueuesPersistedState>(RUNTIME_QUEUES_STATE_KEY),
+        loadAppStateJsonSafely<PushSubscriptionPersistedState>(
           PUSH_SUBSCRIPTIONS_STATE_KEY
         ),
-        appStateService.getJson<ResidentNotificationPreferencePersistedState>(
+        loadAppStateJsonSafely<ResidentNotificationPreferencePersistedState>(
           RESIDENT_NOTIFICATION_PREFERENCES_STATE_KEY
         )
       ]);
@@ -8689,6 +8698,163 @@ async function bootstrap() {
       userSupportService.listNotifications(session.houseNumber, session.buildingId)
     );
     return res.json({ data });
+  });
+
+  app.get("/api/user/startup", async (req, res, next) => {
+    try {
+      const session = await getResidentSession(req, res);
+      if (!session) {
+        return;
+      }
+
+      const billingVisible = hasResidentBillingAccess(session);
+      if (billingVisible) {
+        enqueueResidentBillingNotifications(session.buildingId, session.houseNumber);
+      }
+
+      const notifications = filterResidentNotificationsForSession(
+        session,
+        userSupportService.listNotifications(session.houseNumber, session.buildingId)
+      );
+      const reports = billingVisible
+        ? userSupportService.listReports(session.houseNumber, session.buildingId)
+        : [];
+
+      const configuredRent = rentLedgerService.getRentDue(
+        session.buildingId,
+        session.houseNumber
+      );
+      const basePaymentAccess = paymentAccessService.getForBuilding(session.buildingId);
+      const paymentAccess = billingVisible
+        ? {
+            ...basePaymentAccess,
+            rentConfigured: Boolean(configuredRent),
+            rentEnabled: basePaymentAccess.rentEnabled && Boolean(configuredRent),
+            locked: false
+          }
+        : {
+            rentEnabled: false,
+            waterEnabled: false,
+            electricityEnabled: false,
+            rentConfigured: false,
+            locked: true
+          };
+
+      let rentDue: Record<string, unknown> | null = null;
+      let rentDueMessage: string | undefined;
+      let rentPayments = [] as ReturnType<typeof rentLedgerService.listPayments>;
+      let rentPaymentsMessage: string | undefined;
+      let utilityBills: ReturnType<typeof utilityBillingService.listResidentVisibleBillsForHouse> =
+        [];
+      let utilityMeters: ReturnType<typeof utilityBillingService.listMeters> = [];
+      let utilityLatestReadings: ReturnType<
+        typeof utilityBillingService.listLatestReadingsForHouse
+      > = [];
+      let utilitiesMessage: string | undefined;
+      let utilityPayments = [] as ReturnType<typeof utilityBillingService.listPayments>;
+      let utilityPaymentsMessage: string | undefined;
+
+      if (!billingVisible) {
+        rentDueMessage = RESIDENT_BILLING_LOCKED_MESSAGE;
+        rentPaymentsMessage = RESIDENT_BILLING_LOCKED_MESSAGE;
+        utilitiesMessage = RESIDENT_BILLING_LOCKED_MESSAGE;
+        utilityPaymentsMessage = RESIDENT_BILLING_LOCKED_MESSAGE;
+      } else {
+        if (!basePaymentAccess.rentEnabled) {
+          rentDueMessage = "Rent is currently disabled by your landlord for this building.";
+          rentPaymentsMessage =
+            "Rent is currently disabled by your landlord for this building.";
+        } else {
+          const expenseBalanceKsh = [...buildingExpenditures.values()].reduce((sum, item) => {
+            const itemHouseNumber = item.houseNumber
+              ? normalizeHouseNumber(item.houseNumber)
+              : "";
+            if (
+              item.buildingId !== normalizeBuildingId(session.buildingId) ||
+              itemHouseNumber !== normalizeHouseNumber(session.houseNumber)
+            ) {
+              return sum;
+            }
+
+            return sum + Math.max(0, Number(item.amountKsh ?? 0));
+          }, 0);
+          const due = configuredRent;
+          rentDue = due
+            ? {
+                ...due,
+                expenseBalanceKsh,
+                expenseArrearsKsh: expenseBalanceKsh,
+                totalRoomBalanceKsh:
+                  Math.max(0, Number(due.balanceKsh ?? 0)) + expenseBalanceKsh
+              }
+            : null;
+          rentDueMessage = rentDue
+            ? undefined
+            : "Rent profile is not configured yet for this house number.";
+          rentPayments = rentLedgerService.listPayments({
+            buildingId: session.buildingId,
+            houseNumber: session.houseNumber
+          });
+        }
+
+        await ensureRecurringUtilityBillsCurrent("resident.startup", {
+          buildingId: session.buildingId,
+          houseNumber: session.houseNumber
+        });
+
+        utilityBills = utilityBillingService.listResidentVisibleBillsForHouse(
+          session.buildingId,
+          session.houseNumber,
+          undefined,
+          24
+        );
+        const hasHiddenUpcomingBalances = utilityBillingService.hasHiddenUpcomingBalancesForHouse(
+          session.buildingId,
+          session.houseNumber
+        );
+        utilityMeters = utilityBillingService.listMeters({
+          buildingId: session.buildingId,
+          houseNumber: session.houseNumber
+        });
+        utilityLatestReadings = utilityBillingService.listLatestReadingsForHouse(
+          session.buildingId,
+          session.houseNumber
+        );
+        utilitiesMessage =
+          utilityBills.length > 0
+            ? undefined
+            : hasHiddenUpcomingBalances
+              ? "Your next utility bill will appear one week before the due date."
+              : "Utility bills are not configured yet for this house number.";
+        utilityPayments = utilityBillingService.listPayments({
+          buildingId: session.buildingId,
+          houseNumber: session.houseNumber,
+          limit: 120
+        });
+      }
+
+      return res.json({
+        data: {
+          paymentAccess,
+          reports,
+          notifications,
+          rentDue,
+          rentPayments,
+          utilityBills,
+          utilityMeters,
+          utilityLatestReadings,
+          utilityPayments
+        },
+        messages: {
+          rentDue: rentDueMessage,
+          rentPayments: rentPaymentsMessage,
+          utilities: utilitiesMessage,
+          utilityPayments: utilityPaymentsMessage
+        }
+      });
+    } catch (error) {
+      return next(error);
+    }
   });
 
   app.get("/api/user/rent-due", async (req, res) => {

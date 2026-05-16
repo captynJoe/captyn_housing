@@ -5333,6 +5333,7 @@ async function bootstrap() {
       pathValue === "/landlord" ||
       pathValue.startsWith("/landlord/rooms/") ||
       pathValue === "/landlord/login" ||
+      pathValue === "/resident" ||
       pathValue === "/admin" ||
       pathValue === "/admin/login" ||
       pathValue.startsWith("/api/auth/") ||
@@ -5421,19 +5422,15 @@ async function bootstrap() {
     });
   };
 
-  const sendResidentProfileShell = (_req: express.Request, res: express.Response) => {
-    res.sendFile(path.join(publicDir, "user.html"), {
-      headers: {
-        "Cache-Control": "no-store, max-age=0"
-      }
-    });
+  const redirectResidentAlias = (_req: express.Request, res: express.Response) => {
+    res.redirect(308, "/resident");
   };
 
   app.get("/resident", sendResidentShell);
-  app.get("/user", sendResidentProfileShell);
-  app.get("/user/", sendResidentProfileShell);
-  app.get("/users", sendResidentShell);
-  app.get("/users/", sendResidentShell);
+  app.get("/user", redirectResidentAlias);
+  app.get("/user/", redirectResidentAlias);
+  app.get("/users", redirectResidentAlias);
+  app.get("/users/", redirectResidentAlias);
 
   app.get("/health", (_req, res) => {
     res.json({

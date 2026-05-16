@@ -14,7 +14,7 @@ import {
 const RESIDENT_TOKEN_KEY = "captyn_resident_session_token";
 const RESIDENT_SESSION_TOKEN_KEY = "captyn_resident_session_token_session";
 const RESIDENT_REMEMBER_DEVICE_KEY = "captyn_resident_remember_device";
-const RESIDENT_SW_URL = "/resident-sw.js?v=20260508c";
+const RESIDENT_SW_URL = "/resident-sw.js?v=20260516a";
 
 let deferredInstallPrompt = null;
 let residentSwRegistrationPromise = null;

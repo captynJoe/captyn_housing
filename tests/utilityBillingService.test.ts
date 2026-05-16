@@ -524,6 +524,147 @@ test("spreads utility payment across the selected month and the next open month"
   );
 });
 
+test("unrecords cash utility payments and restores allocated bill balances", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.createBill("water", BUILDING_A, "B-10", {
+    billingMonth: "2026-02",
+    fixedChargeKsh: 300,
+    dueDate
+  });
+
+  service.createBill("water", BUILDING_A, "B-10", {
+    billingMonth: "2026-03",
+    fixedChargeKsh: 400,
+    dueDate
+  });
+
+  const paid = service.recordPayment("water", BUILDING_A, "B-10", {
+    billingMonth: "2026-02",
+    amountKsh: 500,
+    provider: "cash",
+    providerReference: "util-spread-undo"
+  });
+
+  assert.equal(paid.allocations.length, 2);
+
+  const unrecorded = service.unrecordCashPayment(
+    "water",
+    BUILDING_A,
+    "b-10",
+    paid.event.id
+  );
+
+  assert.ok(unrecorded);
+  assert.equal(unrecorded.totalAmountKsh, 500);
+  assert.equal(unrecorded.events.length, 2);
+  assert.equal(service.listPayments({ buildingId: BUILDING_A, houseNumber: "B-10" }).length, 0);
+
+  const bills = service.listBills({ buildingId: BUILDING_A, houseNumber: "B-10" });
+  const februaryBill = bills.find((item) => item.billingMonth === "2026-02");
+  const marchBill = bills.find((item) => item.billingMonth === "2026-03");
+
+  assert.ok(februaryBill);
+  assert.equal(februaryBill.balanceKsh, 300);
+  assert.ok(marchBill);
+  assert.equal(marchBill.balanceKsh, 400);
+});
+
+test("allocates entered utility payment amounts across the oldest open room balance", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.createBill("water", BUILDING_A, "B-12", {
+    billingMonth: "2026-02",
+    fixedChargeKsh: 200,
+    dueDate
+  });
+
+  service.createBill("water", BUILDING_A, "B-12", {
+    billingMonth: "2026-03",
+    fixedChargeKsh: 400,
+    dueDate
+  });
+
+  const paid = service.recordPayment("water", BUILDING_A, "B-12", {
+    billingMonth: "2026-03",
+    amountKsh: 500,
+    provider: "mpesa",
+    providerReference: "UTIL-ROOM-RECEIPT-500"
+  });
+
+  assert.deepEqual(
+    paid.allocations.map((item) => item.bill.billingMonth),
+    ["2026-02", "2026-03"]
+  );
+  assert.deepEqual(
+    paid.allocations.map((item) => item.appliedAmountKsh),
+    [200, 300]
+  );
+
+  const bills = service.listBills({ buildingId: BUILDING_A, houseNumber: "B-12" });
+  const februaryBill = bills.find((item) => item.billingMonth === "2026-02");
+  const marchBill = bills.find((item) => item.billingMonth === "2026-03");
+
+  assert.ok(februaryBill);
+  assert.equal(februaryBill.balanceKsh, 0);
+  assert.ok(marchBill);
+  assert.equal(marchBill.balanceKsh, 100);
+});
+
+test("does not unrecord non-cash utility payments", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.createBill("water", BUILDING_A, "B-11", {
+    billingMonth: "2026-02",
+    fixedChargeKsh: 300,
+    dueDate
+  });
+
+  const paid = service.recordPayment("water", BUILDING_A, "B-11", {
+    amountKsh: 200,
+    provider: "mpesa",
+    providerReference: "util-mpesa-undo-denied"
+  });
+
+  assert.throws(
+    () => service.unrecordCashPayment("water", BUILDING_A, "B-11", paid.event.id),
+    /Only manually recorded utility payments/
+  );
+  assert.equal(service.listBills({ buildingId: BUILDING_A, houseNumber: "B-11" })[0].balanceKsh, 100);
+});
+
+test("unrecords manually entered M-PESA utility receipts", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.createBill("water", BUILDING_A, "B-13", {
+    billingMonth: "2026-02",
+    fixedChargeKsh: 300,
+    dueDate
+  });
+
+  const paid = service.recordPayment("water", BUILDING_A, "B-13", {
+    amountKsh: 200,
+    provider: "mpesa",
+    providerReference: "MANUAL-MPESA-UTILITY-1",
+    source: "manual"
+  });
+
+  const unrecorded = service.unrecordCashPayment(
+    "water",
+    BUILDING_A,
+    "B-13",
+    paid.event.id
+  );
+
+  assert.ok(unrecorded);
+  assert.equal(unrecorded.totalAmountKsh, 200);
+  assert.equal(service.listBills({ buildingId: BUILDING_A, houseNumber: "B-13" })[0].balanceKsh, 300);
+});
+
 test("previews utility payment across the selected month and later open bills", () => {
   const service = new UtilityBillingService();
   const dueDate = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();

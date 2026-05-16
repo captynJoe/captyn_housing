@@ -517,9 +517,9 @@ export const adminAccessCredentialUpdateSchema = z
       .trim()
       .min(3)
       .max(80)
-      .regex(/^[A-Za-z0-9._-]+$/, {
+      .regex(/^[A-Za-z0-9._@-]+$/, {
         message:
-          "Username can only include letters, numbers, dots, underscores, and hyphens."
+          "Username can only include letters, numbers, dots, underscores, hyphens, and @."
       }),
     password: z.string().trim().min(8).max(120),
     confirmPassword: z.string().trim().min(8).max(120)

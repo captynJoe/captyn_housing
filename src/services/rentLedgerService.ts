@@ -5,6 +5,7 @@ import type {
 } from "../validation/schemas.js";
 
 type RentPaymentProvider = "mpesa" | "cash" | "bank" | "card";
+type RentPaymentSource = "manual" | "mpesa";
 
 interface RecordRentPaymentInput {
   buildingId: string;
@@ -17,6 +18,7 @@ interface RecordRentPaymentInput {
   billingMonth?: string;
   tenantUserId?: string;
   tenantName?: string;
+  source?: RentPaymentSource;
 }
 
 export const RENT_LEGACY_BUILDING_ID = "__LEGACY__";
@@ -35,6 +37,7 @@ export interface RentPaymentEvent {
   phoneNumber?: string;
   paidAt: string;
   createdAt: string;
+  source?: RentPaymentSource;
 }
 
 interface ReminderState {
@@ -91,6 +94,18 @@ interface ReferenceIndexEntry {
 interface ListRentPaymentsOptions {
   buildingId?: string;
   houseNumber?: string;
+}
+
+interface UnrecordRentPaymentInput {
+  buildingId: string;
+  houseNumber: string;
+  paymentId: string;
+}
+
+export interface UnrecordRentPaymentResult {
+  event: RentPaymentEvent;
+  applied: boolean;
+  snapshot: RentDueSnapshot | null;
 }
 
 export interface RentLedgerPersistedState {
@@ -497,6 +512,94 @@ export class RentLedgerService {
     return [...resolved, ...pending].sort((a, b) => b.paidAt.localeCompare(a.paidAt));
   }
 
+  unrecordCashPayment(
+    input: UnrecordRentPaymentInput
+  ): UnrecordRentPaymentResult | null {
+    const normalizedBuildingId = normalizeBuildingId(input.buildingId);
+    const normalizedHouse = normalizeHouseNumber(input.houseNumber);
+    const paymentId = String(input.paymentId ?? "").trim();
+    if (!paymentId) {
+      return null;
+    }
+
+    const scopedKeys = [
+      ledgerKey(normalizedBuildingId, normalizedHouse),
+      ...(normalizedBuildingId === RENT_LEGACY_BUILDING_ID
+        ? []
+        : [ledgerKey(RENT_LEGACY_BUILDING_ID, normalizedHouse)])
+    ];
+
+    for (const key of scopedKeys) {
+      const record = this.records.get(key);
+      if (!record) {
+        continue;
+      }
+
+      const paymentIndex = record.payments.findIndex((payment) => payment.id === paymentId);
+      if (paymentIndex === -1) {
+        continue;
+      }
+
+      const event = record.payments[paymentIndex];
+      if (!event) {
+        return null;
+      }
+      if (event.provider !== "cash" && event.source !== "manual") {
+        throw new Error("Only manually recorded rent payments can be unrecorded.");
+      }
+
+      record.payments.splice(paymentIndex, 1);
+      record.balanceKsh = Math.max(0, Math.round(record.balanceKsh + event.amountKsh));
+      record.updatedAt = nowIso();
+      if (record.note === "Rent cleared by CASH payment event.") {
+        record.note = undefined;
+      }
+      this.paymentReferenceIndex.delete(normalizeProviderReference(event.providerReference));
+      this.emitStateChange();
+
+      return {
+        event: { ...event },
+        applied: true,
+        snapshot: this.toSnapshot(record)
+      };
+    }
+
+    for (const key of scopedKeys) {
+      const pending = this.pendingPayments.get(key);
+      if (!pending) {
+        continue;
+      }
+
+      const paymentIndex = pending.findIndex((payment) => payment.id === paymentId);
+      if (paymentIndex === -1) {
+        continue;
+      }
+
+      const event = pending[paymentIndex];
+      if (!event) {
+        return null;
+      }
+      if (event.provider !== "cash" && event.source !== "manual") {
+        throw new Error("Only manually recorded rent payments can be unrecorded.");
+      }
+
+      pending.splice(paymentIndex, 1);
+      if (pending.length === 0) {
+        this.pendingPayments.delete(key);
+      }
+      this.paymentReferenceIndex.delete(normalizeProviderReference(event.providerReference));
+      this.emitStateChange();
+
+      return {
+        event: { ...event },
+        applied: false,
+        snapshot: null
+      };
+    }
+
+    return null;
+  }
+
   purgeHouse(buildingId: string, houseNumber: string): boolean {
     const normalizedBuildingId = normalizeBuildingId(buildingId);
     const normalizedHouse = normalizeHouseNumber(houseNumber);
@@ -553,7 +656,8 @@ export class RentLedgerService {
       paidAt: input.paidAt,
       billingMonth: input.billingMonth,
       tenantUserId: input.tenantUserId,
-      tenantName: input.tenantName
+      tenantName: input.tenantName,
+      source: "mpesa"
     });
   }
 
@@ -588,7 +692,8 @@ export class RentLedgerService {
       amountKsh: Math.round(input.amountKsh),
       phoneNumber: input.phoneNumber,
       paidAt,
-      createdAt: nowIso()
+      createdAt: nowIso(),
+      source: input.source
     };
 
     const record = this.resolveRecord(normalizedBuildingId, normalizedHouse);

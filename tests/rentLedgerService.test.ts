@@ -121,6 +121,102 @@ test("records admin rent payments with provider metadata against an existing pro
   assert.equal(service.listCollectionStatus(10, BUILDING_A)[0]?.totalPaidKsh, 1500);
 });
 
+test("unrecords cash rent payments and restores the room balance", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.upsertRentDue(BUILDING_A, "M-3", {
+    monthlyRentKsh: 12000,
+    balanceKsh: 6000,
+    dueDate
+  });
+
+  const payment = service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "M-3",
+    amountKsh: 1500,
+    provider: "cash",
+    providerReference: "cash-undo-001",
+    paidAt: dueDate
+  });
+
+  assert.equal(payment.snapshot?.balanceKsh, 4500);
+
+  const unrecorded = service.unrecordCashPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "m-3",
+    paymentId: payment.event.id
+  });
+
+  assert.ok(unrecorded);
+  assert.equal(unrecorded.applied, true);
+  assert.equal(unrecorded.event.providerReference, "CASH-UNDO-001");
+  assert.equal(unrecorded.snapshot?.balanceKsh, 6000);
+  assert.equal(service.listPayments({ buildingId: BUILDING_A, houseNumber: "M-3" }).length, 0);
+  assert.equal(service.listCollectionStatus(10, BUILDING_A)[0]?.totalPaidKsh, 0);
+});
+
+test("does not unrecord non-cash rent payments", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.upsertRentDue(BUILDING_A, "M-4", {
+    monthlyRentKsh: 12000,
+    balanceKsh: 6000,
+    dueDate
+  });
+
+  const payment = service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "M-4",
+    amountKsh: 1500,
+    provider: "mpesa",
+    providerReference: "mpesa-undo-denied",
+    paidAt: dueDate
+  });
+
+  assert.throws(
+    () =>
+      service.unrecordCashPayment({
+        buildingId: BUILDING_A,
+        houseNumber: "M-4",
+        paymentId: payment.event.id
+      }),
+    /Only manually recorded rent payments/
+  );
+  assert.equal(service.getRentDue(BUILDING_A, "M-4")?.balanceKsh, 4500);
+});
+
+test("unrecords manually entered M-PESA rent receipts", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.upsertRentDue(BUILDING_A, "M-5", {
+    monthlyRentKsh: 12000,
+    balanceKsh: 6000,
+    dueDate
+  });
+
+  const payment = service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "M-5",
+    amountKsh: 1500,
+    provider: "mpesa",
+    providerReference: "manual-mpesa-rent-1",
+    paidAt: dueDate,
+    source: "manual"
+  });
+
+  const unrecorded = service.unrecordCashPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "M-5",
+    paymentId: payment.event.id
+  });
+
+  assert.ok(unrecorded);
+  assert.equal(unrecorded.snapshot?.balanceKsh, 6000);
+});
+
 test("exposes current-month paid, current-month outstanding, and arrears separately", () => {
   const service = new RentLedgerService();
   const dueDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();

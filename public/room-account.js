@@ -31,6 +31,7 @@ const roomChargeNoteEl = document.getElementById("room-charge-note");
 const roomProfileGridEl = document.getElementById("room-profile-grid");
 const roomAnomaliesEl = document.getElementById("room-anomalies");
 const roomBillsBodyEl = document.getElementById("room-bills-body");
+const roomRentPaymentsBodyEl = document.getElementById("room-rent-payments-body");
 const roomPaymentsBodyEl = document.getElementById("room-payments-body");
 const roomChargesBodyEl = document.getElementById("room-charges-body");
 const roomIssuesEl = document.getElementById("room-issues");
@@ -227,6 +228,36 @@ function formatUtilityPaymentCoverage(payment) {
 
   const fallback = String(payment?.billingMonth ?? "").trim();
   return fallback ? formatBillingMonth(fallback) : "-";
+}
+
+function canUnrecordPayments() {
+  return String(state.role ?? "").trim() !== "caretaker";
+}
+
+function renderUnrecordPaymentButton(action, payment, extraAttributes = {}) {
+  const paymentId = String(payment?.id ?? "").trim();
+  const provider = String(payment?.provider ?? "").trim().toLowerCase();
+  const source = String(payment?.source ?? "").trim().toLowerCase();
+  if (!canUnrecordPayments() || !paymentId || (provider !== "cash" && source !== "manual")) {
+    return "-";
+  }
+
+  const extra = Object.entries(extraAttributes)
+    .map(([key, value]) => `data-${key}="${escapeHtml(value)}"`)
+    .join(" ");
+
+  return `
+    <button
+      type="button"
+      class="btn-danger payment-unrecord-btn"
+      data-action="${escapeHtml(action)}"
+      data-payment-id="${escapeHtml(paymentId)}"
+      data-amount="${escapeHtml(formatCurrency(payment?.amountKsh ?? 0))}"
+      ${extra}
+    >
+      Unrecord
+    </button>
+  `;
 }
 
 function setStatus(message) {
@@ -616,6 +647,35 @@ function renderUtilityBills(payload) {
   });
 }
 
+function renderRentPayments(payload) {
+  if (!(roomRentPaymentsBodyEl instanceof HTMLElement)) {
+    return;
+  }
+
+  const rows = Array.isArray(payload?.rentPayments) ? payload.rentPayments : [];
+  roomRentPaymentsBodyEl.replaceChildren();
+
+  if (rows.length === 0) {
+    const row = document.createElement("tr");
+    row.innerHTML = '<td colspan="6">No rent payments recorded for this room.</td>';
+    roomRentPaymentsBodyEl.append(row);
+    return;
+  }
+
+  rows.forEach((item) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${escapeHtml(formatBillingMonth(item?.billingMonth))}</td>
+      <td>${escapeHtml(formatPaymentProvider(item?.provider))}</td>
+      <td>${escapeHtml(item?.providerReference || "-")}</td>
+      <td>${escapeHtml(formatCurrency(item?.amountKsh ?? 0))}</td>
+      <td>${escapeHtml(formatDateTime(item?.paidAt || item?.createdAt))}</td>
+      <td>${renderUnrecordPaymentButton("unrecord-rent-payment", item)}</td>
+    `;
+    roomRentPaymentsBodyEl.append(row);
+  });
+}
+
 function renderUtilityPayments(payload) {
   if (!(roomPaymentsBodyEl instanceof HTMLElement)) {
     return;
@@ -626,7 +686,7 @@ function renderUtilityPayments(payload) {
 
   if (rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="6">No utility payments recorded for this room.</td>';
+    row.innerHTML = '<td colspan="7">No utility payments recorded for this room.</td>';
     roomPaymentsBodyEl.append(row);
     return;
   }
@@ -640,6 +700,9 @@ function renderUtilityPayments(payload) {
       <td>${escapeHtml(item?.providerReference || item?.note || "-")}</td>
       <td>${escapeHtml(formatCurrency(item?.amountKsh ?? 0))}</td>
       <td>${escapeHtml(formatDateTime(item?.paidAt || item?.createdAt))}</td>
+      <td>${renderUnrecordPaymentButton("unrecord-utility-payment", item, {
+        "utility-type": String(item?.utilityType ?? "")
+      })}</td>
     `;
     roomPaymentsBodyEl.append(row);
   });
@@ -737,6 +800,7 @@ function renderRoomAccount(payload) {
   renderProfile(payload);
   renderAnomalies(payload);
   renderUtilityBills(payload);
+  renderRentPayments(payload);
   renderUtilityPayments(payload);
   renderRoomCharges(payload);
   renderRoomIssues(payload);
@@ -779,6 +843,78 @@ async function loadRoomAccount() {
   } finally {
     setLoading(false);
   }
+}
+
+async function unrecordPayment(button) {
+  const action = button?.dataset?.action;
+  const paymentId = String(button?.dataset?.paymentId ?? "").trim();
+  const amount = String(button?.dataset?.amount ?? "").trim() || "this payment";
+  if (!paymentId || (action !== "unrecord-rent-payment" && action !== "unrecord-utility-payment")) {
+    return;
+  }
+
+  const paymentLabel = action === "unrecord-rent-payment" ? "rent" : "utility";
+  const confirmed = window.confirm(
+    `Unrecord ${amount} ${paymentLabel} payment? The room balance will reopen by that amount.`
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  const utilityType = String(button?.dataset?.utilityType ?? "").trim();
+  if (action === "unrecord-utility-payment" && !utilityType) {
+    showError("Utility type is missing for this payment.");
+    return;
+  }
+
+  const roomPath = encodeURIComponent(state.houseNumber);
+  const paymentPath = encodeURIComponent(paymentId);
+  const buildingQuery = `buildingId=${encodeURIComponent(state.buildingId)}`;
+  const url =
+    action === "unrecord-rent-payment"
+      ? `/api/landlord/rent/${roomPath}/payments/${paymentPath}?${buildingQuery}`
+      : `/api/landlord/utilities/${encodeURIComponent(
+          utilityType
+        )}/${roomPath}/payments/${paymentPath}?${buildingQuery}`;
+
+  setLoading(true);
+  showError("");
+  button.disabled = true;
+  setStatus(`Unrecording ${paymentLabel} payment...`);
+
+  try {
+    await requestJson(url, {
+      method: "DELETE"
+    });
+    await loadRoomAccount();
+    setStatus(`${paymentLabel.charAt(0).toUpperCase() + paymentLabel.slice(1)} payment unrecorded.`);
+  } catch (error) {
+    if (error?.status === 401) {
+      redirectToLogin();
+      return;
+    }
+
+    const message =
+      error instanceof Error ? error.message : "Unable to unrecord this payment.";
+    showError(message);
+    setStatus("Payment unrecord failed.");
+  } finally {
+    button.disabled = false;
+    setLoading(false);
+  }
+}
+
+function handlePaymentActionClick(event) {
+  if (state.loading || !(event.target instanceof Element)) {
+    return;
+  }
+
+  const button = event.target.closest("button[data-action]");
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  void unrecordPayment(button);
 }
 
 async function signOut() {
@@ -826,5 +962,8 @@ roomAccountLogoutBtnEl?.addEventListener("click", () => {
   }
   void signOut();
 });
+
+roomRentPaymentsBodyEl?.addEventListener("click", handlePaymentActionClick);
+roomPaymentsBodyEl?.addEventListener("click", handlePaymentActionClick);
 
 void init();

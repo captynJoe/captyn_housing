@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=20260322b" />
-    <link rel="stylesheet" href="/landlord.css?v=20260516b" />
+    <link rel="stylesheet" href="/landlord.css?v=20260516i" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -115,6 +115,27 @@
 
       <section class="panel wide-panel">
         <div class="panel-head">
+          <h2>Rent Payments</h2>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Paid For</th>
+                <th>Provider</th>
+                <th>Reference</th>
+                <th>Amount</th>
+                <th>Paid On</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="room-rent-payments-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel wide-panel">
+        <div class="panel-head">
           <h2>Utility Payments</h2>
         </div>
         <div class="table-wrap">
@@ -127,6 +148,7 @@
                 <th>Reference</th>
                 <th>Amount</th>
                 <th>Paid On</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody id="room-payments-body"></tbody>
@@ -165,6 +187,6 @@
       </section>
     </main>
 
-    <script type="module" src="/room-account.js?v=20260509b"></script>
+    <script type="module" src="/room-account.js?v=20260516b"></script>
   </body>
 </html>

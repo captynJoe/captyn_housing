@@ -834,7 +834,7 @@ function openMetricTarget(target) {
     case "unpaid-bills":
     case "overdue-bills":
       setActiveLandlordView("tenants");
-      scrollToLandlordSection("utilities-meters-section");
+      scrollToLandlordSection("utility-room-status-section");
       break;
     case "outstanding":
       setActiveLandlordView("tenants");
@@ -1493,6 +1493,90 @@ function getResidentUtilityRoomSummary(resident) {
   return index.get(exactKey) ?? index.get(fallbackKey) ?? null;
 }
 
+function getUtilitySummaryResident(item) {
+  if (!item) {
+    return null;
+  }
+
+  return (
+    findResidentDirectoryEntry(item.buildingId, item.houseNumber) ??
+    findResidentDirectoryEntry("", item.houseNumber) ??
+    null
+  );
+}
+
+function matchesUtilitySummaryTenantFilters(item) {
+  if (!item) {
+    return false;
+  }
+
+  const selectedBuildingId = String(state.selectedResidentsBuildingId || "all").trim();
+  if (
+    selectedBuildingId &&
+    selectedBuildingId !== "all" &&
+    String(item.buildingId || "") !== selectedBuildingId
+  ) {
+    return false;
+  }
+
+  const resident = getUtilitySummaryResident(item);
+  const query = String(state.residentSearchQuery || "").trim().toLowerCase();
+  if (query) {
+    const fallbackSearch = [
+      item.buildingId,
+      item.houseNumber,
+      item.status,
+      item.breakdown
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    if (
+      !(resident && matchesResidentSearch(resident, query)) &&
+      !fallbackSearch.includes(query)
+    ) {
+      return false;
+    }
+  }
+
+  const filter = String(state.residentStatusFilter || "all").trim();
+  if (!filter || filter === "all") {
+    return true;
+  }
+
+  switch (filter) {
+    case "overdue":
+      return utilityAmount(item.overdueBalanceKsh) > 0;
+    case "current_due":
+      return utilityAmount(item.payableBalanceKsh) > 0;
+    case "awaiting_readings":
+      return item.status === "awaiting_readings";
+    case "clear":
+      return (
+        item.status === "clear" &&
+        utilityAmount(item.totalOpenBalanceKsh) <= 0 &&
+        (!resident || matchesResidentStatusFilter(resident, "clear"))
+      );
+    case "with_balance":
+      return utilityAmount(item.totalOpenBalanceKsh) > 0;
+    case "vacant":
+    case "occupied":
+    case "pending_review":
+      return resident ? matchesResidentStatusFilter(resident, filter) : false;
+    default:
+      return resident ? matchesResidentStatusFilter(resident, filter) : true;
+  }
+}
+
+function getUtilityLedgerBuildingId() {
+  const selectedBuildingId = String(state.selectedResidentsBuildingId || "").trim();
+  if (selectedBuildingId && selectedBuildingId !== "all") {
+    return selectedBuildingId;
+  }
+
+  return "";
+}
+
 function getResidentOperationalCurrentDueKsh(resident, utilitySummary = null) {
   const utilityCurrentDueKsh = Math.max(
     getResidentCurrentUtilityDueKsh(resident),
@@ -1910,6 +1994,15 @@ function getResidentLookupExactMatches(rows, query) {
 
 function findResidentDirectoryEntry(buildingId, houseNumber) {
   return getIndexedRoom(state.residentDirectoryByKey, buildingId, houseNumber);
+}
+
+function getRoomsDeepLinkBuildingId() {
+  const segments = window.location.pathname.split("/").filter(Boolean);
+  if (segments.length !== 3 || segments[0] !== "landlord" || segments[1] !== "rooms") {
+    return "";
+  }
+
+  return decodeURIComponent(segments[2] ?? "").trim();
 }
 
 function buildRoomAccountPath(buildingId, houseNumber) {
@@ -5501,7 +5594,7 @@ function renderRegistryRows(rows) {
 
   if (!Array.isArray(rows) || rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="14">No houses found for this building.</td>';
+    row.innerHTML = '<td colspan="13">No houses found for this building.</td>';
     registryBodyEl.append(row);
     return;
   }
@@ -5603,37 +5696,37 @@ function renderRegistryRows(rows) {
       </td>
       <td>${formatRegistryChargeSetupMarkup(item, buildingId, billingMonth)}</td>
       <td>
-        ${
-          item.residentUserId && !isCaretakerRole()
-            ? `<button
-                type="button"
-                class="btn-danger"
-                data-action="remove-resident"
-                data-building-id="${escapeHtml(state.selectedRegistryBuildingId)}"
-                data-house-number="${escapeHtml(houseNumber)}"
-                data-user-id="${escapeHtml(item.residentUserId)}"
-                data-resident-name="${escapeHtml(item.residentName ?? "Resident")}"
-              >
-                Clear Resident
-              </button>`
-            : "-"
-        }
-      </td>
-      <td>
-        ${
-          !isCaretakerRole()
-            ? `<button
-                type="button"
-                class="btn-danger"
-                data-action="remove-room"
-                data-building-id="${escapeHtml(state.selectedRegistryBuildingId)}"
-                data-house-number="${escapeHtml(houseNumber)}"
-                ${item.residentUserId ? "disabled" : ""}
-              >
-                ${item.residentUserId ? "Clear Resident First" : "Remove Room"}
-              </button>`
-            : "-"
-        }
+        <div class="resident-row-actions">
+          ${
+            item.residentUserId && !isCaretakerRole()
+              ? `<button
+                  type="button"
+                  class="btn-danger"
+                  data-action="remove-resident"
+                  data-building-id="${escapeHtml(state.selectedRegistryBuildingId)}"
+                  data-house-number="${escapeHtml(houseNumber)}"
+                  data-user-id="${escapeHtml(item.residentUserId)}"
+                  data-resident-name="${escapeHtml(item.residentName ?? "Resident")}"
+                >
+                  Clear Resident
+                </button>`
+              : ""
+          }
+          ${
+            !isCaretakerRole()
+              ? `<button
+                  type="button"
+                  class="btn-danger"
+                  data-action="remove-room"
+                  data-building-id="${escapeHtml(state.selectedRegistryBuildingId)}"
+                  data-house-number="${escapeHtml(houseNumber)}"
+                  ${item.residentUserId ? "disabled" : ""}
+                >
+                  ${item.residentUserId ? "Clear Resident First" : "Remove Room"}
+                </button>`
+              : "-"
+          }
+        </div>
       </td>
     `;
 
@@ -5856,26 +5949,28 @@ function renderOverviewCollections(rows) {
 }
 
 function renderResidentDirectory(rows) {
+  const allRows = Array.isArray(rows) ? rows : [];
+  renderResidentsOverview(allRows);
+  const filteredRows = getVisibleResidentDirectoryRows(allRows);
+  updateResidentsSearchSummary(allRows.length, filteredRows.length);
+  renderUtilityRoomSummary(state.bills);
+
   if (!(residentsBodyEl instanceof HTMLElement)) {
     return;
   }
 
   residentsBodyEl.replaceChildren();
-  const allRows = Array.isArray(rows) ? rows : [];
-  renderResidentsOverview(allRows);
-  const filteredRows = getVisibleResidentDirectoryRows(allRows);
-  updateResidentsSearchSummary(allRows.length, filteredRows.length);
 
   if (allRows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="13">No rooms found for this selection.</td>';
+    row.innerHTML = '<td colspan="12">No rooms found for this selection.</td>';
     residentsBodyEl.append(row);
     return;
   }
 
   if (filteredRows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = `<td colspan="13">No rooms matched "${escapeHtml(
+    row.innerHTML = `<td colspan="12">No rooms matched "${escapeHtml(
       state.residentSearchQuery
     )}".</td>`;
     residentsBodyEl.append(row);
@@ -5912,10 +6007,6 @@ function renderResidentDirectory(rows) {
       ? summarizeResidentOccupation(resident)
       : { title: "-", details: "" };
     const emergencySummary = hasResident ? summarizeEmergencyContact(resident) : "-";
-    const canRemoveResident =
-      hasResident && !isCaretakerRole() && Boolean(resident.residentUserId);
-    const canRemoveRoom = !hasResident && !isCaretakerRole();
-
     row.innerHTML = `
       <td>${escapeHtml(buildingLabel)}</td>
       <td>${escapeHtml(resident.houseNumber)}</td>
@@ -5951,35 +6042,6 @@ function renderResidentDirectory(rows) {
             Account
           </button>
         </div>
-      </td>
-      <td>
-        ${
-          isCaretakerRole()
-            ? "-"
-            : hasResident
-              ? `<button
-                  type="button"
-                  class="btn-danger"
-                  data-action="remove-resident"
-                  data-building-id="${escapeHtml(resident.buildingId)}"
-                  data-house-number="${escapeHtml(resident.houseNumber)}"
-                  data-user-id="${escapeHtml(resident.residentUserId ?? "")}"
-                  data-resident-name="${escapeHtml(resident.residentName ?? "Resident")}"
-                  ${canRemoveResident ? "" : "disabled"}
-                >
-                  Clear Resident
-                </button>`
-              : `<button
-                  type="button"
-                  class="btn-danger"
-                  data-action="remove-room"
-                  data-building-id="${escapeHtml(resident.buildingId)}"
-                  data-house-number="${escapeHtml(resident.houseNumber)}"
-                  ${canRemoveRoom ? "" : "disabled"}
-                >
-                  Remove Room
-                </button>`
-        }
       </td>
     `;
 
@@ -7096,9 +7158,10 @@ function renderUtilityRoomSummary(rows) {
     return;
   }
 
-  const summaryRows = summarizeUtilityRooms(rows);
+  const allSummaryRows = summarizeUtilityRooms(rows);
+  const summaryRows = allSummaryRows.filter(matchesUtilitySummaryTenantFilters);
   state.utilityRoomSummaryByKey = new Map();
-  summaryRows.forEach((item) => {
+  allSummaryRows.forEach((item) => {
     const key = buildingHouseLookupKey(item.buildingId, item.houseNumber);
     if (key) {
       state.utilityRoomSummaryByKey.set(key, item);
@@ -7114,13 +7177,30 @@ function renderUtilityRoomSummary(rows) {
 
     if (summaryRows.length === 0) {
       const row = document.createElement("tr");
-      row.innerHTML = '<td colspan="9">No utility bill history found.</td>';
+      const emptyText =
+        allSummaryRows.length === 0
+          ? "No utility bill history found."
+          : "No utility rooms match current filters.";
+      row.innerHTML = `<td colspan="10">${escapeHtml(emptyText)}</td>`;
       bodyEl.append(row);
       return;
     }
 
     summaryRows.forEach((item) => {
+      const accountBuildingId =
+        item.buildingId ||
+        getSelectedUtilityBuildingId() ||
+        state.selectedResidentsBuildingId ||
+        state.selectedRegistryBuildingId ||
+        "";
       const row = document.createElement("tr");
+      row.className = "account-drilldown-row";
+      row.dataset.action = "open-room-account-row";
+      row.dataset.buildingId = accountBuildingId;
+      row.dataset.houseNumber = item.houseNumber;
+      row.tabIndex = 0;
+      row.setAttribute("role", "link");
+      row.setAttribute("title", `Open room account ${item.houseNumber}`);
       row.innerHTML = `
         <td>${escapeHtml(item.houseNumber)}</td>
         <td>${item.overdueMonths.length > 0 ? escapeHtml(item.overdueMonths.join(", ")) : "-"}</td>
@@ -7131,6 +7211,7 @@ function renderUtilityRoomSummary(rows) {
         <td>${formatCurrency(item.totalOpenBalanceKsh)}</td>
         <td>${renderUtilityStatusAction(item)}</td>
         <td><div class="utility-breakdown">${escapeHtml(item.breakdown || "-")}</div></td>
+        <td>${renderUtilityRoomSummaryActions(item, accountBuildingId)}</td>
       `;
       bodyEl.append(row);
     });
@@ -7161,6 +7242,64 @@ function renderUtilityPayments(rows) {
     `;
     utilityPaymentsBodyEl.append(row);
   });
+}
+
+function renderUtilityRoomSummaryActions(item, accountBuildingId) {
+  const houseNumber = normalizeHouse(item?.houseNumber);
+  const resident =
+    findResidentDirectoryEntry(accountBuildingId, houseNumber) ??
+    getIndexedRoom(state.registryRoomByKey, accountBuildingId, houseNumber) ??
+    {};
+  const residentUserId = String(resident?.residentUserId ?? "").trim();
+  const hasResident = Boolean(
+    residentUserId ||
+      resident?.hasActiveResident ||
+      String(resident?.residentName ?? "").trim()
+  );
+  const residentName = String(resident?.residentName ?? "Resident").trim() || "Resident";
+
+  return `
+    <div class="resident-row-actions utility-room-actions">
+      <button
+        type="button"
+        data-action="open-room-account"
+        data-building-id="${escapeHtml(accountBuildingId)}"
+        data-house-number="${escapeHtml(houseNumber)}"
+      >
+        Account
+      </button>
+      ${
+        !isCaretakerRole() && hasResident
+          ? `<button
+              type="button"
+              class="btn-danger"
+              data-action="remove-resident"
+              data-building-id="${escapeHtml(accountBuildingId)}"
+              data-house-number="${escapeHtml(houseNumber)}"
+              data-user-id="${escapeHtml(residentUserId)}"
+              data-resident-name="${escapeHtml(residentName)}"
+              ${residentUserId ? "" : "disabled"}
+            >
+              Clear Resident
+            </button>`
+          : ""
+      }
+      ${
+        !isCaretakerRole()
+          ? `<button
+              type="button"
+              class="btn-danger"
+              data-action="remove-room"
+              data-building-id="${escapeHtml(accountBuildingId)}"
+              data-house-number="${escapeHtml(houseNumber)}"
+              ${hasResident ? "disabled" : ""}
+            >
+              ${hasResident ? "Clear Resident First" : "Remove Room"}
+            </button>`
+          : ""
+      }
+    </div>
+  `;
 }
 
 function renderMetrics() {
@@ -7667,7 +7806,7 @@ async function loadMeters() {
 }
 
 async function loadBills() {
-  const buildingId = getSelectedUtilityBuildingId();
+  const buildingId = getUtilityLedgerBuildingId();
   const payload = await requestJson(
     withBuildingQuery("/api/landlord/utilities/bills", buildingId, "limit=600")
   );
@@ -7760,21 +7899,29 @@ function applyLandlordStartupData(startup) {
   const selection = startup?.selection ?? {};
   setBuildings(startup?.buildings ?? []);
   setPaymentAccess(startup?.paymentAccess ?? []);
+  const deepLinkBuildingId = getRoomsDeepLinkBuildingId();
+  const hasDeepLinkBuilding = state.buildings.some(
+    (item) => item.id === deepLinkBuildingId
+  );
 
   state.selectedRoomBuildingId = String(
-    selection.roomBuildingId || state.buildings[0]?.id || ""
+    (hasDeepLinkBuilding ? deepLinkBuildingId : selection.roomBuildingId) ||
+      state.buildings[0]?.id ||
+      ""
   ).trim();
   state.selectedRegistryBuildingId = String(
-    selection.registryBuildingId || state.buildings[0]?.id || ""
+    (hasDeepLinkBuilding ? deepLinkBuildingId : selection.registryBuildingId) ||
+      state.buildings[0]?.id ||
+      ""
   ).trim();
   state.selectedCaretakerBuildingId = String(
     selection.caretakerBuildingId || state.selectedRegistryBuildingId || ""
   ).trim();
   state.selectedResidentsBuildingId = state.buildings.length
-    ? String(selection.residentsBuildingId || "all").trim() || "all"
+    ? String(hasDeepLinkBuilding ? deepLinkBuildingId : selection.residentsBuildingId || "all").trim() || "all"
     : "";
   state.selectedOverviewRoomBuildingId =
-    String(selection.overviewRoomBuildingId || "all").trim() || "all";
+    String(hasDeepLinkBuilding ? deepLinkBuildingId : selection.overviewRoomBuildingId || "all").trim() || "all";
   state.selectedTicketBuildingId = String(selection.ticketBuildingId || "").trim();
   state.selectedWifiPackageBuildingId = String(
     selection.wifiPackageBuildingId || ""
@@ -9521,19 +9668,73 @@ utilityRoomSummaryBodyEls.forEach((bodyEl) => {
       return;
     }
 
-    const actionButton = target.closest("[data-action='open-overview-utility-payment']");
-    if (!(actionButton instanceof HTMLButtonElement)) {
+    const button = target.closest("button[data-action]");
+    if (button instanceof HTMLButtonElement) {
+      const action = String(button.dataset.action ?? "").trim();
+      const buildingId = String(button.dataset.buildingId || "").trim();
+      const houseNumber = String(button.dataset.houseNumber || "").trim();
+
+      if (action === "open-overview-utility-payment") {
+        openOverviewUtilityPaymentModal({
+          buildingId,
+          houseNumber,
+          utilityType: button.dataset.utilityType,
+          billingMonth: button.dataset.billingMonth,
+          amountKsh: Number(button.dataset.amountKsh ?? 0),
+          statusLabel: button.dataset.statusLabel
+        });
+        return;
+      }
+
+      if (action === "open-room-account") {
+        openRoomAccountPage(buildingId, houseNumber);
+        return;
+      }
+
+      if (action === "remove-resident") {
+        const userId = String(button.dataset.userId || "").trim();
+        const residentName = String(button.dataset.residentName || "Resident").trim();
+        handleRemoveResidentClick(button, buildingId, userId, houseNumber, residentName);
+        return;
+      }
+
+      if (action === "remove-room") {
+        handleRemoveRoomClick(button, buildingId, houseNumber);
+        return;
+      }
+
       return;
     }
 
-    openOverviewUtilityPaymentModal({
-      buildingId: actionButton.dataset.buildingId,
-      houseNumber: actionButton.dataset.houseNumber,
-      utilityType: actionButton.dataset.utilityType,
-      billingMonth: actionButton.dataset.billingMonth,
-      amountKsh: Number(actionButton.dataset.amountKsh ?? 0),
-      statusLabel: actionButton.dataset.statusLabel
-    });
+    const row = target.closest("[data-action='open-room-account-row']");
+    if (!(row instanceof HTMLElement)) {
+      return;
+    }
+
+    openRoomAccountPage(row.dataset.buildingId, row.dataset.houseNumber);
+  });
+
+  bodyEl?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    if (target.closest("button[data-action]")) {
+      return;
+    }
+
+    const row = target.closest("[data-action='open-room-account-row']");
+    if (!(row instanceof HTMLElement)) {
+      return;
+    }
+
+    event.preventDefault();
+    openRoomAccountPage(row.dataset.buildingId, row.dataset.houseNumber);
   });
 });
 
@@ -9810,7 +10011,7 @@ residentsBuildingSelectEl?.addEventListener("change", () => {
     landlordTicketBuildingSelectEl.value = state.selectedResidentsBuildingId;
   }
   updateLandlordBranding();
-  void Promise.all([loadResidents(), loadLandlordTickets()]).catch((error) => {
+  void Promise.all([loadResidents(), loadLandlordTickets(), loadBills()]).catch((error) => {
     handleLandlordError(error, "Unable to load residents.");
   });
 });

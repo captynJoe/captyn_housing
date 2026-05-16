@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=20260322b" />
-    <link rel="stylesheet" href="/landlord.css?v=20260516b" />
+    <link rel="stylesheet" href="/landlord.css?v=20260516i" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -141,7 +141,7 @@
             <button
               type="button"
               data-landlord-focus-target-view="tenants"
-              data-landlord-focus-target-section="utilities-meters-section"
+              data-landlord-focus-target-section="utility-room-status-section"
             >
               Utility Status
             </button>
@@ -640,27 +640,29 @@
           <p id="residents-search-summary" class="status-text">
             Showing all rooms for the selected building filter.
           </p>
-          <div class="table-wrap">
-            <table class="resident-directory-table">
-              <thead>
-                <tr>
-                  <th>Building</th>
-                  <th>House</th>
-                  <th>Occupancy</th>
-                  <th>Resident</th>
-                  <th>Phone</th>
-                  <th>ID / Passport</th>
-                  <th>Occupation / Work</th>
-                  <th>Emergency Contact</th>
-                  <th>Billing Status</th>
-                  <th>Outstanding</th>
-                  <th>Next Due</th>
-                  <th>Action</th>
-                  <th>Room Action</th>
-                </tr>
-              </thead>
-              <tbody id="residents-body"></tbody>
-            </table>
+          <div id="utility-room-status-section" class="utility-summary-card">
+            <div class="panel-head">
+              <h3>Utility Room Status</h3>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>House</th>
+                    <th>Overdue Months</th>
+                    <th>Overdue</th>
+                    <th>Payable Months</th>
+                    <th>Payable</th>
+                    <th>Awaiting Readings</th>
+                    <th>Total Open</th>
+                    <th>Status</th>
+                    <th>Summary</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="utility-room-summary-body" data-utility-room-summary-body></tbody>
+              </table>
+            </div>
           </div>
         </section>
 
@@ -704,8 +706,7 @@
                   <th>Electric Fixed (KSh)</th>
                   <th>Room Utility Amount (KSh)</th>
                   <th>Charge Setup</th>
-                  <th>Resident Action</th>
-                  <th>Room Action</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody id="registry-body"></tbody>
@@ -719,7 +720,7 @@
           id="utilities-meters-section"
         >
           <div class="panel-head">
-            <h2>Utility Overdue + Meter Registry</h2>
+            <h2>Meter Registry</h2>
             <button id="refresh-meters" type="button">Refresh</button>
           </div>
 
@@ -743,30 +744,6 @@
             </label>
             <button type="submit">Save Meter</button>
           </form>
-
-          <div class="utility-summary-card">
-            <div class="panel-head">
-              <h3>Utility Room Status</h3>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>House</th>
-                    <th>Overdue Months</th>
-                    <th>Overdue</th>
-                    <th>Payable Months</th>
-                    <th>Payable</th>
-                    <th>Awaiting Readings</th>
-                    <th>Total Open</th>
-                    <th>Status</th>
-                    <th>Summary</th>
-                  </tr>
-                </thead>
-                <tbody id="utility-room-summary-body" data-utility-room-summary-body></tbody>
-              </table>
-            </div>
-          </div>
 
           <details class="secondary-ledger-panel">
             <summary>Registered Meters</summary>
@@ -1390,6 +1367,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=20260516b"></script>
+    <script type="module" src="/landlord.js?v=20260516h"></script>
   </body>
 </html>

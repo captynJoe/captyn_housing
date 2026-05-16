@@ -799,6 +799,10 @@ function mapUtilityDomainError(error: unknown): { status: number; message: strin
     return { status: 400, message };
   }
 
+  if (message.includes("Only manually recorded")) {
+    return { status: 400, message };
+  }
+
   if (message.includes("was not found") || message.includes("No ") && message.includes(" bills found")) {
     return { status: 404, message };
   }
@@ -4555,6 +4559,13 @@ async function bootstrap() {
         limit: 600
       })
       .sort((a, b) => (b.paidAt || b.createdAt).localeCompare(a.paidAt || a.createdAt));
+    const rentPayments = rentLedgerService
+      .listPayments({
+        buildingId: building.id,
+        houseNumber: normalizedHouseNumber
+      })
+      .sort((a, b) => (b.paidAt || b.createdAt).localeCompare(a.paidAt || a.createdAt))
+      .slice(0, 600);
     const expenditures = [...buildingExpenditures.values()]
       .filter(
         (item) =>
@@ -4730,6 +4741,7 @@ async function bootstrap() {
         overappliedBills
       },
       utilityBills,
+      rentPayments,
       utilityPayments,
       expenditures,
       tickets,
@@ -5371,6 +5383,28 @@ async function bootstrap() {
   });
 
   app.get("/landlord", async (req, res) => {
+    const token = readAdminSessionToken(req);
+    const session = adminAuthService.getSession(token);
+
+    if (session && adminAuthService.hasRole(session, "landlord")) {
+      return res.sendFile(path.join(publicDir, "landlord.html"));
+    }
+
+    if (userAccountService) {
+      const userSession = await userAccountService.getSession(readUserSessionToken(req));
+      if (
+        userSession &&
+        (hasUserRoleAtLeast(userSession.role, "landlord") ||
+          listCaretakerBuildingIdsForUser(userSession.userId).size > 0)
+      ) {
+        return res.sendFile(path.join(publicDir, "landlord.html"));
+      }
+    }
+
+    return res.redirect("/landlord/login");
+  });
+
+  app.get("/landlord/rooms/:buildingId", async (req, res) => {
     const token = readAdminSessionToken(req);
     const session = adminAuthService.getSession(token);
 
@@ -10829,7 +10863,8 @@ async function bootstrap() {
         providerReference,
         phoneNumber: parsed.phoneNumber,
         billingMonth: parsed.billingMonth,
-        paidAt: parsed.paidAt
+        paidAt: parsed.paidAt,
+        source: "manual"
       });
 
       const providerLabel =
@@ -10869,6 +10904,82 @@ async function bootstrap() {
       return next(error);
     }
   });
+
+  app.delete(
+    "/api/landlord/rent/:houseNumber/payments/:paymentId",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) {
+          return;
+        }
+
+        if (context.role === "caretaker") {
+          return res.status(403).json({
+            error: "House manager accounts cannot unrecord rent payments."
+          });
+        }
+
+        const { houseNumber } = houseNumberQuerySchema.parse({
+          houseNumber: req.params.houseNumber
+        });
+        const paymentId = String(req.params.paymentId ?? "").trim();
+        const buildingId =
+          typeof req.query.buildingId === "string"
+            ? req.query.buildingId
+            : typeof req.body?.buildingId === "string"
+              ? req.body.buildingId
+              : "";
+
+        if (!paymentId) {
+          return res.status(400).json({ error: "Payment ID is required." });
+        }
+
+        if (!buildingId.trim()) {
+          return res.status(400).json({
+            error: "Building ID is required to unrecord a rent payment."
+          });
+        }
+
+        const hasAccess = await canManageBuildingFromLandlordContext(context, buildingId);
+        if (!hasAccess) {
+          return res.status(403).json({ error: "Building access denied" });
+        }
+
+        const outcome = rentLedgerService.unrecordCashPayment({
+          buildingId,
+          houseNumber,
+          paymentId
+        });
+        if (!outcome) {
+          return res.status(404).json({ error: "Rent payment not found." });
+        }
+
+        await persistRentLedgerStateNow();
+        return res.json({
+          data: {
+            buildingId: outcome.event.buildingId,
+            houseNumber: outcome.event.houseNumber,
+            paymentId: outcome.event.id,
+            amountKsh: outcome.event.amountKsh,
+            provider: outcome.event.provider,
+            providerReference: outcome.event.providerReference,
+            applied: outcome.applied,
+            rentStatus: outcome.snapshot?.paymentStatus.toUpperCase() ?? "PENDING_PROFILE"
+          },
+          role: context.role
+        });
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message.includes("Only manually recorded")
+        ) {
+          return res.status(400).json({ error: error.message });
+        }
+        return next(error);
+      }
+    }
+  );
 
   app.get(
     "/api/landlord/buildings/:buildingId/houses/:houseNumber/agreement",
@@ -11806,10 +11917,92 @@ async function bootstrap() {
           utilityType,
           buildingId,
           houseNumber,
-          parsed
+          {
+            ...parsed,
+            source: "manual"
+          }
         );
 
         return res.status(201).json({ data, role: context.role });
+      } catch (error) {
+        const mapped = mapUtilityDomainError(error);
+        if (mapped) {
+          return res.status(mapped.status).json({ error: mapped.message });
+        }
+        return next(error);
+      }
+    }
+  );
+
+  app.delete(
+    "/api/landlord/utilities/:utilityType/:houseNumber/payments/:paymentId",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) {
+          return;
+        }
+
+        if (context.role === "caretaker") {
+          return res.status(403).json({
+            error: "House manager accounts cannot unrecord utility payments."
+          });
+        }
+
+        const utilityType = utilityTypeSchema.parse(req.params.utilityType);
+        const { houseNumber } = houseNumberQuerySchema.parse({
+          houseNumber: req.params.houseNumber
+        });
+        const paymentId = String(req.params.paymentId ?? "").trim();
+        const buildingId =
+          typeof req.query.buildingId === "string"
+            ? req.query.buildingId
+            : typeof req.body?.buildingId === "string"
+              ? req.body.buildingId
+              : "";
+
+        if (!paymentId) {
+          return res.status(400).json({ error: "Payment ID is required." });
+        }
+
+        if (!buildingId.trim()) {
+          return res.status(400).json({
+            error: "Building ID is required to unrecord a utility payment."
+          });
+        }
+
+        const hasAccess = await canManageBuildingFromLandlordContext(context, buildingId);
+        if (!hasAccess) {
+          return res.status(403).json({ error: "Building access denied" });
+        }
+
+        const outcome = utilityBillingService.unrecordCashPayment(
+          utilityType,
+          buildingId,
+          houseNumber,
+          paymentId
+        );
+        if (!outcome) {
+          return res.status(404).json({ error: "Utility payment not found." });
+        }
+
+        await persistUtilityBillingStateNow();
+        return res.json({
+          data: {
+            utilityType,
+            buildingId,
+            houseNumber,
+            paymentIds: outcome.events.map((event) => event.id),
+            amountKsh: outcome.totalAmountKsh,
+            allocations: outcome.allocations.map((item) => ({
+              paymentId: item.event.id,
+              billingMonth: item.bill.billingMonth,
+              amountKsh: item.appliedAmountKsh,
+              balanceKsh: item.bill.balanceKsh
+            }))
+          },
+          role: context.role
+        });
       } catch (error) {
         const mapped = mapUtilityDomainError(error);
         if (mapped) {
@@ -11949,10 +12142,17 @@ async function bootstrap() {
         utilityType,
         buildingId,
         houseNumber,
-        parsed
+        {
+          ...parsed,
+          source: "manual"
+        }
       );
       return res.status(201).json({ data, role: admin.role });
     } catch (error) {
+      const mapped = mapUtilityDomainError(error);
+      if (mapped) {
+        return res.status(mapped.status).json({ error: mapped.message });
+      }
       return next(error);
     }
   });

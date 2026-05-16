@@ -9,6 +9,7 @@ import type {
 export type UtilityType = UtilityTypeInput;
 export const UTILITY_LEGACY_BUILDING_ID = "__LEGACY__";
 const UTILITY_BALANCE_VISIBILITY_WINDOW_DAYS = 7;
+type UtilityPaymentSource = "manual" | "resident" | "mpesa";
 
 export interface UtilityMeterRecord {
   utilityType: UtilityType;
@@ -30,6 +31,7 @@ export interface UtilityPaymentEvent {
   paidAt: string;
   note?: string;
   createdAt: string;
+  source?: UtilityPaymentSource;
 }
 
 export interface UtilityPaymentAllocation {
@@ -82,6 +84,12 @@ export interface RecordUtilityPaymentResult {
   bill: UtilityBillSnapshot;
   allocations: UtilityPaymentAllocation[];
   totalAppliedAmountKsh: number;
+}
+
+export interface UnrecordUtilityPaymentResult {
+  events: UtilityPaymentEvent[];
+  allocations: UtilityPaymentAllocation[];
+  totalAmountKsh: number;
 }
 
 export interface UtilityPaymentPreview {
@@ -1098,7 +1106,7 @@ export class UtilityBillingService {
     utilityType: UtilityType,
     buildingId: string,
     houseNumber: string,
-    input: RecordUtilityPaymentInput
+    input: RecordUtilityPaymentInput & { source?: UtilityPaymentSource }
   ): RecordUtilityPaymentResult {
     const {
       normalizedHouse,
@@ -1157,7 +1165,8 @@ export class UtilityBillingService {
         amountKsh: appliedAmountKsh,
         paidAt,
         note: input.note?.trim() || undefined,
-        createdAt
+        createdAt,
+        source: input.source
       };
 
       bill.payments.unshift(event);
@@ -1186,6 +1195,119 @@ export class UtilityBillingService {
     return result;
   }
 
+  unrecordCashPayment(
+    utilityType: UtilityType,
+    buildingId: string,
+    houseNumber: string,
+    paymentId: string
+  ): UnrecordUtilityPaymentResult | null {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const normalizedHouse = normalizeHouseNumber(houseNumber);
+    const normalizedPaymentId = String(paymentId ?? "").trim();
+    if (!normalizedPaymentId) {
+      return null;
+    }
+
+    let targetEvent: UtilityPaymentEvent | null = null;
+    for (const bills of this.billsByLedger.values()) {
+      for (const bill of bills) {
+        if (
+          bill.utilityType !== utilityType ||
+          !buildingMatchesScope(bill.buildingId, normalizedBuildingId) ||
+          bill.houseNumber !== normalizedHouse
+        ) {
+          continue;
+        }
+
+        const event = bill.payments.find((payment) => payment.id === normalizedPaymentId);
+        if (event) {
+          targetEvent = event;
+          break;
+        }
+      }
+
+      if (targetEvent) {
+        break;
+      }
+    }
+
+    if (!targetEvent) {
+      return null;
+    }
+    if (targetEvent.provider !== "cash" && targetEvent.source !== "manual") {
+      throw new Error("Only manually recorded utility payments can be unrecorded.");
+    }
+
+    const normalizedReference = targetEvent.providerReference
+      ? normalizeProviderReference(targetEvent.providerReference)
+      : undefined;
+    const removed: UtilityPaymentEvent[] = [];
+    const touchedBills: Array<{ bill: UtilityBillRecord; event: UtilityPaymentEvent }> = [];
+    const updatedAt = nowIso();
+
+    for (const bills of this.billsByLedger.values()) {
+      for (const bill of bills) {
+        if (
+          bill.utilityType !== utilityType ||
+          !buildingMatchesScope(bill.buildingId, normalizedBuildingId) ||
+          bill.houseNumber !== normalizedHouse
+        ) {
+          continue;
+        }
+
+        for (let index = bill.payments.length - 1; index >= 0; index -= 1) {
+          const payment = bill.payments[index];
+          if (
+            !payment ||
+            (payment.provider !== "cash" && payment.source !== "manual")
+          ) {
+            continue;
+          }
+
+          const paymentReference = payment.providerReference
+            ? normalizeProviderReference(payment.providerReference)
+            : undefined;
+          const shouldRemove =
+            payment.id === normalizedPaymentId ||
+            (normalizedReference !== undefined && paymentReference === normalizedReference);
+          if (!shouldRemove) {
+            continue;
+          }
+
+          const [event] = bill.payments.splice(index, 1);
+          if (!event) {
+            continue;
+          }
+
+          bill.balanceKsh = Math.max(0, Math.round(bill.balanceKsh + event.amountKsh));
+          bill.updatedAt = updatedAt;
+          removed.push({ ...event });
+          touchedBills.push({ bill, event: { ...event } });
+        }
+      }
+    }
+
+    if (removed.length === 0) {
+      return null;
+    }
+
+    this.rebuildPaymentReferenceIndex();
+    this.emitStateChange();
+
+    return {
+      events: removed,
+      allocations: touchedBills.map(({ bill, event }) => ({
+        event,
+        bill: this.toSnapshot(bill),
+        appliedAmountKsh: event.amountKsh
+      })),
+      totalAmountKsh: removed.reduce(
+        (sum, event) => sum + Math.max(0, Number(event.amountKsh ?? 0)),
+        0
+      )
+    };
+  }
+
   private resolvePaymentContext(
     utilityType: UtilityType,
     buildingId: string,
@@ -1211,32 +1333,27 @@ export class UtilityBillingService {
     const openBills = [...mergedRecords]
       .filter((item) => item.balanceKsh > 0)
       .sort((a, b) => monthSortAsc(a.billingMonth, b.billingMonth));
-    const targetBill = input.billingMonth
+    const selectedBill = input.billingMonth
       ? mergedRecords.find((item) => item.billingMonth === input.billingMonth)
-      : openBills[0];
+      : undefined;
+    const targetBill = selectedBill ?? openBills[0];
 
     if (!targetBill) {
       throw new Error(
-        input.billingMonth
-          ? `${utilityType} bill for ${input.billingMonth} was not found.`
-          : `No outstanding ${utilityType} bill found for house ${normalizedHouse}.`
+        `No outstanding ${utilityType} bill found for house ${normalizedHouse}.`
       );
     }
 
-    const candidateBills = input.billingMonth
-      ? [targetBill, ...openBills.filter((item) => item.id !== targetBill.id)]
-      : openBills;
+    const candidateBills = openBills;
     const availableBalanceKsh = candidateBills.reduce(
       (sum, item) => sum + Math.max(0, Math.round(item.balanceKsh)),
       0
     );
-    const effectiveBill = candidateBills.find((item) => item.balanceKsh > 0) ?? targetBill;
+    const effectiveBill = candidateBills[0] ?? targetBill;
 
     if (availableBalanceKsh <= 0 || Number(effectiveBill.balanceKsh ?? 0) <= 0) {
       throw new Error(
-        input.billingMonth
-          ? `${utilityType} bill for ${targetBill.billingMonth} is already cleared.`
-          : `No outstanding ${utilityType} bill found for house ${normalizedHouse}.`
+        `No outstanding ${utilityType} bill found for house ${normalizedHouse}.`
       );
     }
 

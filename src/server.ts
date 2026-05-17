@@ -117,6 +117,7 @@ import {
   reviewLandlordAccessRequestSchema,
   landlordAddBuildingHousesSchema,
   landlordRemoveBuildingHouseSchema,
+  landlordWriteOffRoomBalanceSchema,
   landlordRemoveBuildingUserSchema,
   adminRevokeLandlordSchema,
   adminAssignBuildingLandlordSchema,
@@ -5676,17 +5677,103 @@ async function bootstrap() {
     };
   };
 
+  const buildEmptyRoomLossSettlementSummary = async (
+    buildingId: string,
+    houseNumber: string
+  ) => {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const normalizedHouseNumber = normalizeHouseNumber(houseNumber);
+    const building = await store.getBuilding(normalizedBuildingId);
+    if (!building) {
+      throw new Error("BUILDING_NOT_FOUND");
+    }
+
+    await ensureRecurringUtilityBillsCurrent("landlord.empty_room_loss_settlement", {
+      buildingId: normalizedBuildingId,
+      houseNumber: normalizedHouseNumber
+    });
+
+    const rentDue = rentLedgerService.getRentDue(
+      normalizedBuildingId,
+      normalizedHouseNumber
+    );
+    const rentOutstandingKsh = Math.max(0, Math.round(Number(rentDue?.balanceKsh ?? 0)));
+    const utilityBills = utilityBillingService
+      .listBills({
+        buildingId: normalizedBuildingId,
+        houseNumber: normalizedHouseNumber,
+        limit: 1_000
+      })
+      .filter((item) => Math.max(0, Number(item.balanceKsh ?? 0)) > 0)
+      .map((item) => ({
+        id: item.id,
+        utilityType: item.utilityType,
+        billingMonth: item.billingMonth,
+        amountKsh: Math.max(0, Math.round(Number(item.amountKsh ?? 0))),
+        balanceKsh: Math.max(0, Math.round(Number(item.balanceKsh ?? 0))),
+        dueDate: item.dueDate
+      }));
+    const utilityOutstandingKsh = utilityBills.reduce(
+      (sum, item) => sum + item.balanceKsh,
+      0
+    );
+    const roomCharges = [...buildingExpenditures.values()]
+      .filter(
+        (item) =>
+          item.buildingId === normalizedBuildingId &&
+          normalizeHouseNumber(item.houseNumber ?? "") === normalizedHouseNumber &&
+          item.chargeableToResident
+      )
+      .map((item) => ({
+        id: item.id,
+        category: item.category,
+        title: item.title,
+        amountKsh: Math.max(0, Math.round(Number(item.amountKsh ?? 0))),
+        createdAt: item.createdAt
+      }));
+    const roomChargesOutstandingKsh = roomCharges.reduce(
+      (sum, item) => sum + item.amountKsh,
+      0
+    );
+
+    return {
+      building: {
+        id: building.id,
+        name: building.name
+      },
+      resident: null,
+      tenancyId: null,
+      houseNumber: normalizedHouseNumber,
+      rentOutstandingKsh,
+      utilityOutstandingKsh,
+      roomChargesOutstandingKsh,
+      totalOutstandingKsh:
+        rentOutstandingKsh + utilityOutstandingKsh + roomChargesOutstandingKsh,
+      rent: rentDue
+        ? {
+            monthlyRentKsh: Math.max(0, Math.round(Number(rentDue.monthlyRentKsh ?? 0))),
+            dueDate: rentDue.dueDate,
+            balanceKsh: rentOutstandingKsh
+          }
+        : null,
+      utilityBills,
+      roomCharges
+    };
+  };
+
   const settleRoomBalancesForResidentRemoval = async (
     buildingId: string,
     houseNumber: string,
-    action: "write_off" | "transfer_to_resident_debt"
+    action: "write_off" | "transfer_to_resident_debt",
+    settlementNote?: string
   ) => {
     const normalizedBuildingId = normalizeBuildingId(buildingId);
     const normalizedHouseNumber = normalizeHouseNumber(houseNumber);
     const note =
-      action === "transfer_to_resident_debt"
+      settlementNote?.trim() ||
+      (action === "transfer_to_resident_debt"
         ? "Transferred to resident debt when resident was removed."
-        : "Written off when resident was removed.";
+        : "Written off when resident was removed.");
     const rent = rentLedgerService.writeOffHouseBalance(
       normalizedBuildingId,
       normalizedHouseNumber,
@@ -5756,7 +5843,23 @@ async function bootstrap() {
   };
 
   const recordResidentMoveOutSettlement = async (input: {
-    summary: Awaited<ReturnType<typeof buildResidentMoveOutSettlementSummary>>;
+    summary: {
+      building: { id: string; name: string };
+      resident?: {
+        id: string;
+        fullName: string;
+        email: string | null;
+        phone: string;
+      } | null;
+      tenancyId?: string | null;
+      houseNumber: string;
+      rentOutstandingKsh: number;
+      utilityOutstandingKsh: number;
+      roomChargesOutstandingKsh: number;
+      totalOutstandingKsh: number;
+      utilityBills?: unknown;
+      roomCharges?: unknown;
+    };
     action: "write_off" | "transfer_to_resident_debt";
     reason?: string;
     actor: {
@@ -5774,8 +5877,8 @@ async function bootstrap() {
       data: {
         buildingId: input.summary.building.id,
         houseNumber: input.summary.houseNumber,
-        residentUserId: input.summary.resident.id,
-        tenancyId: input.summary.tenancyId,
+        residentUserId: input.summary.resident?.id ?? null,
+        tenancyId: input.summary.tenancyId ?? null,
         action: input.action,
         status:
           input.action === "transfer_to_resident_debt"
@@ -5807,7 +5910,7 @@ async function bootstrap() {
       id: string;
       buildingId: string;
       houseNumber: string;
-      residentUserId: string;
+      residentUserId: string | null;
       tenancyId: string | null;
       action: string;
       status: string;
@@ -5837,7 +5940,7 @@ async function bootstrap() {
     buildingId: settlement.buildingId,
     buildingName: lookup.building?.name,
     houseNumber: settlement.houseNumber,
-    residentUserId: settlement.residentUserId,
+    residentUserId: settlement.residentUserId ?? undefined,
     residentName: lookup.resident?.fullName,
     residentPhone: lookup.resident?.phone,
     residentEmail: lookup.resident?.email,
@@ -5904,7 +6007,9 @@ async function bootstrap() {
     });
 
     const buildingIds = [...new Set(rows.map((item) => item.buildingId))];
-    const residentUserIds = [...new Set(rows.map((item) => item.residentUserId))];
+    const residentUserIds = [
+      ...new Set(rows.map((item) => item.residentUserId).filter(Boolean))
+    ] as string[];
     const [buildings, residents] = await Promise.all([
       buildingIds.length > 0
         ? Promise.all(buildingIds.map((id) => store.getBuilding(id)))
@@ -5932,7 +6037,9 @@ async function bootstrap() {
     return rows.map((item) =>
       mapResidentMoveOutSettlement(item, {
         building: buildingById.get(item.buildingId) ?? null,
-        resident: residentById.get(item.residentUserId) ?? null
+        resident: item.residentUserId
+          ? residentById.get(item.residentUserId) ?? null
+          : null
       })
     );
   };
@@ -5971,6 +6078,10 @@ async function bootstrap() {
 
     if (settlement.action !== "transfer_to_resident_debt") {
       throw new Error("SETTLEMENT_NOT_RESIDENT_DEBT");
+    }
+    const residentUserId = settlement.residentUserId;
+    if (!residentUserId) {
+      throw new Error("SETTLEMENT_RESIDENT_NOT_FOUND");
     }
     if (settlement.status === "resident_debt_closed") {
       throw new Error("RESIDENT_DEBT_ALREADY_CLOSED");
@@ -6031,7 +6142,7 @@ async function bootstrap() {
       actor,
       metadata: {
         settlementRecordId: settlement.id,
-        residentUserId: settlement.residentUserId,
+        residentUserId,
         collection
       }
     });
@@ -6039,7 +6150,7 @@ async function bootstrap() {
     const [building, resident] = await Promise.all([
       store.getBuilding(updated.buildingId),
       repositoryContext.prisma.housingUser.findUnique({
-        where: { id: updated.residentUserId },
+        where: { id: residentUserId },
         select: {
           id: true,
           fullName: true,
@@ -13995,6 +14106,142 @@ async function bootstrap() {
       return next(error);
     }
   };
+
+  app.post(
+    "/api/landlord/buildings/:buildingId/houses/:houseNumber/write-off-balances",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) {
+          return;
+        }
+
+        if (context.role === "caretaker") {
+          return res.status(403).json({
+            error: "House manager accounts cannot clear room balances."
+          });
+        }
+
+        if (!repositoryContext.prisma) {
+          return res.status(503).json({
+            error: "Room balance write-off requires database connection."
+          });
+        }
+
+        const buildingId = req.params.buildingId?.trim();
+        const houseNumberParam = req.params.houseNumber?.trim();
+        if (!buildingId || !houseNumberParam) {
+          return res
+            .status(400)
+            .json({ error: "Building id and house number are required." });
+        }
+
+        const building = await store.getBuilding(buildingId);
+        if (!building) {
+          return res.status(404).json({ error: "Building not found" });
+        }
+
+        const hasAccess = await canManageBuildingFromLandlordContext(
+          context,
+          building.id
+        );
+        if (!hasAccess) {
+          return res.status(403).json({ error: "Building access denied" });
+        }
+
+        const { houseNumber } = houseNumberQuerySchema.parse({
+          houseNumber: houseNumberParam
+        });
+        const registeredHouseNumbers = new Set(
+          (building.houseNumbers ?? []).map((item) => normalizeHouseNumber(item))
+        );
+        const visibleHouseNumbers = await listVisibleHouseNumbersForBuildings([building]);
+        if (
+          !registeredHouseNumbers.has(houseNumber) &&
+          !visibleHouseNumbers.has(houseNumber)
+        ) {
+          return res.status(404).json({ error: "Room not found" });
+        }
+
+        const activeTenancy = await repositoryContext.prisma.tenancy.findFirst({
+          where: {
+            buildingId: building.id,
+            active: true,
+            unit: {
+              houseNumber
+            }
+          },
+          select: {
+            id: true,
+            userId: true
+          }
+        });
+        if (activeTenancy) {
+          return res.status(409).json({
+            error:
+              "This room has an active resident. Use Clear Resident so the settlement is tied to that resident."
+          });
+        }
+
+        const parsed = landlordWriteOffRoomBalanceSchema.parse(req.body ?? {});
+        const summary = await buildEmptyRoomLossSettlementSummary(
+          building.id,
+          houseNumber
+        );
+        if (summary.totalOutstandingKsh <= 0) {
+          return res.json({
+            data: {
+              summary,
+              settlement: null,
+              recordId: null
+            }
+          });
+        }
+
+        const actor = actorFromLandlordContext(context);
+        const settlement = await settleRoomBalancesForResidentRemoval(
+          building.id,
+          houseNumber,
+          "write_off",
+          "Written off when empty room balance was cleared."
+        );
+        const record = await recordResidentMoveOutSettlement({
+          summary,
+          action: "write_off",
+          reason: parsed.reason || "Empty room balance cleared",
+          actor,
+          settlement
+        });
+
+        await recordRoomAccountAuditEvent({
+          buildingId: building.id,
+          houseNumber,
+          action: "room.balance.writeoff",
+          summary: `KSh ${settlement.totalSettledKsh.toLocaleString("en-US")} in pending room balances written off for empty room ${houseNumber}.`,
+          actor,
+          metadata: {
+            settlementRecordId: record?.id,
+            reason: parsed.reason,
+            rentKsh: settlement.rentSettledKsh,
+            utilityKsh: settlement.utilitySettledKsh,
+            roomChargesKsh: settlement.roomChargesSettledKsh,
+            utilityBills: settlement.utilities.bills,
+            roomChargeCount: settlement.roomChargeCount
+          }
+        });
+
+        return res.json({
+          data: {
+            summary,
+            settlement,
+            recordId: record?.id
+          }
+        });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
 
   app.delete(
     "/api/landlord/buildings/:buildingId/houses/:houseNumber",

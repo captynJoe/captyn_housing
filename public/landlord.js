@@ -6007,8 +6007,12 @@ function renderMoveOutSettlementReport(rows) {
       const row = document.createElement("tr");
       const buildingLabel =
         item.buildingName || getBuildingDisplayNameById(item.buildingId, "-");
+      const isEmptyRoomLoss = !item.residentUserId && item.action === "write_off";
       const residentName =
-        item.residentName || item.metadata?.resident?.fullName || item.residentUserId || "-";
+        item.residentName ||
+        item.metadata?.resident?.fullName ||
+        item.residentUserId ||
+        (isEmptyRoomLoss ? "Empty room" : "-");
       const residentPhone = item.residentPhone || item.metadata?.resident?.phone || "";
       const actorLabel = item.createdBy?.name
         ? `${item.createdBy.name} (${formatRoleLabel(item.createdBy.role || "-")})`
@@ -6434,18 +6438,19 @@ function renderRegistryRows(rows) {
               : ""
           }
           ${
-            !isCaretakerRole()
+            !isCaretakerRole() && !item.residentUserId
               ? `<button
                   type="button"
                   class="btn-danger"
                   data-action="remove-room"
                   data-building-id="${escapeHtml(state.selectedRegistryBuildingId)}"
                   data-house-number="${escapeHtml(houseNumber)}"
-                  ${item.residentUserId ? "disabled" : ""}
                 >
-                  ${item.residentUserId ? "Clear Resident First" : "Remove Room"}
+                  Remove Room
                 </button>`
-              : "-"
+              : isCaretakerRole()
+                ? "-"
+                : ""
           }
         </div>
       </td>
@@ -7981,6 +7986,7 @@ function renderUtilityRoomSummaryActions(item, accountBuildingId) {
       String(resident?.residentName ?? "").trim()
   );
   const residentName = String(resident?.residentName ?? "Resident").trim() || "Resident";
+  const openBalanceKsh = Math.max(0, Number(item?.totalOpenBalanceKsh ?? 0));
 
   return `
     <div class="resident-row-actions utility-room-actions">
@@ -8009,16 +8015,29 @@ function renderUtilityRoomSummaryActions(item, accountBuildingId) {
           : ""
       }
       ${
-        !isCaretakerRole()
+        !isCaretakerRole() && !hasResident && openBalanceKsh > 0
+          ? `<button
+              type="button"
+              class="btn-danger"
+              data-action="write-off-room-balance"
+              data-building-id="${escapeHtml(accountBuildingId)}"
+              data-house-number="${escapeHtml(houseNumber)}"
+              data-amount-ksh="${escapeHtml(openBalanceKsh)}"
+            >
+              Clear Balance
+            </button>`
+          : ""
+      }
+      ${
+        !isCaretakerRole() && !hasResident && openBalanceKsh <= 0
           ? `<button
               type="button"
               class="btn-danger"
               data-action="remove-room"
               data-building-id="${escapeHtml(accountBuildingId)}"
               data-house-number="${escapeHtml(houseNumber)}"
-              ${hasResident ? "disabled" : ""}
             >
-              ${hasResident ? "Clear Resident First" : "Remove Room"}
+              Remove Room
             </button>`
           : ""
       }
@@ -9550,6 +9569,57 @@ function handleRemoveRoomClick(target, buildingId, houseNumber) {
   })();
 }
 
+function handleWriteOffRoomBalanceClick(target, buildingId, houseNumber, amountKsh) {
+  if (isCaretakerRole()) {
+    showError("House manager accounts cannot clear room balances.");
+    return;
+  }
+
+  const amountLabel = formatCurrency(Math.max(0, Number(amountKsh ?? 0)));
+  const shouldProceed = window.confirm(
+    `Clear the open balance for room ${houseNumber} in ${buildingId}?\n${amountLabel} will be recorded as landlord loss and the room will stay available.`
+  );
+  if (!shouldProceed) {
+    return;
+  }
+
+  target.disabled = true;
+  clearError();
+
+  void (async () => {
+    try {
+      const response = await requestJson(
+        `/api/landlord/buildings/${encodeURIComponent(buildingId)}/houses/${encodeURIComponent(houseNumber)}/write-off-balances`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            reason: "Empty room balance cleared from housing UI"
+          })
+        }
+      );
+      const settled = Number(response?.data?.settlement?.totalSettledKsh ?? amountKsh ?? 0);
+      setStatus(
+        `Cleared room ${houseNumber}. ${formatCurrency(settled)} recorded as landlord loss.`
+      );
+      await Promise.all([
+        loadBills(),
+        loadPayments(),
+        loadRentStatus(),
+        loadRegistryRows(),
+        loadResidents(),
+        loadMoveOutSettlements()
+      ]);
+    } catch (error) {
+      handleLandlordError(error, "Failed to clear room balance.");
+    } finally {
+      target.disabled = false;
+    }
+  })();
+}
+
 function handleRemoveResidentClick(
   target,
   buildingId,
@@ -9714,6 +9784,21 @@ registryBodyEl.addEventListener("click", (event) => {
 
     handleRemoveRoomClick(target, buildingId, houseNumber);
   }
+
+  if (action === "write-off-room-balance") {
+    const buildingId = String(target.dataset.buildingId || "").trim();
+    const houseNumber = String(target.dataset.houseNumber || "").trim();
+    if (!buildingId || !houseNumber) {
+      return;
+    }
+
+    handleWriteOffRoomBalanceClick(
+      target,
+      buildingId,
+      houseNumber,
+      Number(target.dataset.amountKsh ?? 0)
+    );
+  }
 });
 
 residentsBodyEl?.addEventListener("click", (event) => {
@@ -9749,6 +9834,16 @@ residentsBodyEl?.addEventListener("click", (event) => {
 
   if (action === "remove-room") {
     handleRemoveRoomClick(target, buildingId, houseNumber);
+    return;
+  }
+
+  if (action === "write-off-room-balance") {
+    handleWriteOffRoomBalanceClick(
+      target,
+      buildingId,
+      houseNumber,
+      Number(target.dataset.amountKsh ?? 0)
+    );
     return;
   }
 
@@ -10544,6 +10639,16 @@ utilityRoomSummaryBodyEls.forEach((bodyEl) => {
 
       if (action === "remove-room") {
         handleRemoveRoomClick(button, buildingId, houseNumber);
+        return;
+      }
+
+      if (action === "write-off-room-balance") {
+        handleWriteOffRoomBalanceClick(
+          button,
+          buildingId,
+          houseNumber,
+          Number(button.dataset.amountKsh ?? 0)
+        );
         return;
       }
 

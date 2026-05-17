@@ -318,7 +318,7 @@ model ResidentMoveOutSettlement {
   id                String   @id @default(uuid())
   buildingId        String
   houseNumber       String
-  residentUserId    String
+  residentUserId    String?
   tenancyId         String?
   action            String
   status            String   @default("recorded")

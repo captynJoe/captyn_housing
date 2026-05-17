@@ -54,6 +54,10 @@ export const landlordRemoveBuildingHouseSchema = z.object({
   note: z.string().trim().max(280).optional()
 });
 
+export const landlordWriteOffRoomBalanceSchema = z.object({
+  reason: z.string().trim().max(280).optional()
+});
+
 export const moveOutSettlementActionSchema = z.enum([
   "collect_before_move_out",
   "write_off",
@@ -1106,6 +1110,9 @@ export type LandlordUtilityBulkSubmissionAuditFinalizeInput = z.infer<
 >;
 export type CreateRoomBillingHoldInput = z.infer<typeof createRoomBillingHoldSchema>;
 export type CancelRoomBillingHoldInput = z.infer<typeof cancelRoomBillingHoldSchema>;
+export type LandlordWriteOffRoomBalanceInput = z.infer<
+  typeof landlordWriteOffRoomBalanceSchema
+>;
 export type LandlordAssignCaretakerInput = z.infer<
   typeof landlordAssignCaretakerSchema
 >;

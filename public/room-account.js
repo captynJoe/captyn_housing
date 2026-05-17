@@ -37,6 +37,15 @@ const roomPaymentsBodyEl = document.getElementById("room-payments-body");
 const roomChargesBodyEl = document.getElementById("room-charges-body");
 const roomIssuesEl = document.getElementById("room-issues");
 const roomAuditEventsEl = document.getElementById("room-audit-events");
+const roomBillingHoldFormEl = document.getElementById("room-billing-hold-form");
+const roomBillingHoldScopeEl = document.getElementById("room-billing-hold-scope");
+const roomBillingHoldUtilityWrapEl = document.getElementById("room-billing-hold-utility-wrap");
+const roomBillingHoldUtilityEl = document.getElementById("room-billing-hold-utility");
+const roomBillingHoldStartEl = document.getElementById("room-billing-hold-start");
+const roomBillingHoldEndEl = document.getElementById("room-billing-hold-end");
+const roomBillingHoldReasonEl = document.getElementById("room-billing-hold-reason");
+const roomBillingHoldSubmitEl = document.getElementById("room-billing-hold-submit");
+const roomBillingHoldsEl = document.getElementById("room-billing-holds");
 
 const state = {
   buildingId: "",
@@ -196,8 +205,16 @@ function formatAuditActionLabel(value) {
       return "Utility payment unrecorded";
     case "resident.removed":
       return "Resident removed";
+    case "resident.balance.writeoff":
+      return "Balance written off";
+    case "resident.debt.transferred":
+      return "Debt transferred";
     case "room.removed":
       return "Room removed";
+    case "billing.hold.created":
+      return "Billing hold added";
+    case "billing.hold.canceled":
+      return "Billing hold resumed";
     default:
       return String(value ?? "").replaceAll(".", " ") || "Account activity";
   }
@@ -234,6 +251,21 @@ function formatExpenditureCategory(value) {
 function currentBillingMonth() {
   const now = new Date();
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function shiftBillingMonth(value, offset) {
+  const normalized = toBillingMonth(value);
+  if (!normalized) {
+    return "";
+  }
+
+  const [yearRaw, monthRaw] = normalized.split("-");
+  const shifted = new Date(Date.UTC(Number(yearRaw), Number(monthRaw) - 1 + offset, 1));
+  if (Number.isNaN(shifted.getTime())) {
+    return "";
+  }
+
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 function monthKeyFromValue(value) {
@@ -399,6 +431,19 @@ function getOccupancyLabel(room) {
 }
 
 function getBillingModeLabel(room, payload) {
+  const activeHolds = Array.isArray(payload?.billingHolds)
+    ? payload.billingHolds.filter((item) => item?.active)
+    : [];
+  if (activeHolds.some((item) => item?.scope === "all")) {
+    return "Billing paused";
+  }
+  if (activeHolds.some((item) => item?.scope === "utilities")) {
+    return "Utilities paused";
+  }
+  if (activeHolds.some((item) => item?.scope === "rent")) {
+    return "Rent paused";
+  }
+
   const hasRent =
     Number(room?.monthlyRentKsh ?? 0) > 0 ||
     Number(payload?.summary?.currentMonthRentPaidKsh ?? 0) > 0 ||
@@ -482,6 +527,9 @@ function renderChargeSetup(payload) {
   const missingMonths = Array.isArray(anomalies.possibleMissingBillingMonths)
     ? anomalies.possibleMissingBillingMonths
     : [];
+  const heldMonths = Array.isArray(anomalies.heldRecurringBillingMonths)
+    ? anomalies.heldRecurringBillingMonths
+    : [];
   const fixedParts = [];
   if (Number(setup.resolvedWaterFixedChargeKsh ?? 0) > 0) {
     fixedParts.push(`Water ${formatCurrency(setup.resolvedWaterFixedChargeKsh)}`);
@@ -523,8 +571,86 @@ function renderChargeSetup(payload) {
         ? `${description.detail} Missing recurring month${missingMonths.length === 1 ? "" : "s"}: ${missingMonths
             .map((item) => formatBillingMonth(item))
             .join(", ")}.`
+        : heldMonths.length > 0
+          ? `${description.detail} Held month${heldMonths.length === 1 ? "" : "s"}: ${heldMonths
+              .map((item) => formatBillingMonth(item))
+              .join(", ")}.`
         : description.detail;
   }
+}
+
+function canManageBillingHolds() {
+  return String(state.role ?? "").trim() !== "caretaker";
+}
+
+function formatBillingHoldScope(value, utilityType) {
+  const scope = String(value ?? "").trim();
+  const utility = String(utilityType ?? "").trim();
+  if (scope === "rent") {
+    return "Rent";
+  }
+  if (scope === "all") {
+    return "Rent + Utilities";
+  }
+  if (utility) {
+    return utilityTypeLabel(utility);
+  }
+  return "Utilities";
+}
+
+function formatBillingHoldRange(hold) {
+  const start = formatBillingMonth(hold?.startMonth);
+  const end = formatBillingMonth(hold?.endMonth);
+  return start === end ? start : `${start} to ${end}`;
+}
+
+function renderBillingHolds(payload) {
+  if (!(roomBillingHoldsEl instanceof HTMLElement)) {
+    return;
+  }
+
+  const holds = Array.isArray(payload?.billingHolds) ? payload.billingHolds : [];
+  const sorted = [...holds].sort((left, right) => {
+    if (Boolean(left?.active) !== Boolean(right?.active)) {
+      return left?.active ? -1 : 1;
+    }
+    return String(right?.createdAt ?? "").localeCompare(String(left?.createdAt ?? ""));
+  });
+
+  if (roomBillingHoldFormEl instanceof HTMLElement) {
+    roomBillingHoldFormEl.classList.toggle("hidden", !canManageBillingHolds());
+  }
+
+  if (sorted.length === 0) {
+    roomBillingHoldsEl.innerHTML =
+      '<p class="status-text">No billing holds recorded for this room.</p>';
+    return;
+  }
+
+  roomBillingHoldsEl.innerHTML = sorted
+    .map((hold) => {
+      const active = Boolean(hold?.active);
+      const scopeLabel = formatBillingHoldScope(hold?.scope, hold?.utilityType);
+      return `
+        <article class="package-card room-billing-hold-card ${active ? "is-active" : "is-canceled"}">
+          <div>
+            <p class="status-text">${escapeHtml(active ? "Active" : "Ended")} • ${escapeHtml(
+              formatBillingHoldRange(hold)
+            )}</p>
+            <h4>${escapeHtml(scopeLabel)}</h4>
+            <p class="status-text">${escapeHtml(hold?.reason || hold?.cancelReason || "No reason recorded.")}</p>
+          </div>
+          ${
+            active && canManageBillingHolds()
+              ? `<button type="button" class="ghost-btn" data-action="cancel-billing-hold" data-hold-id="${escapeHtml(
+                  hold?.id
+                )}" data-hold-label="${escapeHtml(scopeLabel)}">Resume</button>`
+              : ""
+          }
+        </article>
+      `;
+    })
+    .join("");
 }
 
 function renderProfile(payload) {
@@ -866,6 +992,7 @@ function renderRoomAccount(payload) {
   renderMetrics(payload);
   renderChargeSetup(payload);
   renderProfile(payload);
+  renderBillingHolds(payload);
   renderAnomalies(payload);
   renderUtilityBills(payload);
   renderRentPayments(payload);
@@ -873,6 +1000,151 @@ function renderRoomAccount(payload) {
   renderRoomCharges(payload);
   renderRoomAuditEvents(payload);
   renderRoomIssues(payload);
+}
+
+function syncBillingHoldUtilityVisibility() {
+  const scope = String(roomBillingHoldScopeEl?.value ?? "utilities");
+  const isUtilities = scope === "utilities";
+  if (roomBillingHoldUtilityWrapEl instanceof HTMLElement) {
+    roomBillingHoldUtilityWrapEl.classList.toggle("hidden", !isUtilities);
+  }
+  if (!isUtilities && roomBillingHoldUtilityEl instanceof HTMLSelectElement) {
+    roomBillingHoldUtilityEl.value = "";
+  }
+}
+
+function setDefaultBillingHoldMonths() {
+  const current = currentBillingMonth();
+  if (roomBillingHoldStartEl instanceof HTMLInputElement && !roomBillingHoldStartEl.value) {
+    roomBillingHoldStartEl.value = current;
+  }
+  if (roomBillingHoldEndEl instanceof HTMLInputElement && !roomBillingHoldEndEl.value) {
+    roomBillingHoldEndEl.value = current;
+  }
+}
+
+function setBillingHoldFormEnabled(enabled) {
+  [
+    roomBillingHoldScopeEl,
+    roomBillingHoldUtilityEl,
+    roomBillingHoldStartEl,
+    roomBillingHoldEndEl,
+    roomBillingHoldReasonEl,
+    roomBillingHoldSubmitEl
+  ].forEach((element) => {
+    if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element instanceof HTMLButtonElement) {
+      element.disabled = !enabled;
+    }
+  });
+}
+
+async function createBillingHold(event) {
+  event.preventDefault();
+  if (state.loading || !canManageBillingHolds()) {
+    return;
+  }
+
+  const scope = String(roomBillingHoldScopeEl?.value ?? "utilities");
+  const utilityType = String(roomBillingHoldUtilityEl?.value ?? "").trim();
+  const startMonth = toBillingMonth(roomBillingHoldStartEl?.value) || currentBillingMonth();
+  const endMonth = toBillingMonth(roomBillingHoldEndEl?.value) || startMonth;
+  const reason = String(roomBillingHoldReasonEl?.value ?? "").trim();
+
+  if (endMonth < startMonth) {
+    showError("Billing hold end month must be the same as or after the start month.");
+    return;
+  }
+
+  setLoading(true);
+  setBillingHoldFormEnabled(false);
+  showError("");
+  setStatus("Saving billing hold...");
+
+  try {
+    await requestJson(
+      `/api/landlord/buildings/${encodeURIComponent(state.buildingId)}/rooms/${encodeURIComponent(
+        state.houseNumber
+      )}/billing-holds`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          scope,
+          utilityType: scope === "utilities" && utilityType ? utilityType : undefined,
+          startMonth,
+          endMonth,
+          reason: reason || undefined
+        })
+      }
+    );
+    if (roomBillingHoldReasonEl instanceof HTMLInputElement) {
+      roomBillingHoldReasonEl.value = "";
+    }
+    await loadRoomAccount();
+    setStatus("Billing hold saved.");
+  } catch (error) {
+    if (error?.status === 401) {
+      redirectToLogin();
+      return;
+    }
+
+    const message = error instanceof Error ? error.message : "Unable to save billing hold.";
+    showError(message);
+    setStatus("Billing hold save failed.");
+  } finally {
+    setBillingHoldFormEnabled(true);
+    syncBillingHoldUtilityVisibility();
+    setLoading(false);
+  }
+}
+
+async function cancelBillingHold(button) {
+  const holdId = String(button?.dataset?.holdId ?? "").trim();
+  if (!holdId || state.loading || !canManageBillingHolds()) {
+    return;
+  }
+
+  const label = String(button?.dataset?.holdLabel ?? "").trim() || "this billing hold";
+  if (!window.confirm(`Resume billing for ${label}? Future automatic charges can post again.`)) {
+    return;
+  }
+
+  const url = `/api/landlord/buildings/${encodeURIComponent(
+    state.buildingId
+  )}/rooms/${encodeURIComponent(state.houseNumber)}/billing-holds/${encodeURIComponent(
+    holdId
+  )}/cancel`;
+
+  setLoading(true);
+  showError("");
+  button.disabled = true;
+  setStatus("Resuming billing...");
+
+  try {
+    await requestJson(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({})
+    });
+    await loadRoomAccount();
+    setStatus("Billing resumed.");
+  } catch (error) {
+    if (error?.status === 401) {
+      redirectToLogin();
+      return;
+    }
+
+    const message = error instanceof Error ? error.message : "Unable to resume billing.";
+    showError(message);
+    setStatus("Billing resume failed.");
+  } finally {
+    button.disabled = false;
+    setLoading(false);
+  }
 }
 
 async function ensureSession() {
@@ -1008,6 +1280,19 @@ function handlePaymentActionClick(event) {
   void unrecordPayment(button);
 }
 
+function handleBillingHoldClick(event) {
+  if (state.loading || !(event.target instanceof Element)) {
+    return;
+  }
+
+  const button = event.target.closest("button[data-action='cancel-billing-hold']");
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  void cancelBillingHold(button);
+}
+
 async function signOut() {
   setLoading(true);
   try {
@@ -1056,5 +1341,11 @@ roomAccountLogoutBtnEl?.addEventListener("click", () => {
 
 roomRentPaymentsBodyEl?.addEventListener("click", handlePaymentActionClick);
 roomPaymentsBodyEl?.addEventListener("click", handlePaymentActionClick);
+roomBillingHoldScopeEl?.addEventListener("change", syncBillingHoldUtilityVisibility);
+roomBillingHoldFormEl?.addEventListener("submit", createBillingHold);
+roomBillingHoldsEl?.addEventListener("click", handleBillingHoldClick);
+
+setDefaultBillingHoldMonths();
+syncBillingHoldUtilityVisibility();
 
 void init();

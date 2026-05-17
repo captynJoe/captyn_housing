@@ -104,6 +104,73 @@
   margin: 4px 0;
 }
 
+.room-billing-hold-form {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(140px, 0.8fr) minmax(120px, 0.7fr) minmax(120px, 0.7fr) minmax(220px, 1.4fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.room-billing-hold-form label {
+  display: grid;
+  gap: 5px;
+  color: rgba(16, 35, 49, 0.72);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.room-billing-hold-form input,
+.room-billing-hold-form select {
+  min-height: 38px;
+}
+
+.room-billing-hold-form button {
+  min-height: 38px;
+  width: auto;
+  min-width: 124px;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+.room-billing-holds {
+  display: grid;
+  gap: 10px;
+}
+
+.room-billing-hold-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 0;
+  border-left: 3px solid rgba(54, 93, 146, 0.36);
+}
+
+.room-billing-hold-card.is-active {
+  border-left-color: rgba(181, 120, 31, 0.68);
+  background: rgba(255, 250, 239, 0.82);
+}
+
+.room-billing-hold-card.is-canceled {
+  opacity: 0.78;
+}
+
+.room-billing-hold-card h4 {
+  margin: 4px 0;
+}
+
+.room-billing-hold-card button {
+  min-height: 32px;
+  width: auto;
+  min-width: 84px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
 @media (max-width: 960px) {
   .room-account-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -111,6 +178,15 @@
 
   .room-account-grid {
     grid-template-columns: 1fr;
+  }
+
+  .room-billing-hold-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .room-billing-hold-reason,
+  .room-billing-hold-form button {
+    grid-column: 1 / -1;
   }
 }
 
@@ -131,6 +207,15 @@
 
   .room-account-shell .resident-agreement-overview div {
     min-height: auto;
+  }
+
+  .room-billing-hold-form {
+    grid-template-columns: 1fr;
+  }
+
+  .room-billing-hold-card {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 
@@ -455,6 +540,84 @@
   border: 1px solid rgba(15, 62, 87, 0.12);
   border-radius: 18px;
   background: rgba(244, 250, 250, 0.9);
+}
+
+.move-out-report-head {
+  margin-top: 22px;
+  align-items: center;
+}
+
+.move-out-report-head h4 {
+  margin: 0;
+  color: #102331;
+  font-size: 0.98rem;
+}
+
+.move-out-report-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin: 10px 0 12px;
+}
+
+.move-out-report-summary div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(16, 35, 49, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.move-out-report-summary span,
+.move-out-report-summary small {
+  color: rgba(16, 35, 49, 0.68);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.move-out-report-summary strong {
+  overflow-wrap: anywhere;
+  color: #102331;
+  font-size: 1rem;
+}
+
+.settlement-outcome-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 122px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.settlement-outcome-pill.is-loss {
+  background: rgba(186, 43, 43, 0.12);
+  color: #8c1f1f;
+}
+
+.settlement-outcome-pill.is-debt {
+  background: rgba(243, 197, 91, 0.2);
+  color: #745606;
+}
+
+.settlement-outcome-pill.is-recorded {
+  background: rgba(62, 90, 166, 0.14);
+  color: #274388;
+}
+
+.settlement-status-text {
+  display: block;
+  margin-top: 5px;
+  color: rgba(16, 35, 49, 0.62);
+  font-size: 0.75rem;
 }
 
 .utility-raw-ledger-head {
@@ -1324,6 +1487,79 @@ button.resident-overview-card.is-active {
   min-height: 0;
 }
 
+.move-out-settlement-modal {
+  inset: 8vh max(3vw, calc((100vw - 820px) / 2));
+}
+
+.move-out-settlement-totals {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.move-out-settlement-totals div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(16, 35, 49, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 12px;
+}
+
+.move-out-settlement-totals span {
+  color: rgba(16, 35, 49, 0.68);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.move-out-settlement-totals strong {
+  color: #102331;
+  font-size: 1rem;
+}
+
+.move-out-settlement-options {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(16, 35, 49, 0.12);
+  border-radius: 10px;
+  margin: 0;
+  padding: 12px;
+}
+
+.move-out-settlement-options legend {
+  padding: 0 6px;
+  color: rgba(16, 35, 49, 0.74);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.move-out-settlement-options label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: rgba(247, 251, 251, 0.82);
+}
+
+.move-out-settlement-options input {
+  margin-top: 3px;
+}
+
+.move-out-settlement-options span {
+  display: grid;
+  gap: 2px;
+  color: rgba(16, 35, 49, 0.72);
+  font-size: 0.86rem;
+}
+
+.move-out-settlement-options strong {
+  color: #102331;
+}
+
 .utility-sheet-table-wrap {
   max-height: 58vh;
   overflow: auto;
@@ -1422,6 +1658,14 @@ button.resident-overview-card.is-active {
     padding: 12px;
   }
 
+  .move-out-settlement-totals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .move-out-report-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .utility-sheet-table-wrap {
     max-height: 52vh;
   }
@@ -1471,6 +1715,10 @@ button.resident-overview-card.is-active {
   }
 
   .registry-charge-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .move-out-report-summary {
     grid-template-columns: 1fr;
   }
 
@@ -1699,6 +1947,10 @@ button.resident-overview-card.is-active {
   .resident-agreement-overview,
   .resident-agreement-grid,
   .resident-ledger-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .move-out-settlement-totals {
     grid-template-columns: 1fr;
   }
 }

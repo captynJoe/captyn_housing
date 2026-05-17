@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=20260322b" />
-    <link rel="stylesheet" href="/landlord.css?v=20260516i" />
+    <link rel="stylesheet" href="/landlord.css?v=20260517c" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -79,6 +79,46 @@
             </div>
             <div id="room-profile-grid" class="resident-agreement-overview"></div>
           </article>
+        </div>
+      </section>
+
+      <section class="panel wide-panel">
+        <div class="panel-head">
+          <h2>Billing Holds</h2>
+        </div>
+        <form id="room-billing-hold-form" class="room-billing-hold-form">
+          <label>
+            Hold
+            <select id="room-billing-hold-scope">
+              <option value="utilities">Utilities</option>
+              <option value="rent">Rent</option>
+              <option value="all">Rent + Utilities</option>
+            </select>
+          </label>
+          <label id="room-billing-hold-utility-wrap">
+            Utility
+            <select id="room-billing-hold-utility">
+              <option value="">All utilities</option>
+              <option value="water">Water</option>
+              <option value="electricity">Electricity</option>
+            </select>
+          </label>
+          <label>
+            From
+            <input id="room-billing-hold-start" type="month" required />
+          </label>
+          <label>
+            To
+            <input id="room-billing-hold-end" type="month" required />
+          </label>
+          <label class="room-billing-hold-reason">
+            Reason
+            <input id="room-billing-hold-reason" type="text" maxlength="280" placeholder="Tenant away / landlord approved" />
+          </label>
+          <button id="room-billing-hold-submit" type="submit">Pause Billing</button>
+        </form>
+        <div id="room-billing-holds" class="room-billing-holds">
+          <p class="status-text">No billing holds loaded yet.</p>
         </div>
       </section>
 
@@ -196,6 +236,6 @@
       </section>
     </main>
 
-    <script type="module" src="/room-account.js?v=20260517b"></script>
+    <script type="module" src="/room-account.js?v=20260517e"></script>
   </body>
 </html>

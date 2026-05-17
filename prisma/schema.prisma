@@ -98,6 +98,8 @@ model Building {
   tenantAgreements         TenantAgreement[]
   tenancies                Tenancy[]
   roomAccountAuditEvents   RoomAccountAuditEvent[]
+  roomBillingHolds         RoomBillingHold[]
+  residentMoveOutSettlements ResidentMoveOutSettlement[]
   wifiPackages             BuildingWifiPackage[]
   householdMemberRegistries HouseholdMemberRegistry[]
   createdAt                DateTime            @default(now())
@@ -284,6 +286,59 @@ model RoomAccountAuditEvent {
   @@index([buildingId, houseNumber, createdAt])
   @@index([tenancyId, createdAt])
   @@index([actorUserId, createdAt])
+}
+
+model RoomBillingHold {
+  id               String   @id @default(uuid())
+  buildingId       String
+  houseNumber      String
+  scope            String
+  utilityType      String?
+  startMonth       String
+  endMonth         String
+  reason           String?
+  createdByUserId  String?
+  createdByRole    String?
+  createdByName    String?
+  canceledAt       DateTime?
+  canceledByUserId String?
+  canceledByRole   String?
+  canceledByName   String?
+  cancelReason     String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  building         Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+
+  @@index([buildingId, houseNumber, startMonth, endMonth])
+  @@index([buildingId, canceledAt])
+  @@index([createdByUserId, createdAt])
+}
+
+model ResidentMoveOutSettlement {
+  id                String   @id @default(uuid())
+  buildingId        String
+  houseNumber       String
+  residentUserId    String
+  tenancyId         String?
+  action            String
+  status            String   @default("recorded")
+  amountKsh         Int
+  rentKsh           Int      @default(0)
+  utilityKsh        Int      @default(0)
+  roomChargesKsh    Int      @default(0)
+  reason            String?
+  metadata          Json?
+  createdByUserId   String?
+  createdByRole     String?
+  createdByName     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  building          Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+
+  @@index([buildingId, houseNumber, createdAt])
+  @@index([residentUserId, createdAt])
+  @@index([tenancyId, createdAt])
+  @@index([action, createdAt])
 }
 
 model TenantAgreement {

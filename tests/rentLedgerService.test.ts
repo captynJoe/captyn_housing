@@ -317,6 +317,47 @@ test("rolls a cleared room into the next month with one month rent, not two", ()
   assert.notEqual(snapshot.dueDate, dueDate);
 });
 
+test("skips automatic rent balance increases while a billing hold matches", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.setBillingHoldPredicate((input) => input.houseNumber === "R-3");
+  service.upsertRentDue(BUILDING_A, "R-3", {
+    monthlyRentKsh: 350,
+    balanceKsh: 0,
+    dueDate
+  });
+
+  const snapshot = service.getRentDue(BUILDING_A, "R-3");
+  assert.ok(snapshot);
+  assert.equal(snapshot.balanceKsh, 0);
+  assert.notEqual(snapshot.dueDate, dueDate);
+});
+
+test("writes off room rent balance without deleting payment history", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.upsertRentDue(BUILDING_A, "W-1", {
+    monthlyRentKsh: 1000,
+    balanceKsh: 700,
+    dueDate
+  });
+  service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "W-1",
+    amountKsh: 300,
+    provider: "cash",
+    providerReference: "writeoff-history-1"
+  });
+
+  const result = service.writeOffHouseBalance(BUILDING_A, "W-1");
+  assert.ok(result);
+  assert.equal(result.previousBalanceKsh, 400);
+  assert.equal(result.snapshot.balanceKsh, 0);
+  assert.equal(result.snapshot.payments.length, 1);
+});
+
 test("generates D-3 reminder once per due cycle per building and house", () => {
   const service = new RentLedgerService();
 

@@ -249,6 +249,25 @@ const overviewUtilityPaymentHelpEl = document.getElementById(
 const overviewUtilityPaymentSubmitBtnEl = document.getElementById(
   "overview-utility-payment-submit-btn"
 );
+const moveOutSettlementBackdropEl = document.getElementById(
+  "move-out-settlement-backdrop"
+);
+const moveOutSettlementModalEl = document.getElementById("move-out-settlement-modal");
+const closeMoveOutSettlementBtnEl = document.getElementById(
+  "close-move-out-settlement-btn"
+);
+const moveOutSettlementFormEl = document.getElementById("move-out-settlement-form");
+const moveOutSettlementSummaryEl = document.getElementById(
+  "move-out-settlement-summary"
+);
+const moveOutSettlementTotalsEl = document.getElementById(
+  "move-out-settlement-totals"
+);
+const moveOutSettlementNoteEl = document.getElementById("move-out-settlement-note");
+const moveOutSettlementHelpEl = document.getElementById("move-out-settlement-help");
+const moveOutSettlementSubmitBtnEl = document.getElementById(
+  "move-out-settlement-submit-btn"
+);
 
 const utilityMeterFormEl = document.getElementById("utility-meter-form");
 const utilityMeterTypeEl = document.getElementById("utility-meter-type");
@@ -302,6 +321,13 @@ const expenditureChargeableEl = document.getElementById("expenditure-chargeable"
 const expenditureSubmitBtnEl = document.getElementById("expenditure-submit-btn");
 const expendituresBodyEl = document.getElementById("expenditures-body");
 const refreshExpendituresBtnEl = document.getElementById("refresh-expenditures");
+const moveOutSettlementReportSummaryEl = document.getElementById(
+  "move-out-settlement-report-summary"
+);
+const moveOutSettlementsBodyEl = document.getElementById("move-out-settlements-body");
+const refreshMoveOutSettlementsBtnEl = document.getElementById(
+  "refresh-move-out-settlements"
+);
 
 const landlordErrorEl = document.getElementById("landlord-error");
 
@@ -354,7 +380,9 @@ const state = {
   registryMonthlyCombinedCharge: null,
   utilityRoomSummaryByKey: new Map(),
   payments: [],
-  expenditures: []
+  expenditures: [],
+  moveOutSettlements: [],
+  moveOutSettlement: null
 };
 
 const BUILDING_PHOTO_LIMIT = 1;
@@ -1034,6 +1062,36 @@ function showOverviewUtilityPaymentModal() {
 
   if (overviewUtilityPaymentBackdropEl instanceof HTMLElement) {
     overviewUtilityPaymentBackdropEl.classList.remove("hidden");
+  }
+}
+
+function closeMoveOutSettlementModal() {
+  if (moveOutSettlementModalEl instanceof HTMLElement) {
+    moveOutSettlementModalEl.classList.add("hidden");
+  }
+
+  if (moveOutSettlementBackdropEl instanceof HTMLElement) {
+    moveOutSettlementBackdropEl.classList.add("hidden");
+  }
+
+  if (moveOutSettlementFormEl instanceof HTMLFormElement) {
+    moveOutSettlementFormEl.reset();
+    delete moveOutSettlementFormEl.dataset.buildingId;
+    delete moveOutSettlementFormEl.dataset.userId;
+    delete moveOutSettlementFormEl.dataset.houseNumber;
+    delete moveOutSettlementFormEl.dataset.residentName;
+  }
+
+  state.moveOutSettlement = null;
+}
+
+function showMoveOutSettlementModal() {
+  if (moveOutSettlementModalEl instanceof HTMLElement) {
+    moveOutSettlementModalEl.classList.remove("hidden");
+  }
+
+  if (moveOutSettlementBackdropEl instanceof HTMLElement) {
+    moveOutSettlementBackdropEl.classList.remove("hidden");
   }
 }
 
@@ -4758,6 +4816,8 @@ async function requestJson(url, options = {}) {
       issueMessage ?? payload.error ?? `Request failed (${response.status})`
     );
     err.status = response.status;
+    err.payload = payload;
+    err.data = payload.data;
     throw err;
   }
 
@@ -5829,6 +5889,223 @@ function renderExpenditures(rows) {
   });
 }
 
+function formatSettlementAction(action) {
+  switch (String(action ?? "").trim()) {
+    case "write_off":
+      return "Written off loss";
+    case "transfer_to_resident_debt":
+      return "Resident debt";
+    case "collect_before_move_out":
+      return "Collect first";
+    default:
+      return String(action ?? "Recorded").replaceAll("_", " ") || "Recorded";
+  }
+}
+
+function formatSettlementStatus(status) {
+  switch (String(status ?? "").trim()) {
+    case "written_off_loss":
+      return "Loss recorded";
+    case "resident_debt_open":
+      return "Open debt";
+    case "resident_debt_closed":
+      return "Debt closed";
+    default:
+      return String(status ?? "recorded").replaceAll("_", " ") || "Recorded";
+  }
+}
+
+function getSettlementOutcomeClass(action) {
+  if (action === "write_off") {
+    return "is-loss";
+  }
+  if (action === "transfer_to_resident_debt") {
+    return "is-debt";
+  }
+  return "is-recorded";
+}
+
+function renderMoveOutSettlementReport(rows) {
+  const reportRows = Array.isArray(rows) ? rows : [];
+  const lossRows = reportRows.filter((item) => item?.action === "write_off");
+  const debtRows = reportRows.filter(
+    (item) => item?.action === "transfer_to_resident_debt"
+  );
+  const openDebtRows = debtRows.filter((item) => item?.status !== "resident_debt_closed");
+  const closedDebtRows = debtRows.filter((item) => item?.status === "resident_debt_closed");
+  const sumBy = (items, field) =>
+    items.reduce((sum, item) => sum + Math.max(0, Number(item?.[field] ?? 0)), 0);
+  const totalLossKsh = sumBy(lossRows, "amountKsh");
+  const totalOpenDebtKsh = sumBy(openDebtRows, "amountKsh");
+  const totalClosedDebtKsh = sumBy(closedDebtRows, "amountKsh");
+  const totalRentKsh = sumBy(reportRows, "rentKsh");
+  const totalUtilityKsh = sumBy(reportRows, "utilityKsh");
+  const totalRoomChargeKsh = sumBy(reportRows, "roomChargesKsh");
+
+  if (moveOutSettlementReportSummaryEl instanceof HTMLElement) {
+    const cards = [
+      {
+        label: "Written Off Loss",
+        value: formatCurrency(totalLossKsh),
+        detail: `${lossRows.length} settlement${lossRows.length === 1 ? "" : "s"}`
+      },
+      {
+        label: "Open Resident Debt",
+        value: formatCurrency(totalOpenDebtKsh),
+        detail: `${openDebtRows.length} account${openDebtRows.length === 1 ? "" : "s"}`
+      },
+      {
+        label: "Collected Debt",
+        value: formatCurrency(totalClosedDebtKsh),
+        detail: `${closedDebtRows.length} account${closedDebtRows.length === 1 ? "" : "s"}`
+      },
+      {
+        label: "Settled Accounts",
+        value: String(reportRows.length),
+        detail: `Rent ${formatCurrency(totalRentKsh)}`
+      },
+      {
+        label: "Utilities + Charges",
+        value: formatCurrency(totalUtilityKsh + totalRoomChargeKsh),
+        detail: `Utilities ${formatCurrency(totalUtilityKsh)} | Charges ${formatCurrency(totalRoomChargeKsh)}`
+      }
+    ];
+
+    moveOutSettlementReportSummaryEl.innerHTML = cards
+      .map(
+        (card) => `
+          <div>
+            <span>${escapeHtml(card.label)}</span>
+            <strong>${escapeHtml(card.value)}</strong>
+            <small>${escapeHtml(card.detail)}</small>
+          </div>
+        `
+      )
+      .join("");
+  }
+
+  if (!(moveOutSettlementsBodyEl instanceof HTMLElement)) {
+    return;
+  }
+
+  moveOutSettlementsBodyEl.replaceChildren();
+  if (reportRows.length === 0) {
+    const row = document.createElement("tr");
+    row.innerHTML =
+      '<td colspan="12">No move-out loss or resident debt has been recorded for this building.</td>';
+    moveOutSettlementsBodyEl.append(row);
+    return;
+  }
+
+  [...reportRows]
+    .sort(
+      (a, b) =>
+        new Date(b?.createdAt ?? 0).getTime() -
+        new Date(a?.createdAt ?? 0).getTime()
+    )
+    .forEach((item) => {
+      const row = document.createElement("tr");
+      const buildingLabel =
+        item.buildingName || getBuildingDisplayNameById(item.buildingId, "-");
+      const residentName =
+        item.residentName || item.metadata?.resident?.fullName || item.residentUserId || "-";
+      const residentPhone = item.residentPhone || item.metadata?.resident?.phone || "";
+      const actorLabel = item.createdBy?.name
+        ? `${item.createdBy.name} (${formatRoleLabel(item.createdBy.role || "-")})`
+        : formatRoleLabel(item.createdBy?.role || "-");
+      const outcomeClass = getSettlementOutcomeClass(item.action);
+      const canCollectDebt =
+        !isCaretakerRole() &&
+        item.action === "transfer_to_resident_debt" &&
+        item.status === "resident_debt_open";
+      const actionCell = canCollectDebt
+        ? `<button type="button" class="ghost-btn" data-action="collect-resident-debt" data-settlement-id="${escapeHtml(
+            item.id
+          )}" data-resident-name="${escapeHtml(residentName)}" data-amount-ksh="${escapeHtml(
+            String(Math.max(0, Number(item.amountKsh ?? 0)))
+          )}">Record Collection</button>`
+        : "-";
+
+      row.innerHTML = `
+        <td>${formatDateTime(item.createdAt)}</td>
+        <td>${escapeHtml(buildingLabel)}</td>
+        <td>${escapeHtml(item.houseNumber ?? "-")}</td>
+        <td>
+          <strong>${escapeHtml(residentName)}</strong>
+          ${residentPhone ? `<br /><small>${escapeHtml(residentPhone)}</small>` : ""}
+        </td>
+        <td>
+          <span class="settlement-outcome-pill ${escapeHtml(outcomeClass)}">${escapeHtml(
+            formatSettlementAction(item.action)
+          )}</span>
+          <small class="settlement-status-text">${escapeHtml(
+            formatSettlementStatus(item.status)
+          )}</small>
+        </td>
+        <td>${escapeHtml(formatCurrency(item.amountKsh))}</td>
+        <td>${escapeHtml(formatCurrency(item.rentKsh))}</td>
+        <td>${escapeHtml(formatCurrency(item.utilityKsh))}</td>
+        <td>${escapeHtml(formatCurrency(item.roomChargesKsh))}</td>
+        <td>${escapeHtml(actorLabel || "-")}</td>
+        <td>${escapeHtml(item.reason || "-")}</td>
+        <td>${actionCell}</td>
+      `;
+      moveOutSettlementsBodyEl.append(row);
+    });
+}
+
+function handleCollectResidentDebtClick(target, settlementId, residentName, amountKsh) {
+  if (isCaretakerRole()) {
+    showError("House manager accounts cannot close resident debt.");
+    return;
+  }
+
+  if (!settlementId) {
+    showError("Settlement details are missing. Refresh and try again.");
+    return;
+  }
+
+  const amount = Math.max(0, Number(amountKsh ?? 0));
+  const shouldProceed = window.confirm(
+    `Record ${formatCurrency(amount)} collected from ${residentName || "this resident"}?`
+  );
+  if (!shouldProceed) {
+    return;
+  }
+
+  target.disabled = true;
+  clearError();
+
+  void (async () => {
+    try {
+      const response = await requestJson(
+        `/api/landlord/move-out-settlements/${encodeURIComponent(settlementId)}/collect`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            amountKsh: Math.round(amount)
+          })
+        }
+      );
+
+      const collected = Number(response?.data?.amountKsh ?? amount);
+      setStatus(
+        `${formatCurrency(collected)} resident debt marked as collected for ${
+          response?.data?.residentName || residentName || "resident"
+        }.`
+      );
+      await loadMoveOutSettlements();
+    } catch (error) {
+      handleLandlordError(error, "Failed to record resident debt collection.");
+    } finally {
+      target.disabled = false;
+    }
+  })();
+}
+
 function handleDeleteExpenditureClick(target, expenditureId, title) {
   if (isCaretakerRole()) {
     showError("House manager accounts cannot delete expenditure entries.");
@@ -5867,6 +6144,169 @@ function handleDeleteExpenditureClick(target, expenditureId, title) {
       target.disabled = false;
     }
   })();
+}
+
+function getMoveOutSettlementAction() {
+  const selected = moveOutSettlementFormEl?.querySelector(
+    'input[name="moveOutSettlementAction"]:checked'
+  );
+  return selected instanceof HTMLInputElement
+    ? selected.value
+    : "write_off";
+}
+
+function setMoveOutSettlementLoading(loading) {
+  const total = Number(state.moveOutSettlement?.summary?.totalOutstandingKsh ?? 0);
+  [moveOutSettlementSubmitBtnEl, moveOutSettlementNoteEl].forEach((element) => {
+    if (element instanceof HTMLButtonElement || element instanceof HTMLInputElement) {
+      element.disabled = loading;
+    }
+  });
+
+  document.querySelectorAll('input[name="moveOutSettlementAction"]').forEach((element) => {
+    if (!(element instanceof HTMLInputElement)) {
+      return;
+    }
+
+    element.disabled =
+      loading ||
+      (total <= 0 &&
+        (element.value === "write_off" ||
+          element.value === "transfer_to_resident_debt"));
+  });
+}
+
+function updateMoveOutSettlementHelp() {
+  const summary = state.moveOutSettlement?.summary;
+  const total = Number(summary?.totalOutstandingKsh ?? 0);
+  const action = getMoveOutSettlementAction();
+  if (moveOutSettlementHelpEl instanceof HTMLElement) {
+    if (action === "collect_before_move_out" && total > 0) {
+      moveOutSettlementHelpEl.textContent =
+        "Resident access will stay active so the landlord can collect first.";
+    } else if (action === "transfer_to_resident_debt") {
+      moveOutSettlementHelpEl.textContent =
+        "The room will clear, and the balance will be kept against this resident.";
+    } else if (action === "write_off") {
+      moveOutSettlementHelpEl.textContent =
+        "The room will clear, and the unpaid amount will be recorded as a landlord loss.";
+    } else {
+      moveOutSettlementHelpEl.textContent =
+        "No balance is pending, so the resident can be cleared now.";
+    }
+  }
+
+  if (moveOutSettlementSubmitBtnEl instanceof HTMLButtonElement) {
+    moveOutSettlementSubmitBtnEl.textContent =
+      action === "collect_before_move_out" && total > 0
+        ? "Keep Active Until Paid"
+        : "Confirm Settlement";
+  }
+}
+
+function renderMoveOutSettlement(summary, context) {
+  const total = Number(summary?.totalOutstandingKsh ?? 0);
+  state.moveOutSettlement = {
+    ...context,
+    summary
+  };
+
+  if (moveOutSettlementFormEl instanceof HTMLFormElement) {
+    moveOutSettlementFormEl.dataset.buildingId = context.buildingId;
+    moveOutSettlementFormEl.dataset.userId = context.userId;
+    moveOutSettlementFormEl.dataset.houseNumber = summary?.houseNumber || context.houseNumber;
+    moveOutSettlementFormEl.dataset.residentName =
+      summary?.resident?.fullName || context.residentName;
+  }
+
+  if (moveOutSettlementSummaryEl instanceof HTMLElement) {
+    moveOutSettlementSummaryEl.textContent = `${summary?.resident?.fullName || context.residentName} • ${
+      summary?.building?.name || getBuildingDisplayNameById(context.buildingId)
+    } • House ${summary?.houseNumber || context.houseNumber}`;
+  }
+
+  if (moveOutSettlementTotalsEl instanceof HTMLElement) {
+    const totals = [
+      ["Rent", summary?.rentOutstandingKsh ?? 0],
+      ["Utilities", summary?.utilityOutstandingKsh ?? 0],
+      ["Room Charges", summary?.roomChargesOutstandingKsh ?? 0],
+      ["Total Pending", total]
+    ];
+    moveOutSettlementTotalsEl.innerHTML = totals
+      .map(
+        ([label, amount]) => `
+          <div>
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(formatCurrency(amount))}</strong>
+          </div>
+        `
+      )
+      .join("");
+  }
+
+  const collectInput = moveOutSettlementFormEl?.querySelector(
+    'input[name="moveOutSettlementAction"][value="collect_before_move_out"]'
+  );
+  const writeOffInput = moveOutSettlementFormEl?.querySelector(
+    'input[name="moveOutSettlementAction"][value="write_off"]'
+  );
+  const transferInput = moveOutSettlementFormEl?.querySelector(
+    'input[name="moveOutSettlementAction"][value="transfer_to_resident_debt"]'
+  );
+
+  if (collectInput instanceof HTMLInputElement) {
+    collectInput.checked = total <= 0;
+  }
+  if (writeOffInput instanceof HTMLInputElement) {
+    writeOffInput.checked = total > 0;
+    writeOffInput.disabled = total <= 0;
+  }
+  if (transferInput instanceof HTMLInputElement) {
+    transferInput.disabled = total <= 0;
+  }
+
+  updateMoveOutSettlementHelp();
+}
+
+async function openMoveOutSettlement(target, context) {
+  clearError();
+  state.moveOutSettlement = {
+    ...context,
+    summary: null
+  };
+
+  if (moveOutSettlementSummaryEl instanceof HTMLElement) {
+    moveOutSettlementSummaryEl.textContent = "Loading settlement...";
+  }
+  if (moveOutSettlementTotalsEl instanceof HTMLElement) {
+    moveOutSettlementTotalsEl.innerHTML = "";
+  }
+  if (moveOutSettlementNoteEl instanceof HTMLInputElement) {
+    moveOutSettlementNoteEl.value = "";
+  }
+
+  showMoveOutSettlementModal();
+  setMoveOutSettlementLoading(true);
+  if (target instanceof HTMLButtonElement) {
+    target.disabled = true;
+  }
+
+  try {
+    const response = await requestJson(
+      `/api/landlord/buildings/${encodeURIComponent(context.buildingId)}/users/${encodeURIComponent(
+        context.userId
+      )}/move-out-settlement`
+    );
+    renderMoveOutSettlement(response?.data ?? {}, context);
+  } catch (error) {
+    closeMoveOutSettlementModal();
+    handleLandlordError(error, "Unable to load move-out settlement.");
+  } finally {
+    setMoveOutSettlementLoading(false);
+    if (target instanceof HTMLButtonElement) {
+      target.disabled = false;
+    }
+  }
 }
 
 function renderRegistryRows(rows) {
@@ -8152,6 +8592,24 @@ async function loadExpenditures() {
   renderExpenditures(state.expenditures);
 }
 
+async function loadMoveOutSettlements() {
+  const buildingId = getSelectedUtilityBuildingId();
+  try {
+    const payload = await requestJson(
+      withBuildingQuery("/api/landlord/move-out-settlements", buildingId, "limit=500")
+    );
+    state.moveOutSettlements = payload.data ?? [];
+    renderMoveOutSettlementReport(state.moveOutSettlements);
+  } catch (error) {
+    if (isMissingRouteError(error)) {
+      state.moveOutSettlements = [];
+      renderMoveOutSettlementReport(state.moveOutSettlements);
+      return;
+    }
+    throw error;
+  }
+}
+
 async function activateBuilding(buildingId, options = {}) {
   const normalizedBuildingId = String(buildingId ?? "").trim();
   if (!normalizedBuildingId) {
@@ -8172,6 +8630,7 @@ async function activateBuilding(buildingId, options = {}) {
     loadBills(),
     loadPayments(),
     loadExpenditures(),
+    loadMoveOutSettlements(),
     loadCaretakerAccessRequests(),
     loadCaretakers(),
     loadLandlordTickets(),
@@ -8246,6 +8705,9 @@ function applyLandlordStartupData(startup) {
   setBills(Array.isArray(startup?.bills) ? startup.bills : []);
   state.payments = Array.isArray(startup?.payments) ? startup.payments : [];
   state.expenditures = Array.isArray(startup?.expenditures) ? startup.expenditures : [];
+  state.moveOutSettlements = Array.isArray(startup?.moveOutSettlements)
+    ? startup.moveOutSettlements
+    : [];
   state.wifiPackages = Array.isArray(startup?.wifiPackages) ? startup.wifiPackages : [];
   state.wifiPackagesUnavailableReason =
     typeof startup?.wifiPackagesUnavailableReason === "string"
@@ -8279,6 +8741,7 @@ function applyLandlordStartupData(startup) {
   renderUtilityBills(state.bills);
   renderUtilityPayments(state.payments);
   renderExpenditures(state.expenditures);
+  renderMoveOutSettlementReport(state.moveOutSettlements);
   renderMetrics();
   updateLandlordBranding();
 
@@ -8306,7 +8769,8 @@ async function loadDataLegacy() {
       loadMeters(),
       loadBills(),
       loadPayments(),
-      loadExpenditures()
+      loadExpenditures(),
+      loadMoveOutSettlements()
     ]);
     await loadRegistryRows();
     await loadResidents();
@@ -9103,51 +9567,112 @@ function handleRemoveResidentClick(
     return;
   }
 
-  const shouldProceed = window.confirm(
-    `Clear resident ${residentName} from house ${houseNumber} in building ${buildingId}?\nThis keeps the house and meter readings but revokes resident access.`
-  );
-  if (!shouldProceed) {
+  void openMoveOutSettlement(target, {
+    buildingId,
+    userId,
+    houseNumber,
+    residentName
+  });
+}
+
+async function submitMoveOutSettlement(event) {
+  event.preventDefault();
+  const summary = state.moveOutSettlement?.summary;
+  if (!summary) {
+    showError("Move-out settlement is still loading.");
     return;
   }
 
-  const noteRaw = window.prompt(
-    "Optional note for this removal (saved on pending applications). Leave blank to skip."
-  );
-  const note =
-    noteRaw == null || String(noteRaw).trim().length === 0
-      ? undefined
-      : String(noteRaw).trim();
+  const action = getMoveOutSettlementAction();
+  const total = Number(summary.totalOutstandingKsh ?? 0);
+  const buildingId = String(moveOutSettlementFormEl?.dataset.buildingId ?? "").trim();
+  const userId = String(moveOutSettlementFormEl?.dataset.userId ?? "").trim();
+  const houseNumber = normalizeHouse(moveOutSettlementFormEl?.dataset.houseNumber);
+  const residentName =
+    String(moveOutSettlementFormEl?.dataset.residentName ?? "").trim() || "Resident";
+  const note = String(moveOutSettlementNoteEl?.value ?? "").trim() || undefined;
 
-  target.disabled = true;
+  if (!buildingId || !userId) {
+    showError("Move-out settlement details are missing. Refresh and try again.");
+    return;
+  }
+
+  if (action === "collect_before_move_out" && total > 0) {
+    closeMoveOutSettlementModal();
+    setStatus(
+      `${residentName} remains active in house ${houseNumber}. Collect ${formatCurrency(
+        total
+      )} before clearing the resident.`
+    );
+    return;
+  }
+
+  setMoveOutSettlementLoading(true);
   clearError();
 
-  void (async () => {
-    try {
-      await requestJson(
-        `/api/landlord/buildings/${encodeURIComponent(buildingId)}/users/${encodeURIComponent(userId)}/remove`,
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json"
-          },
-          body: JSON.stringify({
-            confirmUserId: userId,
-            confirmationText: "REMOVE",
-            note
-          })
-        }
-      );
+  try {
+    const response = await requestJson(
+      `/api/landlord/buildings/${encodeURIComponent(buildingId)}/users/${encodeURIComponent(
+        userId
+      )}/remove`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          confirmUserId: userId,
+          confirmationText: "REMOVE",
+          note,
+          settlementAction: action,
+          settlementReason: note,
+          confirmedOutstandingKsh: Math.max(0, Math.round(total))
+        })
+      }
+    );
 
+    const settled = Number(response?.data?.settlement?.result?.totalSettledKsh ?? 0);
+    if (action === "transfer_to_resident_debt" && settled > 0) {
+      setStatus(
+        `Removed ${residentName} from house ${houseNumber}. ${formatCurrency(
+          settled
+        )} transferred to resident debt.`
+      );
+    } else if (action === "write_off" && settled > 0) {
+      setStatus(
+        `Removed ${residentName} from house ${houseNumber}. ${formatCurrency(
+          settled
+        )} written off.`
+      );
+    } else {
       setStatus(`Removed ${residentName} from house ${houseNumber}.`);
-      await Promise.all([loadApplications(), loadBuildings()]);
-      await loadRegistryRows();
-      await loadResidents();
-    } catch (error) {
-      handleLandlordError(error, "Failed to remove resident user.");
-    } finally {
-      target.disabled = false;
     }
-  })();
+
+    closeMoveOutSettlementModal();
+    await Promise.all([
+      loadApplications(),
+      loadBuildings(),
+      loadBills(),
+      loadPayments(),
+      loadRentStatus(),
+      loadExpenditures(),
+      loadMoveOutSettlements()
+    ]);
+    await loadRegistryRows();
+    await loadResidents();
+  } catch (error) {
+    if (error?.status === 409 && error?.data) {
+      renderMoveOutSettlement(error.data, {
+        buildingId,
+        userId,
+        houseNumber,
+        residentName
+      });
+    }
+    handleLandlordError(error, "Failed to settle move-out.");
+  } finally {
+    setMoveOutSettlementLoading(false);
+  }
 }
 
 registryBodyEl.addEventListener("click", (event) => {
@@ -9395,6 +9920,8 @@ utilitySheetBuildingSelectEl?.addEventListener("change", () => {
     loadBills(),
     loadRegistryReadingBills(),
     loadPayments(),
+    loadExpenditures(),
+    loadMoveOutSettlements(),
     loadUtilitySheetBuildingConfiguration(),
     loadUtilitySheetMonthlyCombinedCharge()
   ]).catch((error) => {
@@ -9428,6 +9955,7 @@ registryBuildingSelectEl.addEventListener("change", () => {
     loadRegistryReadingBills(),
     loadPayments(),
     loadExpenditures(),
+    loadMoveOutSettlements(),
     loadCaretakerAccessRequests(),
     loadCaretakers(),
     loadResidents(),
@@ -9447,6 +9975,7 @@ registryLoadBtnEl.addEventListener("click", () => {
     loadRegistryReadingBills(),
     loadPayments(),
     loadExpenditures(),
+    loadMoveOutSettlements(),
     loadCaretakerAccessRequests(),
     loadCaretakers()
   ]).catch(
@@ -10527,6 +11056,30 @@ refreshExpendituresBtnEl?.addEventListener("click", () => {
   });
 });
 
+refreshMoveOutSettlementsBtnEl?.addEventListener("click", () => {
+  void loadMoveOutSettlements().catch((error) => {
+    handleLandlordError(error, "Unable to refresh move-out settlement report.");
+  });
+});
+
+moveOutSettlementsBodyEl?.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  if (target.dataset.action !== "collect-resident-debt") {
+    return;
+  }
+
+  handleCollectResidentDebtClick(
+    target,
+    String(target.dataset.settlementId || "").trim(),
+    String(target.dataset.residentName || "Resident").trim(),
+    Number(target.dataset.amountKsh ?? 0)
+  );
+});
+
 expendituresBodyEl?.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLButtonElement)) {
@@ -10622,6 +11175,27 @@ expenditureFormEl?.addEventListener("submit", (event) => {
       }
     }
   })();
+});
+
+closeMoveOutSettlementBtnEl?.addEventListener("click", () => {
+  closeMoveOutSettlementModal();
+});
+
+moveOutSettlementBackdropEl?.addEventListener("click", () => {
+  closeMoveOutSettlementModal();
+});
+
+moveOutSettlementFormEl?.addEventListener("change", (event) => {
+  if (
+    event.target instanceof HTMLInputElement &&
+    event.target.name === "moveOutSettlementAction"
+  ) {
+    updateMoveOutSettlementHelp();
+  }
+});
+
+moveOutSettlementFormEl?.addEventListener("submit", (event) => {
+  void submitMoveOutSettlement(event);
 });
 
 refreshAllBtnEl.addEventListener("click", () => {

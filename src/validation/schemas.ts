@@ -54,10 +54,19 @@ export const landlordRemoveBuildingHouseSchema = z.object({
   note: z.string().trim().max(280).optional()
 });
 
+export const moveOutSettlementActionSchema = z.enum([
+  "collect_before_move_out",
+  "write_off",
+  "transfer_to_resident_debt"
+]);
+
 export const landlordRemoveBuildingUserSchema = z.object({
   confirmUserId: nonEmptyString.max(120).optional(),
   confirmationText: z.literal("REMOVE").optional(),
-  note: z.string().trim().max(280).optional()
+  note: z.string().trim().max(280).optional(),
+  settlementAction: moveOutSettlementActionSchema,
+  settlementReason: z.string().trim().max(280).optional(),
+  confirmedOutstandingKsh: z.number().int().min(0).max(5_000_000).optional()
 });
 
 export const adminRevokeLandlordSchema = z.object({
@@ -939,6 +948,46 @@ export const recordAdminRentPaymentSchema = z.object({
   phoneNumber: kenyaPhoneSchema.optional()
 });
 
+export const residentDebtCollectionSchema = z.object({
+  amountKsh: z.number().positive().max(5_000_000).optional(),
+  provider: utilityPaymentProviderSchema.default("cash"),
+  providerReference: nonEmptyString.max(120).optional(),
+  paidAt: z.string().datetime().optional(),
+  note: z.string().trim().max(280).optional()
+});
+
+export const roomBillingHoldScopeSchema = z.enum(["rent", "utilities", "all"]);
+
+export const createRoomBillingHoldSchema = z
+  .object({
+    scope: roomBillingHoldScopeSchema,
+    utilityType: utilityTypeSchema.optional(),
+    startMonth: billingMonthSchema,
+    endMonth: billingMonthSchema,
+    reason: z.string().trim().min(3).max(280).optional()
+  })
+  .superRefine((value, ctx) => {
+    if (value.endMonth < value.startMonth) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["endMonth"],
+        message: "End month must be the same as or after the start month."
+      });
+    }
+
+    if (value.utilityType && value.scope !== "utilities") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["utilityType"],
+        message: "Specific utility type can only be used with a utilities hold."
+      });
+    }
+  });
+
+export const cancelRoomBillingHoldSchema = z.object({
+  reason: z.string().trim().max(280).optional()
+});
+
 export const rentPaymentMethodSchema = z.enum(["mpesa"]);
 
 export const initializeRentMpesaPaymentSchema = z.object({
@@ -1000,6 +1049,9 @@ export type UpsertUtilityMeterInput = z.infer<typeof upsertUtilityMeterSchema>;
 export type CreateUtilityBillInput = z.infer<typeof createUtilityBillSchema>;
 export type RecordUtilityPaymentInput = z.infer<typeof recordUtilityPaymentSchema>;
 export type RecordAdminRentPaymentInput = z.infer<typeof recordAdminRentPaymentSchema>;
+export type ResidentDebtCollectionInput = z.infer<
+  typeof residentDebtCollectionSchema
+>;
 export type UpdateTicketStatusInput = z.infer<typeof updateTicketStatusSchema>;
 export type AdminAccessCredentialUpdateInput = z.infer<
   typeof adminAccessCredentialUpdateSchema
@@ -1052,6 +1104,8 @@ export type LandlordUtilityBulkSubmissionAuditCreateInput = z.infer<
 export type LandlordUtilityBulkSubmissionAuditFinalizeInput = z.infer<
   typeof landlordUtilityBulkSubmissionAuditFinalizeSchema
 >;
+export type CreateRoomBillingHoldInput = z.infer<typeof createRoomBillingHoldSchema>;
+export type CancelRoomBillingHoldInput = z.infer<typeof cancelRoomBillingHoldSchema>;
 export type LandlordAssignCaretakerInput = z.infer<
   typeof landlordAssignCaretakerSchema
 >;

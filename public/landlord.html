@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=20260322b" />
-    <link rel="stylesheet" href="/landlord.css?v=20260516j" />
+    <link rel="stylesheet" href="/landlord.css?v=20260517g" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -1007,6 +1007,38 @@
               <tbody id="expenditures-body"></tbody>
             </table>
           </div>
+
+          <div class="section-head move-out-report-head">
+            <h4>Move-Out Losses + Resident Debt</h4>
+            <button id="refresh-move-out-settlements" type="button" class="ghost-btn">
+              Refresh
+            </button>
+          </div>
+          <div
+            id="move-out-settlement-report-summary"
+            class="move-out-report-summary"
+          ></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Building</th>
+                  <th>House</th>
+                  <th>Resident</th>
+                  <th>Outcome</th>
+                  <th>Total</th>
+                  <th>Rent</th>
+                  <th>Utilities</th>
+                  <th>Room Charges</th>
+                  <th>Recorded By</th>
+                  <th>Reason</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="move-out-settlements-body"></tbody>
+            </table>
+          </div>
         </section>
       </section>
       </div>
@@ -1202,6 +1234,73 @@
         </form>
       </aside>
 
+      <div id="move-out-settlement-backdrop" class="landlord-drawer-backdrop hidden"></div>
+      <aside
+        id="move-out-settlement-modal"
+        class="landlord-sheet-modal move-out-settlement-modal hidden"
+        aria-label="Move-out settlement"
+      >
+        <header class="landlord-drawer-head">
+          <h2>Move-Out Settlement</h2>
+          <button id="close-move-out-settlement-btn" type="button" class="ghost-btn">
+            Close
+          </button>
+        </header>
+
+        <form id="move-out-settlement-form" class="package-card landlord-sheet-form">
+          <p id="move-out-settlement-summary" class="status-text">
+            Loading settlement...
+          </p>
+
+          <div id="move-out-settlement-totals" class="move-out-settlement-totals"></div>
+
+          <fieldset class="move-out-settlement-options">
+            <legend>Settlement Action</legend>
+            <label>
+              <input type="radio" name="moveOutSettlementAction" value="collect_before_move_out" />
+              <span>
+                <strong>Collect before move-out</strong>
+                Keep the resident active until the balance is paid.
+              </span>
+            </label>
+            <label>
+              <input type="radio" name="moveOutSettlementAction" value="write_off" checked />
+              <span>
+                <strong>Write off as loss</strong>
+                Clear the room and record the unpaid balance as landlord loss.
+              </span>
+            </label>
+            <label>
+              <input type="radio" name="moveOutSettlementAction" value="transfer_to_resident_debt" />
+              <span>
+                <strong>Transfer to resident debt</strong>
+                Clear the room, but keep the amount attached to this resident.
+              </span>
+            </label>
+          </fieldset>
+
+          <label>
+            Settlement Note
+            <input
+              id="move-out-settlement-note"
+              type="text"
+              maxlength="280"
+              placeholder="Reason, agreement, or follow-up note"
+            />
+          </label>
+
+          <p id="move-out-settlement-help" class="status-text">
+            Room balances will not carry to the next resident after settlement.
+          </p>
+
+          <div class="action-row">
+            <button id="move-out-settlement-submit-btn" type="submit">
+              Confirm Settlement
+            </button>
+          </div>
+        </form>
+      </aside>
+
       <div id="building-drawer-backdrop" class="landlord-drawer-backdrop hidden"></div>
       <aside
         id="create-building-drawer"
@@ -1386,6 +1485,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=20260516k"></script>
+    <script type="module" src="/landlord.js?v=20260517g"></script>
   </body>
 </html>

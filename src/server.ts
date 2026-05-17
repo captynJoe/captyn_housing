@@ -91,6 +91,7 @@ import {
   initializeUtilityMpesaPaymentSchema,
   verifyUtilityMpesaPaymentSchema,
   recordAdminRentPaymentSchema,
+  residentDebtCollectionSchema,
   createBuildingSchema,
   buildingMediaUpdateSchema,
   deleteBuildingSchema,
@@ -124,6 +125,8 @@ import {
   landlordExpenditureCreateSchema,
   landlordUtilityBulkSubmissionAuditCreateSchema,
   landlordUtilityBulkSubmissionAuditFinalizeSchema,
+  createRoomBillingHoldSchema,
+  cancelRoomBillingHoldSchema,
   landlordUtilityRegistryUpsertSchema,
   landlordAssignCaretakerSchema,
   caretakerAccessResolveSchema,
@@ -2702,6 +2705,195 @@ async function bootstrap() {
     );
   }
 
+  type RoomBillingHoldScope = "rent" | "utilities" | "all";
+  type RoomBillingHoldUtilityType = "water" | "electricity";
+  type RoomBillingHoldCacheItem = {
+    id: string;
+    buildingId: string;
+    houseNumber: string;
+    scope: RoomBillingHoldScope;
+    utilityType?: RoomBillingHoldUtilityType;
+    startMonth: string;
+    endMonth: string;
+  };
+  type RoomBillingChargeKind = "rent" | "utility";
+
+  let roomBillingHoldCache: RoomBillingHoldCacheItem[] = [];
+  let roomBillingHoldCacheLoadedAt = 0;
+  const ROOM_BILLING_HOLD_CACHE_TTL_MS = 15_000;
+
+  const normalizeRoomBillingHoldScope = (value: string): RoomBillingHoldScope => {
+    const normalized = String(value ?? "").trim();
+    if (normalized === "rent" || normalized === "utilities" || normalized === "all") {
+      return normalized;
+    }
+    return "all";
+  };
+
+  const normalizeRoomBillingHoldUtilityType = (
+    value: string | null | undefined
+  ): RoomBillingHoldUtilityType | undefined => {
+    const normalized = String(value ?? "").trim();
+    if (normalized === "water" || normalized === "electricity") {
+      return normalized;
+    }
+    return undefined;
+  };
+
+  const mapRoomBillingHold = (hold: {
+    id: string;
+    buildingId: string;
+    houseNumber: string;
+    scope: string;
+    utilityType: string | null;
+    startMonth: string;
+    endMonth: string;
+    reason: string | null;
+    createdByUserId: string | null;
+    createdByRole: string | null;
+    createdByName: string | null;
+    canceledAt: Date | null;
+    canceledByUserId: string | null;
+    canceledByRole: string | null;
+    canceledByName: string | null;
+    cancelReason: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }) => ({
+    id: hold.id,
+    buildingId: hold.buildingId,
+    houseNumber: hold.houseNumber,
+    scope: normalizeRoomBillingHoldScope(hold.scope),
+    utilityType: normalizeRoomBillingHoldUtilityType(hold.utilityType),
+    startMonth: hold.startMonth,
+    endMonth: hold.endMonth,
+    reason: hold.reason ?? undefined,
+    active: !hold.canceledAt,
+    createdBy: {
+      userId: hold.createdByUserId ?? undefined,
+      role: hold.createdByRole ?? undefined,
+      name: hold.createdByName ?? undefined
+    },
+    canceledBy: hold.canceledAt
+      ? {
+          userId: hold.canceledByUserId ?? undefined,
+          role: hold.canceledByRole ?? undefined,
+          name: hold.canceledByName ?? undefined
+        }
+      : undefined,
+    cancelReason: hold.cancelReason ?? undefined,
+    canceledAt: hold.canceledAt?.toISOString(),
+    createdAt: hold.createdAt.toISOString(),
+    updatedAt: hold.updatedAt.toISOString()
+  });
+
+  const roomBillingHoldMatchesCharge = (
+    hold: RoomBillingHoldCacheItem,
+    input: {
+      buildingId: string;
+      houseNumber: string;
+      kind: RoomBillingChargeKind;
+      billingMonth: string;
+      utilityType?: RoomBillingHoldUtilityType;
+    }
+  ) => {
+    if (hold.buildingId !== normalizeBuildingId(input.buildingId)) {
+      return false;
+    }
+    if (hold.houseNumber !== normalizeHouseNumber(input.houseNumber)) {
+      return false;
+    }
+    if (input.billingMonth < hold.startMonth || input.billingMonth > hold.endMonth) {
+      return false;
+    }
+    if (input.kind === "rent") {
+      return hold.scope === "rent" || hold.scope === "all";
+    }
+    if (hold.scope !== "utilities" && hold.scope !== "all") {
+      return false;
+    }
+    return !hold.utilityType || hold.utilityType === input.utilityType;
+  };
+
+  const isRoomBillingHeld = (input: {
+    buildingId: string;
+    houseNumber: string;
+    kind: RoomBillingChargeKind;
+    billingMonth: string;
+    utilityType?: RoomBillingHoldUtilityType;
+  }) =>
+    roomBillingHoldCache.some((hold) => roomBillingHoldMatchesCharge(hold, input));
+
+  const isBillingHoldOverrideRequested = (value: unknown) =>
+    (value as { overrideBillingHold?: unknown } | null)?.overrideBillingHold === true;
+
+  const refreshRoomBillingHoldCache = async (force = false) => {
+    if (!repositoryContext.prisma) {
+      roomBillingHoldCache = [];
+      roomBillingHoldCacheLoadedAt = Date.now();
+      return;
+    }
+
+    const now = Date.now();
+    if (
+      !force &&
+      roomBillingHoldCacheLoadedAt > 0 &&
+      now - roomBillingHoldCacheLoadedAt < ROOM_BILLING_HOLD_CACHE_TTL_MS
+    ) {
+      return;
+    }
+
+    try {
+      const rows = await repositoryContext.prisma.roomBillingHold.findMany({
+        where: {
+          canceledAt: null
+        },
+        select: {
+          id: true,
+          buildingId: true,
+          houseNumber: true,
+          scope: true,
+          utilityType: true,
+          startMonth: true,
+          endMonth: true
+        }
+      });
+
+      roomBillingHoldCache = rows.map((hold) => ({
+        id: hold.id,
+        buildingId: normalizeBuildingId(hold.buildingId),
+        houseNumber: normalizeHouseNumber(hold.houseNumber),
+        scope: normalizeRoomBillingHoldScope(hold.scope),
+        utilityType: normalizeRoomBillingHoldUtilityType(hold.utilityType),
+        startMonth: hold.startMonth,
+        endMonth: hold.endMonth
+      }));
+      roomBillingHoldCacheLoadedAt = now;
+    } catch (error) {
+      console.warn("Failed to refresh room billing hold cache:", error);
+      roomBillingHoldCacheLoadedAt = now;
+    }
+  };
+
+  rentLedgerService.setBillingHoldPredicate((input) =>
+    isRoomBillingHeld({
+      buildingId: input.buildingId,
+      houseNumber: input.houseNumber,
+      kind: "rent",
+      billingMonth: input.billingMonth
+    })
+  );
+
+  utilityBillingService.setBillingHoldPredicate((input) =>
+    isRoomBillingHeld({
+      buildingId: input.buildingId,
+      houseNumber: input.houseNumber,
+      kind: "utility",
+      billingMonth: input.billingMonth,
+      utilityType: input.utilityType
+    })
+  );
+
   const serializeCsvCell = (value: unknown): string => {
     const stringValue = String(value ?? "");
     if (!/[",\n]/.test(stringValue)) {
@@ -3374,6 +3566,8 @@ async function bootstrap() {
     await syncDerivedBuildingConfigurationState();
   }
 
+  await refreshRoomBillingHoldCache(true);
+
   userSupportService.setNotificationInsertHandler((notifications) =>
     notificationDeliveryService.deliverResidentNotifications(notifications)
   );
@@ -4013,6 +4207,7 @@ async function bootstrap() {
     buildingId: string,
     houseNumbers: string[]
   ): Promise<LandlordUtilityRegistryRow[]> => {
+    await refreshRoomBillingHoldCache();
     const houseSet = new Set(houseNumbers.map((item) => normalizeHouseNumber(item)).filter(Boolean));
     const meterMap = new Map<
       string,
@@ -4687,6 +4882,32 @@ async function bootstrap() {
     }
   };
 
+  const listRoomBillingHolds = async (
+    buildingId: string,
+    houseNumber: string,
+    limit = 80
+  ) => {
+    if (!repositoryContext.prisma) {
+      return [];
+    }
+
+    try {
+      const rows = await repositoryContext.prisma.roomBillingHold.findMany({
+        where: {
+          buildingId,
+          houseNumber: normalizeHouseNumber(houseNumber)
+        },
+        orderBy: [{ canceledAt: "asc" }, { createdAt: "desc" }],
+        take: Math.min(Math.max(Math.trunc(limit), 1), 200)
+      });
+
+      return rows.map(mapRoomBillingHold);
+    } catch (error) {
+      console.warn("Failed to list room billing holds:", error);
+      return [];
+    }
+  };
+
   const buildLandlordRoomLedgerPayload = async (
     building: Awaited<ReturnType<typeof store.getBuilding>>,
     houseNumber: string
@@ -4696,13 +4917,14 @@ async function bootstrap() {
     }
 
     const normalizedHouseNumber = normalizeHouseNumber(houseNumber);
-    const [roomRows, visibleHouseNumbers, buildingConfiguration, auditEvents] = await Promise.all([
+    const [roomRows, visibleHouseNumbers, buildingConfiguration, auditEvents, billingHolds] = await Promise.all([
       buildLandlordUtilityRegistryRows(building.id, [normalizedHouseNumber]),
       listVisibleHouseNumbersForBuildings([building]),
       buildingConfigurationService
         ? buildingConfigurationService.getForBuilding(building.id)
         : Promise.resolve(null),
-      listRoomAccountAuditEvents(building.id, normalizedHouseNumber)
+      listRoomAccountAuditEvents(building.id, normalizedHouseNumber),
+      listRoomBillingHolds(building.id, normalizedHouseNumber)
     ]);
 
     const room =
@@ -4774,9 +4996,23 @@ async function bootstrap() {
           .filter((item) => item.billingMonth === latestPostedBillingMonth)
           .reduce((sum, item) => sum + Math.max(0, Number(item.amountKsh ?? 0)), 0)
       : 0;
-    const possibleMissingBillingMonths = listMissingRecurringBillingMonths(
+    const rawMissingBillingMonths = listMissingRecurringBillingMonths(
       postedBillingMonths,
       visibleThroughBillingMonth
+    );
+    const heldRecurringBillingMonths = rawMissingBillingMonths.filter((billingMonth) =>
+      (["water", "electricity"] as const).every((utilityType) =>
+        isRoomBillingHeld({
+          buildingId: building.id,
+          houseNumber: normalizedHouseNumber,
+          kind: "utility",
+          utilityType,
+          billingMonth
+        })
+      )
+    );
+    const possibleMissingBillingMonths = rawMissingBillingMonths.filter(
+      (billingMonth) => !heldRecurringBillingMonths.includes(billingMonth)
     );
     const hasBothMeters =
       hasUsableRoomMeterNumber(room.waterMeterNumber) &&
@@ -4903,6 +5139,7 @@ async function bootstrap() {
         latestPostedBillingMonth,
         latestPostedMonthlyChargeKsh,
         possibleMissingBillingMonths,
+        heldRecurringBillingMonths,
         estimatedRecurringMonthlyChargeKsh,
         estimatedRecurringBackfillKsh,
         overstatedOrphanedRoom: !(
@@ -4918,6 +5155,7 @@ async function bootstrap() {
       expenditures,
       tickets,
       auditEvents,
+      billingHolds,
       monthlyCombinedCharge,
       buildingConfiguration
     };
@@ -4927,6 +5165,7 @@ async function bootstrap() {
     visibleBuildingIds: Set<string>,
     limit: number
   ) => {
+    await refreshRoomBillingHoldCache();
     const ledgerRows: Array<{
       buildingId: string;
       houseNumber: string;
@@ -5159,6 +5398,13 @@ async function bootstrap() {
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
           .slice(0, 500)
       : [];
+    const moveOutSettlements = registryBuildingId
+      ? await listLandlordMoveOutSettlements({
+          context,
+          buildingId: registryBuildingId,
+          limit: 500
+        })
+      : [];
 
     let caretakerRequests: Array<ReturnType<typeof mapCaretakerAccessRequestWithUser>> = [];
     let caretakers: Array<
@@ -5244,7 +5490,8 @@ async function bootstrap() {
       meters,
       bills,
       payments,
-      expenditures
+      expenditures,
+      moveOutSettlements
     };
   };
 
@@ -5278,6 +5525,7 @@ async function bootstrap() {
       utilityType?: "water" | "electricity";
     } = {}
   ) => {
+    await refreshRoomBillingHoldCache();
     const createdBills = utilityBillingService.backfillRecurringBills({
       ...scope,
       visibleThroughDate: new Date(
@@ -5304,6 +5552,507 @@ async function bootstrap() {
       }))
     });
     return createdBills;
+  };
+
+  const buildResidentMoveOutSettlementSummary = async (
+    buildingId: string,
+    userId: string
+  ) => {
+    if (!repositoryContext.prisma) {
+      throw new Error("DATABASE_REQUIRED");
+    }
+
+    const tenancy = await repositoryContext.prisma.tenancy.findFirst({
+      where: {
+        buildingId,
+        userId,
+        active: true
+      },
+      include: {
+        building: {
+          select: {
+            id: true,
+            name: true
+          }
+        },
+        unit: {
+          select: {
+            houseNumber: true
+          }
+        },
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            phone: true
+          }
+        }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+
+    if (!tenancy) {
+      throw new Error("TENANCY_NOT_FOUND");
+    }
+
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const normalizedHouseNumber = normalizeHouseNumber(tenancy.unit.houseNumber);
+    await ensureRecurringUtilityBillsCurrent("landlord.move_out_settlement", {
+      buildingId: normalizedBuildingId,
+      houseNumber: normalizedHouseNumber
+    });
+
+    const rentDue = rentLedgerService.getRentDue(
+      normalizedBuildingId,
+      normalizedHouseNumber
+    );
+    const rentOutstandingKsh = Math.max(0, Math.round(Number(rentDue?.balanceKsh ?? 0)));
+    const utilityBills = utilityBillingService
+      .listBills({
+        buildingId: normalizedBuildingId,
+        houseNumber: normalizedHouseNumber,
+        limit: 1_000
+      })
+      .filter((item) => Math.max(0, Number(item.balanceKsh ?? 0)) > 0)
+      .map((item) => ({
+        id: item.id,
+        utilityType: item.utilityType,
+        billingMonth: item.billingMonth,
+        amountKsh: Math.max(0, Math.round(Number(item.amountKsh ?? 0))),
+        balanceKsh: Math.max(0, Math.round(Number(item.balanceKsh ?? 0))),
+        dueDate: item.dueDate
+      }));
+    const utilityOutstandingKsh = utilityBills.reduce(
+      (sum, item) => sum + item.balanceKsh,
+      0
+    );
+    const roomCharges = [...buildingExpenditures.values()]
+      .filter(
+        (item) =>
+          item.buildingId === normalizedBuildingId &&
+          normalizeHouseNumber(item.houseNumber ?? "") === normalizedHouseNumber &&
+          item.chargeableToResident
+      )
+      .map((item) => ({
+        id: item.id,
+        category: item.category,
+        title: item.title,
+        amountKsh: Math.max(0, Math.round(Number(item.amountKsh ?? 0))),
+        createdAt: item.createdAt
+      }));
+    const roomChargesOutstandingKsh = roomCharges.reduce(
+      (sum, item) => sum + item.amountKsh,
+      0
+    );
+
+    return {
+      building: {
+        id: tenancy.building.id,
+        name: tenancy.building.name
+      },
+      resident: {
+        id: tenancy.user.id,
+        fullName: tenancy.user.fullName,
+        email: tenancy.user.email,
+        phone: tenancy.user.phone
+      },
+      tenancyId: tenancy.id,
+      houseNumber: normalizedHouseNumber,
+      rentOutstandingKsh,
+      utilityOutstandingKsh,
+      roomChargesOutstandingKsh,
+      totalOutstandingKsh:
+        rentOutstandingKsh + utilityOutstandingKsh + roomChargesOutstandingKsh,
+      rent: rentDue
+        ? {
+            monthlyRentKsh: Math.max(0, Math.round(Number(rentDue.monthlyRentKsh ?? 0))),
+            dueDate: rentDue.dueDate,
+            balanceKsh: rentOutstandingKsh
+          }
+        : null,
+      utilityBills,
+      roomCharges
+    };
+  };
+
+  const settleRoomBalancesForResidentRemoval = async (
+    buildingId: string,
+    houseNumber: string,
+    action: "write_off" | "transfer_to_resident_debt"
+  ) => {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const normalizedHouseNumber = normalizeHouseNumber(houseNumber);
+    const note =
+      action === "transfer_to_resident_debt"
+        ? "Transferred to resident debt when resident was removed."
+        : "Written off when resident was removed.";
+    const rent = rentLedgerService.writeOffHouseBalance(
+      normalizedBuildingId,
+      normalizedHouseNumber,
+      `Outstanding rent ${note.toLowerCase()}`
+    );
+    const utilities = utilityBillingService.writeOffHouseBalances(
+      normalizedBuildingId,
+      normalizedHouseNumber,
+      `Outstanding utility balance ${note.toLowerCase()}`
+    );
+    let roomChargesWrittenOffKsh = 0;
+    let roomChargeCount = 0;
+
+    for (const [id, item] of buildingExpenditures.entries()) {
+      if (
+        item.buildingId !== normalizedBuildingId ||
+        normalizeHouseNumber(item.houseNumber ?? "") !== normalizedHouseNumber ||
+        !item.chargeableToResident
+      ) {
+        continue;
+      }
+
+      const next: BuildingExpenditureRecord = {
+        ...item,
+        chargeableToResident: false,
+        note: item.note?.trim()
+          ? `${item.note.trim()} ${note}`
+          : note
+      };
+      buildingExpenditures.set(id, next);
+      roomChargesWrittenOffKsh += Math.max(0, Number(item.amountKsh ?? 0));
+      roomChargeCount += 1;
+    }
+
+    const rentWrittenOffKsh = Math.max(0, Number(rent?.previousBalanceKsh ?? 0));
+    const utilityWrittenOffKsh = Math.max(
+      0,
+      Number(utilities.totalWrittenOffKsh ?? 0)
+    );
+    const totalWrittenOffKsh =
+      rentWrittenOffKsh + utilityWrittenOffKsh + roomChargesWrittenOffKsh;
+
+    if (rentWrittenOffKsh > 0) {
+      await persistRentLedgerStateNow();
+    }
+    if (utilityWrittenOffKsh > 0) {
+      await persistUtilityBillingStateNow();
+    }
+    if (roomChargeCount > 0) {
+      persistBuildingExpenditureState();
+    }
+
+    return {
+      action,
+      rentWrittenOffKsh,
+      utilityWrittenOffKsh,
+      roomChargesWrittenOffKsh,
+      rentSettledKsh: rentWrittenOffKsh,
+      utilitySettledKsh: utilityWrittenOffKsh,
+      roomChargesSettledKsh: roomChargesWrittenOffKsh,
+      totalWrittenOffKsh,
+      totalSettledKsh: totalWrittenOffKsh,
+      rent,
+      utilities,
+      roomChargeCount
+    };
+  };
+
+  const recordResidentMoveOutSettlement = async (input: {
+    summary: Awaited<ReturnType<typeof buildResidentMoveOutSettlementSummary>>;
+    action: "write_off" | "transfer_to_resident_debt";
+    reason?: string;
+    actor: {
+      userId?: string;
+      role?: string;
+      name?: string;
+    };
+    settlement: Awaited<ReturnType<typeof settleRoomBalancesForResidentRemoval>>;
+  }) => {
+    if (!repositoryContext.prisma || input.summary.totalOutstandingKsh <= 0) {
+      return null;
+    }
+
+    return repositoryContext.prisma.residentMoveOutSettlement.create({
+      data: {
+        buildingId: input.summary.building.id,
+        houseNumber: input.summary.houseNumber,
+        residentUserId: input.summary.resident.id,
+        tenancyId: input.summary.tenancyId,
+        action: input.action,
+        status:
+          input.action === "transfer_to_resident_debt"
+            ? "resident_debt_open"
+            : "written_off_loss",
+        amountKsh: Math.max(0, Math.round(input.summary.totalOutstandingKsh)),
+        rentKsh: Math.max(0, Math.round(input.summary.rentOutstandingKsh)),
+        utilityKsh: Math.max(0, Math.round(input.summary.utilityOutstandingKsh)),
+        roomChargesKsh: Math.max(
+          0,
+          Math.round(input.summary.roomChargesOutstandingKsh)
+        ),
+        reason: input.reason,
+        metadata: sanitizeAuditMetadata({
+          resident: input.summary.resident,
+          settlement: input.settlement,
+          utilityBills: input.summary.utilityBills,
+          roomCharges: input.summary.roomCharges
+        }),
+        createdByUserId: input.actor.userId,
+        createdByRole: input.actor.role,
+        createdByName: input.actor.name
+      }
+    });
+  };
+
+  const mapResidentMoveOutSettlement = (
+    settlement: {
+      id: string;
+      buildingId: string;
+      houseNumber: string;
+      residentUserId: string;
+      tenancyId: string | null;
+      action: string;
+      status: string;
+      amountKsh: number;
+      rentKsh: number;
+      utilityKsh: number;
+      roomChargesKsh: number;
+      reason: string | null;
+      metadata: unknown;
+      createdByUserId: string | null;
+      createdByRole: string | null;
+      createdByName: string | null;
+      createdAt: Date;
+      updatedAt: Date;
+    },
+    lookup: {
+      building?: { id: string; name: string } | null;
+      resident?: {
+        id: string;
+        fullName: string;
+        email: string | null;
+        phone: string;
+      } | null;
+    } = {}
+  ) => ({
+    id: settlement.id,
+    buildingId: settlement.buildingId,
+    buildingName: lookup.building?.name,
+    houseNumber: settlement.houseNumber,
+    residentUserId: settlement.residentUserId,
+    residentName: lookup.resident?.fullName,
+    residentPhone: lookup.resident?.phone,
+    residentEmail: lookup.resident?.email,
+    tenancyId: settlement.tenancyId ?? undefined,
+    action: settlement.action,
+    status: settlement.status,
+    amountKsh: Math.max(0, Number(settlement.amountKsh ?? 0)),
+    rentKsh: Math.max(0, Number(settlement.rentKsh ?? 0)),
+    utilityKsh: Math.max(0, Number(settlement.utilityKsh ?? 0)),
+    roomChargesKsh: Math.max(0, Number(settlement.roomChargesKsh ?? 0)),
+    reason: settlement.reason ?? undefined,
+    metadata: settlement.metadata ?? undefined,
+    createdBy: {
+      userId: settlement.createdByUserId ?? undefined,
+      role: settlement.createdByRole ?? undefined,
+      name: settlement.createdByName ?? undefined
+    },
+    createdAt: settlement.createdAt.toISOString(),
+    updatedAt: settlement.updatedAt.toISOString()
+  });
+
+  const listLandlordMoveOutSettlements = async (input: {
+    context: {
+      role: string;
+      userId?: string;
+      userSession: Awaited<ReturnType<typeof resolveOptionalUserSession>>;
+    } | null;
+    buildingId?: string;
+    limit?: number;
+  }) => {
+    if (!repositoryContext.prisma || !input.context) {
+      return [];
+    }
+
+    const requestedBuildingId = String(input.buildingId ?? "").trim()
+      ? normalizeBuildingId(input.buildingId)
+      : "";
+    const visibleIds = await listVisibleBuildingIdsForLandlordContext(input.context);
+    if (requestedBuildingId) {
+      const building = await store.getBuilding(requestedBuildingId);
+      if (!building) {
+        throw new Error("BUILDING_NOT_FOUND");
+      }
+      const hasAccess = await canManageBuildingFromLandlordContext(
+        input.context,
+        building.id
+      );
+      if (!hasAccess) {
+        throw new Error("BUILDING_ACCESS_DENIED");
+      }
+    }
+
+    const boundedLimit = Math.min(Math.max(Math.trunc(input.limit ?? 500), 1), 1000);
+    const rows = await repositoryContext.prisma.residentMoveOutSettlement.findMany({
+      where: {
+        ...(requestedBuildingId
+          ? { buildingId: requestedBuildingId }
+          : visibleIds
+            ? { buildingId: { in: [...visibleIds] } }
+            : {})
+      },
+      orderBy: { createdAt: "desc" },
+      take: boundedLimit
+    });
+
+    const buildingIds = [...new Set(rows.map((item) => item.buildingId))];
+    const residentUserIds = [...new Set(rows.map((item) => item.residentUserId))];
+    const [buildings, residents] = await Promise.all([
+      buildingIds.length > 0
+        ? Promise.all(buildingIds.map((id) => store.getBuilding(id)))
+        : Promise.resolve([]),
+      residentUserIds.length > 0
+        ? repositoryContext.prisma.housingUser.findMany({
+            where: { id: { in: residentUserIds } },
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              phone: true
+            }
+          })
+        : Promise.resolve([])
+    ]);
+
+    const buildingById = new Map(
+      buildings
+        .filter((item): item is NonNullable<typeof item> => Boolean(item))
+        .map((item) => [item.id, { id: item.id, name: item.name }])
+    );
+    const residentById = new Map(residents.map((item) => [item.id, item]));
+
+    return rows.map((item) =>
+      mapResidentMoveOutSettlement(item, {
+        building: buildingById.get(item.buildingId) ?? null,
+        resident: residentById.get(item.residentUserId) ?? null
+      })
+    );
+  };
+
+  const recordResidentDebtCollection = async (input: {
+    context: {
+      role: string;
+      userId?: string;
+      userSession: Awaited<ReturnType<typeof resolveOptionalUserSession>>;
+    };
+    settlementId: string;
+    amountKsh?: number;
+    provider: "mpesa" | "cash" | "bank" | "card";
+    providerReference?: string;
+    paidAt?: string;
+    note?: string;
+  }) => {
+    if (!repositoryContext.prisma) {
+      throw new Error("DATABASE_REQUIRED");
+    }
+
+    const settlement = await repositoryContext.prisma.residentMoveOutSettlement.findUnique({
+      where: { id: input.settlementId }
+    });
+    if (!settlement) {
+      throw new Error("SETTLEMENT_NOT_FOUND");
+    }
+
+    const hasAccess = await canManageBuildingFromLandlordContext(
+      input.context,
+      settlement.buildingId
+    );
+    if (!hasAccess) {
+      throw new Error("BUILDING_ACCESS_DENIED");
+    }
+
+    if (settlement.action !== "transfer_to_resident_debt") {
+      throw new Error("SETTLEMENT_NOT_RESIDENT_DEBT");
+    }
+    if (settlement.status === "resident_debt_closed") {
+      throw new Error("RESIDENT_DEBT_ALREADY_CLOSED");
+    }
+    if (settlement.status !== "resident_debt_open") {
+      throw new Error("RESIDENT_DEBT_NOT_OPEN");
+    }
+
+    const expectedAmountKsh = Math.max(0, Math.round(Number(settlement.amountKsh ?? 0)));
+    const amountKsh =
+      input.amountKsh === undefined
+        ? expectedAmountKsh
+        : Math.max(0, Math.round(Number(input.amountKsh)));
+    if (amountKsh !== expectedAmountKsh) {
+      throw new Error("RESIDENT_DEBT_AMOUNT_MISMATCH");
+    }
+
+    const actor = actorFromLandlordContext(input.context);
+    const collectedAt = new Date().toISOString();
+    const collection = {
+      amountKsh,
+      provider: input.provider,
+      providerReference: input.providerReference,
+      paidAt: input.paidAt ?? collectedAt,
+      note: input.note,
+      collectedAt,
+      collectedBy: actor
+    };
+    const existingMetadata =
+      settlement.metadata &&
+      typeof settlement.metadata === "object" &&
+      !Array.isArray(settlement.metadata)
+        ? { ...(settlement.metadata as Record<string, unknown>) }
+        : {};
+    const existingCollections = Array.isArray(existingMetadata.debtCollections)
+      ? existingMetadata.debtCollections
+      : [];
+    const metadata = sanitizeAuditMetadata({
+      ...existingMetadata,
+      debtCollection: collection,
+      debtCollections: [...existingCollections, collection]
+    });
+
+    const updated = await repositoryContext.prisma.residentMoveOutSettlement.update({
+      where: { id: settlement.id },
+      data: {
+        status: "resident_debt_closed",
+        metadata
+      }
+    });
+
+    await recordRoomAccountAuditEvent({
+      buildingId: settlement.buildingId,
+      houseNumber: settlement.houseNumber,
+      tenancyId: settlement.tenancyId ?? undefined,
+      action: "resident.debt.closed",
+      summary: `KSh ${amountKsh.toLocaleString("en-US")} resident debt collected after move-out.`,
+      actor,
+      metadata: {
+        settlementRecordId: settlement.id,
+        residentUserId: settlement.residentUserId,
+        collection
+      }
+    });
+
+    const [building, resident] = await Promise.all([
+      store.getBuilding(updated.buildingId),
+      repositoryContext.prisma.housingUser.findUnique({
+        where: { id: updated.residentUserId },
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          phone: true
+        }
+      })
+    ]);
+
+    return mapResidentMoveOutSettlement(updated, {
+      building: building ? { id: building.id, name: building.name } : null,
+      resident
+    });
   };
 
   const recordResidentUtilityPaymentAndNotify = async (
@@ -8433,6 +9182,110 @@ async function bootstrap() {
       return next(error);
     }
   });
+
+  app.get("/api/landlord/move-out-settlements", async (req, res, next) => {
+    try {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) {
+        return;
+      }
+
+      if (!repositoryContext.prisma) {
+        return res.status(503).json({
+          error: "Move-out settlement reporting requires database connection."
+        });
+      }
+
+      const buildingId =
+        typeof req.query.buildingId === "string"
+          ? req.query.buildingId.trim()
+          : "";
+      const limitRaw = Number(req.query.limit ?? 500);
+      const limit = Number.isFinite(limitRaw) ? limitRaw : 500;
+      const data = await listLandlordMoveOutSettlements({
+        context,
+        buildingId,
+        limit
+      });
+
+      return res.json({ data, role: context.role });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to load move-out settlements.";
+      if (message === "BUILDING_NOT_FOUND") {
+        return res.status(404).json({ error: "Building not found" });
+      }
+      if (message === "BUILDING_ACCESS_DENIED") {
+        return res.status(403).json({ error: "Building access denied" });
+      }
+      return next(error);
+    }
+  });
+
+  app.post(
+    "/api/landlord/move-out-settlements/:settlementId/collect",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) {
+          return;
+        }
+
+        const settlementId = String(req.params.settlementId ?? "").trim();
+        if (!settlementId) {
+          return res.status(400).json({ error: "Settlement id is required." });
+        }
+
+        const parsed = residentDebtCollectionSchema.parse(req.body ?? {});
+        const data = await recordResidentDebtCollection({
+          context,
+          settlementId,
+          amountKsh: parsed.amountKsh,
+          provider: parsed.provider,
+          providerReference: parsed.providerReference,
+          paidAt: parsed.paidAt,
+          note: parsed.note
+        });
+
+        return res.json({ data, role: context.role });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Unable to record resident debt collection.";
+        if (message === "DATABASE_REQUIRED") {
+          return res.status(503).json({
+            error: "Resident debt collection requires database connection."
+          });
+        }
+        if (message === "SETTLEMENT_NOT_FOUND") {
+          return res.status(404).json({ error: "Move-out settlement not found." });
+        }
+        if (message === "BUILDING_ACCESS_DENIED") {
+          return res.status(403).json({ error: "Building access denied" });
+        }
+        if (message === "SETTLEMENT_NOT_RESIDENT_DEBT") {
+          return res.status(409).json({
+            error: "Only resident debt settlements can be collected."
+          });
+        }
+        if (message === "RESIDENT_DEBT_ALREADY_CLOSED") {
+          return res.status(409).json({
+            error: "Resident debt is already closed."
+          });
+        }
+        if (message === "RESIDENT_DEBT_NOT_OPEN") {
+          return res.status(409).json({
+            error: "Resident debt is not open for collection."
+          });
+        }
+        if (message === "RESIDENT_DEBT_AMOUNT_MISMATCH") {
+          return res.status(409).json({
+            error: "Collection amount must match the open resident debt total."
+          });
+        }
+        return next(error);
+      }
+    }
+  );
 
   app.post("/api/landlord/expenditures", async (req, res, next) => {
     try {
@@ -11698,6 +12551,232 @@ async function bootstrap() {
   );
 
   app.get(
+    "/api/landlord/buildings/:buildingId/rooms/:houseNumber/billing-holds",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) {
+          return;
+        }
+
+        const buildingId = req.params.buildingId?.trim();
+        const normalizedHouseNumber = houseNumberQuerySchema.parse({
+          houseNumber: req.params.houseNumber
+        }).houseNumber;
+        const building = buildingId ? await store.getBuilding(buildingId) : null;
+        if (!building) {
+          return res.status(404).json({ error: "Building not found" });
+        }
+
+        const hasAccess = await canManageBuildingFromLandlordContext(context, building.id);
+        if (!hasAccess) {
+          return res.status(403).json({ error: "Building access denied" });
+        }
+
+        const data = await listRoomBillingHolds(building.id, normalizedHouseNumber);
+        return res.json({ data, role: context.role });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
+  app.post(
+    "/api/landlord/buildings/:buildingId/rooms/:houseNumber/billing-holds",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) {
+          return;
+        }
+
+        if (context.role === "caretaker") {
+          return res.status(403).json({
+            error: "House manager accounts cannot pause room billing."
+          });
+        }
+
+        if (!repositoryContext.prisma) {
+          return res.status(503).json({
+            error: "Billing holds require database connection."
+          });
+        }
+
+        const buildingId = req.params.buildingId?.trim();
+        const normalizedHouseNumber = normalizeHouseNumber(
+          houseNumberQuerySchema.parse({
+            houseNumber: req.params.houseNumber
+          }).houseNumber
+        );
+        const building = buildingId ? await store.getBuilding(buildingId) : null;
+        if (!building) {
+          return res.status(404).json({ error: "Building not found" });
+        }
+
+        const hasAccess = await canManageBuildingFromLandlordContext(context, building.id);
+        if (!hasAccess) {
+          return res.status(403).json({ error: "Building access denied" });
+        }
+
+        const registeredHouseNumbers = new Set(
+          (building.houseNumbers ?? []).map((item) => normalizeHouseNumber(item))
+        );
+        const visibleHouseNumbers = await listVisibleHouseNumbersForBuildings([building]);
+        if (
+          !registeredHouseNumbers.has(normalizedHouseNumber) &&
+          !visibleHouseNumbers.has(normalizedHouseNumber)
+        ) {
+          return res.status(404).json({ error: "Room not found" });
+        }
+
+        const parsed = createRoomBillingHoldSchema.parse(req.body ?? {});
+        const actor = actorFromLandlordContext(context);
+        const data = mapRoomBillingHold(
+          await repositoryContext.prisma.roomBillingHold.create({
+            data: {
+              buildingId: building.id,
+              houseNumber: normalizedHouseNumber,
+              scope: parsed.scope,
+              utilityType: parsed.utilityType,
+              startMonth: parsed.startMonth,
+              endMonth: parsed.endMonth,
+              reason: parsed.reason,
+              createdByUserId: actor.userId,
+              createdByRole: actor.role,
+              createdByName: actor.name
+            }
+          })
+        );
+
+        await refreshRoomBillingHoldCache(true);
+        await recordRoomAccountAuditEvent({
+          buildingId: building.id,
+          houseNumber: normalizedHouseNumber,
+          action: "billing.hold.created",
+          summary: `Billing hold added for ${data.scope.replaceAll("_", " ")} from ${data.startMonth} to ${data.endMonth}.`,
+          actor,
+          metadata: {
+            billingHoldId: data.id,
+            scope: data.scope,
+            utilityType: data.utilityType,
+            startMonth: data.startMonth,
+            endMonth: data.endMonth,
+            reason: data.reason
+          }
+        });
+
+        return res.status(201).json({ data, role: context.role });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
+  const handleCancelRoomBillingHold = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) {
+        return;
+      }
+
+      if (context.role === "caretaker") {
+        return res.status(403).json({
+          error: "House manager accounts cannot resume room billing."
+        });
+      }
+
+      if (!repositoryContext.prisma) {
+        return res.status(503).json({
+          error: "Billing holds require database connection."
+        });
+      }
+
+      const buildingId = req.params.buildingId?.trim();
+      const normalizedHouseNumber = normalizeHouseNumber(
+        houseNumberQuerySchema.parse({
+          houseNumber: req.params.houseNumber
+        }).houseNumber
+      );
+      const building = buildingId ? await store.getBuilding(buildingId) : null;
+      if (!building) {
+        return res.status(404).json({ error: "Building not found" });
+      }
+
+      const hasAccess = await canManageBuildingFromLandlordContext(context, building.id);
+      if (!hasAccess) {
+        return res.status(403).json({ error: "Building access denied" });
+      }
+
+      const holdId = String(req.params.holdId ?? "").trim();
+      if (!holdId) {
+        return res.status(400).json({ error: "Billing hold ID is required." });
+      }
+
+      const existing = await repositoryContext.prisma.roomBillingHold.findFirst({
+        where: {
+          id: holdId,
+          buildingId: building.id,
+          houseNumber: normalizedHouseNumber
+        }
+      });
+      if (!existing) {
+        return res.status(404).json({ error: "Billing hold not found." });
+      }
+
+      const parsed = cancelRoomBillingHoldSchema.parse(req.body ?? {});
+      const actor = actorFromLandlordContext(context);
+      const data = existing.canceledAt
+        ? mapRoomBillingHold(existing)
+        : mapRoomBillingHold(
+            await repositoryContext.prisma.roomBillingHold.update({
+              where: { id: existing.id },
+              data: {
+                canceledAt: new Date(),
+                canceledByUserId: actor.userId,
+                canceledByRole: actor.role,
+                canceledByName: actor.name,
+                cancelReason: parsed.reason
+              }
+            })
+          );
+
+      await refreshRoomBillingHoldCache(true);
+      await recordRoomAccountAuditEvent({
+        buildingId: building.id,
+        houseNumber: normalizedHouseNumber,
+        action: "billing.hold.canceled",
+        summary: `Billing hold resumed for ${data.scope.replaceAll("_", " ")} from ${data.startMonth} to ${data.endMonth}.`,
+        actor,
+        metadata: {
+          billingHoldId: data.id,
+          scope: data.scope,
+          utilityType: data.utilityType,
+          startMonth: data.startMonth,
+          endMonth: data.endMonth,
+          reason: parsed.reason
+        }
+      });
+
+      return res.json({ data, role: context.role });
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  app.delete(
+    "/api/landlord/buildings/:buildingId/rooms/:houseNumber/billing-holds/:holdId",
+    handleCancelRoomBillingHold
+  );
+  app.post(
+    "/api/landlord/buildings/:buildingId/rooms/:houseNumber/billing-holds/:holdId/cancel",
+    handleCancelRoomBillingHold
+  );
+
+  app.get(
     "/api/landlord/buildings/:buildingId/utility-registry",
     async (req, res, next) => {
       try {
@@ -11971,6 +13050,22 @@ async function bootstrap() {
             req.body ?? {}
           )
         );
+        await refreshRoomBillingHoldCache();
+        if (
+          !isBillingHoldOverrideRequested(req.body) &&
+          isRoomBillingHeld({
+            buildingId,
+            houseNumber,
+            kind: "utility",
+            utilityType,
+            billingMonth: parsed.billingMonth
+          })
+        ) {
+          return res.status(409).json({
+            error:
+              "Utility billing is paused for this room and month. Resume billing from the room account before posting this charge."
+          });
+        }
         const data = utilityBillingService.createBill(
           utilityType,
           buildingId,
@@ -12372,6 +13467,22 @@ async function bootstrap() {
           req.body ?? {}
         )
       );
+      await refreshRoomBillingHoldCache();
+      if (
+        !isBillingHoldOverrideRequested(req.body) &&
+        isRoomBillingHeld({
+          buildingId,
+          houseNumber,
+          kind: "utility",
+          utilityType,
+          billingMonth: parsed.billingMonth
+        })
+      ) {
+        return res.status(409).json({
+          error:
+            "Utility billing is paused for this room and month. Resume billing from the room account before posting this charge."
+        });
+      }
       const data = utilityBillingService.createBill(
         utilityType,
         buildingId,
@@ -12895,6 +14006,47 @@ async function bootstrap() {
     handleLandlordRemoveHouse
   );
 
+  app.get(
+    "/api/landlord/buildings/:buildingId/users/:userId/move-out-settlement",
+    async (req, res, next) => {
+      try {
+        const session = await getUserSession(req, res, "landlord");
+        if (!session) {
+          return;
+        }
+
+        if (!userAccountService || !repositoryContext.prisma) {
+          return res.status(503).json({
+            error: "Move-out settlement requires database connection."
+          });
+        }
+
+        const buildingId = req.params.buildingId?.trim();
+        const userId = req.params.userId?.trim();
+        if (!buildingId || !userId) {
+          return res.status(400).json({ error: "Building id and user id are required." });
+        }
+
+        const hasAccess = await userAccountService.canAccessBuilding(session, buildingId);
+        if (!hasAccess) {
+          return res.status(403).json({ error: "Building access denied" });
+        }
+
+        const data = await buildResidentMoveOutSettlementSummary(buildingId, userId);
+        return res.json({ data, role: session.role });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Unable to load move-out settlement.";
+        if (message === "TENANCY_NOT_FOUND") {
+          return res.status(404).json({
+            error: "Resident is not active in this building."
+          });
+        }
+        return next(error);
+      }
+    }
+  );
+
   const handleLandlordRemoveResident = async (
     req: Request,
     res: Response,
@@ -12926,26 +14078,131 @@ async function bootstrap() {
       }
 
       try {
+        const settlementSummary = await buildResidentMoveOutSettlementSummary(
+          buildingId,
+          userId
+        );
+        if (
+          typeof parsed.confirmedOutstandingKsh === "number" &&
+          parsed.confirmedOutstandingKsh !== settlementSummary.totalOutstandingKsh
+        ) {
+          return res.status(409).json({
+            error:
+              "The move-out balance changed while you were reviewing it. Refresh the settlement and try again.",
+            data: settlementSummary
+          });
+        }
+
+        if (
+          parsed.settlementAction === "collect_before_move_out" &&
+          settlementSummary.totalOutstandingKsh > 0
+        ) {
+          return res.status(409).json({
+            error:
+              "Collect the outstanding balance before clearing this resident, or choose write-off/transfer debt.",
+            data: settlementSummary
+          });
+        }
+
         const data = await userAccountService.removeResidentFromBuilding(session, {
           buildingId,
           userId,
           note: parsed.note
         });
+        const actor = actorFromUserSession(session);
+        const billingSettlement =
+          parsed.settlementAction === "write_off" ||
+          parsed.settlementAction === "transfer_to_resident_debt"
+            ? await settleRoomBalancesForResidentRemoval(
+                buildingId,
+                data.houseNumber,
+                parsed.settlementAction
+              )
+            : {
+                action: parsed.settlementAction,
+                rentWrittenOffKsh: 0,
+                utilityWrittenOffKsh: 0,
+                roomChargesWrittenOffKsh: 0,
+                rentSettledKsh: 0,
+                utilitySettledKsh: 0,
+                roomChargesSettledKsh: 0,
+                totalWrittenOffKsh: 0,
+                totalSettledKsh: 0,
+                rent: null,
+                utilities: { totalWrittenOffKsh: 0, bills: [] },
+                roomChargeCount: 0
+              };
+        const settlementRecord =
+          parsed.settlementAction === "write_off" ||
+          parsed.settlementAction === "transfer_to_resident_debt"
+            ? await recordResidentMoveOutSettlement({
+                summary: settlementSummary,
+                action: parsed.settlementAction,
+                reason: parsed.settlementReason || parsed.note,
+                actor,
+                settlement: billingSettlement as Awaited<
+                  ReturnType<typeof settleRoomBalancesForResidentRemoval>
+                >
+              })
+            : null;
+
+        if (billingSettlement.totalSettledKsh > 0) {
+          const transferred = parsed.settlementAction === "transfer_to_resident_debt";
+          await recordRoomAccountAuditEvent({
+            buildingId,
+            houseNumber: data.houseNumber,
+            tenancyId: data.tenancyId,
+            action: transferred
+              ? "resident.debt.transferred"
+              : "resident.balance.writeoff",
+            summary: transferred
+              ? `KSh ${billingSettlement.totalSettledKsh.toLocaleString("en-US")} moved to resident debt when ${data.user.fullName} was removed.`
+              : `KSh ${billingSettlement.totalSettledKsh.toLocaleString("en-US")} in pending room balances written off when ${data.user.fullName} was removed.`,
+            actor,
+            metadata: {
+              removedUserId: data.user.id,
+              settlementAction: parsed.settlementAction,
+              settlementReason: parsed.settlementReason,
+              settlementRecordId: settlementRecord?.id,
+              rentKsh: billingSettlement.rentSettledKsh,
+              utilityKsh: billingSettlement.utilitySettledKsh,
+              roomChargesKsh: billingSettlement.roomChargesSettledKsh,
+              utilityBills: billingSettlement.utilities.bills,
+              roomChargeCount: billingSettlement.roomChargeCount
+            }
+          });
+        }
         await recordRoomAccountAuditEvent({
           buildingId,
           houseNumber: data.houseNumber,
           tenancyId: data.tenancyId,
           action: "resident.removed",
           summary: `${data.user.fullName} removed from house ${data.houseNumber}.`,
-          actor: actorFromUserSession(session),
+          actor,
           metadata: {
             removedUserId: data.user.id,
             residentPhone: data.user.phone,
             note: data.note,
-            removedAt: data.removedAt
+            settlementAction: parsed.settlementAction,
+            settlementReason: parsed.settlementReason,
+            removedAt: data.removedAt,
+            billingSettlement
           }
         });
-        return res.json({ data });
+        return res.json({
+          data: {
+            ...data,
+            settlement: {
+              action: parsed.settlementAction,
+              reason: parsed.settlementReason,
+              summary: settlementSummary,
+              recordId: settlementRecord?.id,
+              result: billingSettlement
+            },
+            billingWriteOff:
+              parsed.settlementAction === "write_off" ? billingSettlement : undefined
+          }
+        });
       } catch (error) {
         const message =
           error instanceof Error

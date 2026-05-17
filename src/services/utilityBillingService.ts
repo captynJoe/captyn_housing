@@ -92,6 +92,20 @@ export interface UnrecordUtilityPaymentResult {
   totalAmountKsh: number;
 }
 
+export interface UtilityWriteOffBillResult {
+  id: string;
+  utilityType: UtilityType;
+  billingMonth: string;
+  previousBalanceKsh: number;
+}
+
+export interface UtilityWriteOffResult {
+  buildingId: string;
+  houseNumber: string;
+  totalWrittenOffKsh: number;
+  bills: UtilityWriteOffBillResult[];
+}
+
 export interface UtilityPaymentPreview {
   targetBill: UtilityBillSnapshot;
   effectiveBill: UtilityBillSnapshot;
@@ -131,6 +145,16 @@ interface ListUtilityPaymentsOptions {
   houseNumber?: string;
   limit?: number;
 }
+
+export interface UtilityBillingHoldCheck {
+  utilityType: UtilityType;
+  buildingId: string;
+  houseNumber: string;
+  billingMonth: string;
+  dueDate: string;
+}
+
+type UtilityBillingHoldPredicate = (input: UtilityBillingHoldCheck) => boolean;
 
 export interface UtilityBillingPersistedState {
   meters: UtilityMeterRecord[];
@@ -355,6 +379,7 @@ export class UtilityBillingService {
     UtilityPaymentReferenceIndexEntry
   >();
   private stateChangeHandler?: UtilityBillingStateChangeHandler;
+  private billingHoldPredicate?: UtilityBillingHoldPredicate;
   private combinedChargeBuildingIds = new Set<string>();
   private readonly combinedChargeAmountsByBuilding = new Map<string, number>();
   private readonly combinedChargeAmountsByMonth = new Map<string, number>();
@@ -443,6 +468,10 @@ export class UtilityBillingService {
 
   setStateChangeHandler(handler?: UtilityBillingStateChangeHandler): void {
     this.stateChangeHandler = handler;
+  }
+
+  setBillingHoldPredicate(predicate?: UtilityBillingHoldPredicate): void {
+    this.billingHoldPredicate = predicate;
   }
 
   exportState(): UtilityBillingPersistedState {
@@ -698,6 +727,65 @@ export class UtilityBillingService {
     return true;
   }
 
+  writeOffHouseBalances(
+    buildingId: string,
+    houseNumber: string,
+    note = "Outstanding utility balance written off when resident was removed."
+  ): UtilityWriteOffResult {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const normalizedHouse = normalizeHouseNumber(houseNumber);
+    const bills: UtilityWriteOffBillResult[] = [];
+    let totalWrittenOffKsh = 0;
+
+    for (const records of this.billsByLedger.values()) {
+      const sample = records[0];
+      if (!sample) {
+        continue;
+      }
+
+      if (
+        sample.buildingId !== normalizedBuildingId ||
+        sample.houseNumber !== normalizedHouse
+      ) {
+        continue;
+      }
+
+      for (const record of records) {
+        const previousBalanceKsh = Math.max(
+          0,
+          Math.round(Number(record.balanceKsh ?? 0))
+        );
+        if (previousBalanceKsh <= 0) {
+          continue;
+        }
+
+        record.balanceKsh = 0;
+        record.note = record.note?.trim()
+          ? `${record.note.trim()} ${note}`
+          : note;
+        record.updatedAt = nowIso();
+        totalWrittenOffKsh += previousBalanceKsh;
+        bills.push({
+          id: record.id,
+          utilityType: record.utilityType,
+          billingMonth: record.billingMonth,
+          previousBalanceKsh
+        });
+      }
+    }
+
+    if (bills.length > 0) {
+      this.emitStateChange();
+    }
+
+    return {
+      buildingId: normalizedBuildingId,
+      houseNumber: normalizedHouse,
+      totalWrittenOffKsh,
+      bills
+    };
+  }
+
   createBill(
     utilityType: UtilityType,
     buildingId: string,
@@ -879,6 +967,26 @@ export class UtilityBillingService {
         );
         if (fixedChargeKsh <= 0) {
           break;
+        }
+
+        const isHeld =
+          this.billingHoldPredicate?.({
+            utilityType: cursor.utilityType,
+            buildingId: cursor.buildingId,
+            houseNumber: cursor.houseNumber,
+            billingMonth: nextBillingMonth,
+            dueDate: nextDueDate
+          }) ?? false;
+
+        if (isHeld) {
+          cursor = {
+            ...cursor,
+            id: `${cursor.id}:held:${nextBillingMonth}`,
+            billingMonth: nextBillingMonth,
+            dueDate: nextDueDate,
+            updatedAt: nowIso()
+          };
+          continue;
         }
 
         const created = this.createBill(cursor.utilityType, cursor.buildingId, cursor.houseNumber, {

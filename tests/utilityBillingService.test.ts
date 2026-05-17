@@ -727,6 +727,64 @@ test("backfills the next visible recurring fixed-charge utility month", () => {
   );
 });
 
+test("skips held utility months while continuing later recurring backfill", () => {
+  const service = new UtilityBillingService();
+
+  service.setBillingHoldPredicate((input) => input.billingMonth === "2026-04");
+  service.createBill("water", BUILDING_A, "B-9", {
+    billingMonth: "2026-02",
+    fixedChargeKsh: 350,
+    dueDate: "2026-03-06T00:00:00.000Z"
+  });
+
+  service.createBill("water", BUILDING_A, "B-9", {
+    billingMonth: "2026-03",
+    fixedChargeKsh: 350,
+    dueDate: "2026-04-06T00:00:00.000Z"
+  });
+
+  const created = service.backfillRecurringBills({
+    buildingId: BUILDING_A,
+    houseNumber: "B-9",
+    utilityType: "water",
+    visibleThroughDate: "2026-06-09T00:00:00.000Z"
+  });
+
+  assert.deepEqual(created.map((item) => item.billingMonth), ["2026-05"]);
+  assert.deepEqual(
+    service
+      .listBills({ buildingId: BUILDING_A, houseNumber: "B-9", utilityType: "water", limit: 12 })
+      .map((item) => item.billingMonth)
+      .sort(),
+    ["2026-02", "2026-03", "2026-05"]
+  );
+});
+
+test("writes off open utility balances without deleting bills", () => {
+  const service = new UtilityBillingService();
+
+  service.createBill("water", BUILDING_A, "B-14", {
+    billingMonth: "2026-02",
+    fixedChargeKsh: 300,
+    dueDate: "2026-03-06T00:00:00.000Z"
+  });
+  service.createBill("electricity", BUILDING_A, "B-14", {
+    billingMonth: "2026-02",
+    fixedChargeKsh: 500,
+    dueDate: "2026-03-06T00:00:00.000Z"
+  });
+
+  const result = service.writeOffHouseBalances(BUILDING_A, "B-14");
+  assert.equal(result.totalWrittenOffKsh, 800);
+  assert.equal(result.bills.length, 2);
+  assert.equal(
+    service
+      .listBills({ buildingId: BUILDING_A, houseNumber: "B-14", limit: 12 })
+      .reduce((sum, item) => sum + item.balanceKsh, 0),
+    0
+  );
+});
+
 test("does not apply the same provider reference twice", () => {
   const service = new UtilityBillingService();
   const dueDate = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();

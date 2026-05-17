@@ -102,10 +102,26 @@ interface UnrecordRentPaymentInput {
   paymentId: string;
 }
 
+export interface RentBillingHoldCheck {
+  buildingId: string;
+  houseNumber: string;
+  billingMonth: string;
+  dueDate: string;
+}
+
+type RentBillingHoldPredicate = (input: RentBillingHoldCheck) => boolean;
+
 export interface UnrecordRentPaymentResult {
   event: RentPaymentEvent;
   applied: boolean;
   snapshot: RentDueSnapshot | null;
+}
+
+export interface WriteOffRentBalanceResult {
+  buildingId: string;
+  houseNumber: string;
+  previousBalanceKsh: number;
+  snapshot: RentDueSnapshot;
 }
 
 export interface RentLedgerPersistedState {
@@ -257,9 +273,14 @@ export class RentLedgerService {
   private readonly pendingPayments = new Map<string, RentPaymentEvent[]>();
   private readonly paymentReferenceIndex = new Map<string, ReferenceIndexEntry>();
   private stateChangeHandler?: RentLedgerStateChangeHandler;
+  private billingHoldPredicate?: RentBillingHoldPredicate;
 
   setStateChangeHandler(handler?: RentLedgerStateChangeHandler): void {
     this.stateChangeHandler = handler;
+  }
+
+  setBillingHoldPredicate(predicate?: RentBillingHoldPredicate): void {
+    this.billingHoldPredicate = predicate;
   }
 
   exportState(): RentLedgerPersistedState {
@@ -645,6 +666,36 @@ export class RentLedgerService {
     return true;
   }
 
+  writeOffHouseBalance(
+    buildingId: string,
+    houseNumber: string,
+    note = "Outstanding rent written off when resident was removed."
+  ): WriteOffRentBalanceResult | null {
+    const record = this.resolveRecord(buildingId, houseNumber);
+    if (!record) {
+      return null;
+    }
+
+    const advanced = this.advanceRecordCyclesIfNeeded(record);
+    const previousBalanceKsh = Math.max(0, Math.round(Number(record.balanceKsh ?? 0)));
+    if (previousBalanceKsh > 0) {
+      record.balanceKsh = 0;
+      record.note = note;
+      record.updatedAt = nowIso();
+    }
+
+    if (advanced || previousBalanceKsh > 0) {
+      this.emitStateChange();
+    }
+
+    return {
+      buildingId: record.buildingId,
+      houseNumber: record.houseNumber,
+      previousBalanceKsh,
+      snapshot: this.toSnapshot(record)
+    };
+  }
+
   recordMpesaPayment(input: RentMpesaCallbackInput): RecordMpesaPaymentResult {
     return this.recordPayment({
       buildingId: input.buildingId ?? "",
@@ -903,7 +954,19 @@ export class RentLedgerService {
     const now = new Date();
 
     while (Date.parse(nextWindowStart) <= now.getTime()) {
-      record.balanceKsh = Math.max(0, Number(record.balanceKsh ?? 0)) + record.monthlyRentKsh;
+      const billingMonth = billingMonthFromDateTime(nextDueDate);
+      const isHeld =
+        this.billingHoldPredicate?.({
+          buildingId: record.buildingId,
+          houseNumber: record.houseNumber,
+          billingMonth,
+          dueDate: nextDueDate
+        }) ?? false;
+
+      if (!isHeld) {
+        record.balanceKsh =
+          Math.max(0, Number(record.balanceKsh ?? 0)) + record.monthlyRentKsh;
+      }
       record.dueDate = nextDueDate;
       record.updatedAt = nowIso();
       record.reminderState = {};

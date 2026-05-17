@@ -3,6 +3,7 @@ import {
   getLandlordPortalTitle,
   getLandlordShellBrand
 } from "./portal-branding.js";
+import { notifyError, notifyStatus } from "./notifications.js";
 
 const roomAccountTagEl = document.getElementById("room-account-tag");
 const roomAccountTitleEl = document.getElementById("room-account-title");
@@ -35,6 +36,7 @@ const roomRentPaymentsBodyEl = document.getElementById("room-rent-payments-body"
 const roomPaymentsBodyEl = document.getElementById("room-payments-body");
 const roomChargesBodyEl = document.getElementById("room-charges-body");
 const roomIssuesEl = document.getElementById("room-issues");
+const roomAuditEventsEl = document.getElementById("room-audit-events");
 
 const state = {
   buildingId: "",
@@ -69,6 +71,15 @@ function requestJson(url, options = {}) {
     }
     return payload;
   });
+}
+
+function isGenericRouteNotFound(error) {
+  return (
+    error?.status === 404 &&
+    /request failed \(404\)|api route not found|cannot (post|delete)/i.test(
+      String(error?.message ?? "")
+    )
+  );
 }
 
 function redirectToLogin() {
@@ -173,6 +184,34 @@ function formatPaymentProvider(value) {
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
+function formatAuditActionLabel(value) {
+  switch (String(value ?? "").trim()) {
+    case "rent.payment.recorded":
+      return "Rent payment recorded";
+    case "rent.payment.unrecorded":
+      return "Rent payment unrecorded";
+    case "utility.payment.recorded":
+      return "Utility payment recorded";
+    case "utility.payment.unrecorded":
+      return "Utility payment unrecorded";
+    case "resident.removed":
+      return "Resident removed";
+    case "room.removed":
+      return "Room removed";
+    default:
+      return String(value ?? "").replaceAll(".", " ") || "Account activity";
+  }
+}
+
+function formatAuditActor(actor) {
+  const name = String(actor?.name ?? "").trim();
+  const role = String(actor?.role ?? "").trim();
+  if (name && role) {
+    return `${name} • ${formatRoleLabel(role)}`;
+  }
+  return name || formatRoleLabel(role) || "System";
+}
+
 function formatExpenditureCategory(value) {
   switch (String(value ?? "").trim()) {
     case "maintenance":
@@ -264,6 +303,7 @@ function setStatus(message) {
   if (roomAccountStatusEl instanceof HTMLElement) {
     roomAccountStatusEl.textContent = message;
   }
+  notifyStatus(message);
 }
 
 function showError(message) {
@@ -279,6 +319,7 @@ function showError(message) {
 
   roomAccountErrorEl.textContent = message;
   roomAccountErrorEl.classList.remove("hidden");
+  notifyError(message);
 }
 
 function setLoading(loading) {
@@ -737,6 +778,33 @@ function renderRoomCharges(payload) {
   });
 }
 
+function renderRoomAuditEvents(payload) {
+  if (!(roomAuditEventsEl instanceof HTMLElement)) {
+    return;
+  }
+
+  const events = Array.isArray(payload?.auditEvents) ? payload.auditEvents : [];
+  if (events.length === 0) {
+    roomAuditEventsEl.innerHTML =
+      '<p class="status-text">No account audit events recorded for this room.</p>';
+    return;
+  }
+
+  roomAuditEventsEl.innerHTML = events
+    .map(
+      (event) => `
+        <article class="package-card room-account-audit-card">
+          <p class="status-text">${escapeHtml(formatDateTime(event.createdAt))} • ${escapeHtml(
+            formatAuditActor(event.actor)
+          )}</p>
+          <h4>${escapeHtml(formatAuditActionLabel(event.action))}</h4>
+          <p class="status-text">${escapeHtml(event.summary || "Account activity recorded.")}</p>
+        </article>
+      `
+    )
+    .join("");
+}
+
 function renderRoomIssues(payload) {
   if (!(roomIssuesEl instanceof HTMLElement)) {
     return;
@@ -766,7 +834,7 @@ function renderRoomIssues(payload) {
 function renderRoomAccount(payload) {
   const building = payload?.building ?? {};
   const room = payload?.room ?? {};
-  const buildingName = building.name || building.id || state.buildingId;
+  const buildingName = building.name || "Selected building";
   const shellBrand = getLandlordShellBrand(buildingName);
   const portalTitle = getLandlordPortalTitle(buildingName);
   const residentName = room.residentName || "Vacant room";
@@ -803,6 +871,7 @@ function renderRoomAccount(payload) {
   renderRentPayments(payload);
   renderUtilityPayments(payload);
   renderRoomCharges(payload);
+  renderRoomAuditEvents(payload);
   renderRoomIssues(payload);
 }
 
@@ -870,7 +939,13 @@ async function unrecordPayment(button) {
   const roomPath = encodeURIComponent(state.houseNumber);
   const paymentPath = encodeURIComponent(paymentId);
   const buildingQuery = `buildingId=${encodeURIComponent(state.buildingId)}`;
-  const url =
+  const postUrl =
+    action === "unrecord-rent-payment"
+      ? `/api/landlord/rent/${roomPath}/payments/${paymentPath}/unrecord`
+      : `/api/landlord/utilities/${encodeURIComponent(
+          utilityType
+        )}/${roomPath}/payments/${paymentPath}/unrecord`;
+  const deleteUrl =
     action === "unrecord-rent-payment"
       ? `/api/landlord/rent/${roomPath}/payments/${paymentPath}?${buildingQuery}`
       : `/api/landlord/utilities/${encodeURIComponent(
@@ -883,9 +958,25 @@ async function unrecordPayment(button) {
   setStatus(`Unrecording ${paymentLabel} payment...`);
 
   try {
-    await requestJson(url, {
-      method: "DELETE"
-    });
+    try {
+      await requestJson(postUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          buildingId: state.buildingId
+        })
+      });
+    } catch (error) {
+      if (!isGenericRouteNotFound(error)) {
+        throw error;
+      }
+
+      await requestJson(deleteUrl, {
+        method: "DELETE"
+      });
+    }
     await loadRoomAccount();
     setStatus(`${paymentLabel.charAt(0).toUpperCase() + paymentLabel.slice(1)} payment unrecorded.`);
   } catch (error) {

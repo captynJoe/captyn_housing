@@ -1,4 +1,5 @@
 import { initPasswordVisibilityToggles } from "./password-visibility.js";
+import { notifyError, notifyStatus } from "./notifications.js";
 
 const loginFormEl = document.getElementById("admin-login-form");
 const accessTokenEl = document.getElementById("admin-access-token");
@@ -10,11 +11,13 @@ const loginErrorEl = document.getElementById("login-error");
 
 function setStatus(message) {
   loginStatusEl.textContent = message;
+  notifyStatus(message);
 }
 
 function showError(message) {
   loginErrorEl.textContent = message;
   loginErrorEl.classList.remove("hidden");
+  notifyError(message);
 }
 
 function clearError() {

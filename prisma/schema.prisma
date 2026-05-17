@@ -97,6 +97,7 @@ model Building {
   tenantApplications       TenantApplication[]
   tenantAgreements         TenantAgreement[]
   tenancies                Tenancy[]
+  roomAccountAuditEvents   RoomAccountAuditEvent[]
   wifiPackages             BuildingWifiPackage[]
   householdMemberRegistries HouseholdMemberRegistry[]
   createdAt                DateTime            @default(now())
@@ -165,6 +166,7 @@ model HousingUser {
   tenantAgreements      TenantAgreement[]
   reviewedApplications  TenantApplication[] @relation("TenantApplicationReviewer")
   tenancies             Tenancy[]
+  roomAccountAuditEvents RoomAccountAuditEvent[] @relation("RoomAccountAuditActor")
   landlordAccessRequests LandlordAccessRequest[] @relation("LandlordAccessRequester")
   reviewedLandlordAccessRequests LandlordAccessRequest[] @relation("LandlordAccessReviewer")
 
@@ -188,15 +190,18 @@ model LandlordAccessRequest {
 }
 
 model UserSession {
-  id        String      @id @default(uuid())
-  userId    String
-  tokenHash String      @unique
-  expiresAt DateTime
-  revokedAt DateTime?
-  createdAt DateTime    @default(now())
-  user      HousingUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                String      @id @default(uuid())
+  userId            String
+  residentTenancyId String?
+  tokenHash         String      @unique
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  createdAt         DateTime    @default(now())
+  user              HousingUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  residentTenancy   Tenancy?    @relation("ResidentTenancySession", fields: [residentTenancyId], references: [id], onDelete: SetNull)
 
   @@index([userId, expiresAt])
+  @@index([residentTenancyId])
   @@index([expiresAt])
 }
 
@@ -253,9 +258,32 @@ model Tenancy {
   building   Building    @relation(fields: [buildingId], references: [id], onDelete: Cascade)
   unit       HouseUnit   @relation(fields: [unitId], references: [id], onDelete: Restrict)
   agreement  TenantAgreement?
+  sessions   UserSession[] @relation("ResidentTenancySession")
+  auditEvents RoomAccountAuditEvent[] @relation("RoomAccountAuditTenancy")
 
   @@index([userId, active])
   @@index([buildingId, active])
+}
+
+model RoomAccountAuditEvent {
+  id          String       @id @default(uuid())
+  buildingId  String
+  houseNumber String
+  tenancyId   String?
+  actorUserId String?
+  actorRole   String?
+  actorName   String?
+  action      String
+  summary     String
+  metadata    Json?
+  createdAt   DateTime     @default(now())
+  building    Building     @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  tenancy     Tenancy?     @relation("RoomAccountAuditTenancy", fields: [tenancyId], references: [id], onDelete: SetNull)
+  actor       HousingUser? @relation("RoomAccountAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([buildingId, houseNumber, createdAt])
+  @@index([tenancyId, createdAt])
+  @@index([actorUserId, createdAt])
 }
 
 model TenantAgreement {

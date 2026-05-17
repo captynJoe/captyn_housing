@@ -1305,6 +1305,11 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function getPublicBuildingLabel(building, fallback = "Assigned building") {
+  const name = String(building?.name ?? "").trim();
+  return name || fallback;
+}
+
 function getResidentBuildingLabel() {
   const session = state.residentSession;
   if (!session) {
@@ -1312,7 +1317,7 @@ function getResidentBuildingLabel() {
   }
 
   const building = state.buildings.find((item) => item.id === session.buildingId);
-  return building ? `${building.name} (${building.id})` : session.buildingId;
+  return getPublicBuildingLabel(building);
 }
 
 function getSelectedResidentBuildingName() {
@@ -2128,9 +2133,7 @@ function renderOverviewSession() {
   }
 
   const building = state.buildings.find((item) => item.id === session.buildingId);
-  overviewBuildingEl.textContent = building
-    ? `${building.name} (${building.id})`
-    : session.buildingId;
+  overviewBuildingEl.textContent = getPublicBuildingLabel(building);
   overviewHouseNumberEl.textContent = session.houseNumber;
   overviewSessionExpiryEl.textContent = `${formatResidentVerificationLabel(
     session.verificationStatus
@@ -2789,7 +2792,7 @@ function renderAuthBuildingLoading() {
   option.textContent = "Loading buildings...";
   authBuildingIdEl.append(option);
   authBuildingIdEl.disabled = true;
-  residentLoginBtnEl.disabled = true;
+  residentLoginBtnEl.disabled = false;
   residentSignupBtnEl.disabled = true;
   residentForgotBtnEl.disabled = true;
 }
@@ -2825,7 +2828,7 @@ function renderAuthBuildingOptions(buildings) {
     option.textContent = "No building available";
     authBuildingIdEl.append(option);
     authBuildingIdEl.disabled = true;
-    residentLoginBtnEl.disabled = true;
+    residentLoginBtnEl.disabled = false;
     residentSignupBtnEl.disabled = true;
     residentForgotBtnEl.disabled = true;
     updateResidentBranding();
@@ -2837,10 +2840,15 @@ function renderAuthBuildingOptions(buildings) {
   residentSignupBtnEl.disabled = false;
   residentForgotBtnEl.disabled = false;
 
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select building for access request";
+  authBuildingIdEl.append(placeholder);
+
   buildings.forEach((building) => {
     const option = document.createElement("option");
     option.value = building.id;
-    option.textContent = `${building.name} (${building.id})`;
+    option.textContent = getPublicBuildingLabel(building, "Building");
     authBuildingIdEl.append(option);
   });
 
@@ -3515,9 +3523,7 @@ function showSignedInState() {
   residentLayoutEl.classList.toggle("hidden", mustChangePassword);
 
   const building = state.buildings.find((item) => item.id === session.buildingId);
-  boundBuildingEl.value = building
-    ? `${building.name} (${building.id})`
-    : session.buildingId;
+  boundBuildingEl.value = getPublicBuildingLabel(building);
   boundHouseNumberEl.value = session.houseNumber;
 
   residentSessionSummaryEl.textContent = `House ${session.houseNumber} (${session.phoneMask}) • ${formatResidentVerificationLabel(
@@ -3622,7 +3628,7 @@ async function loadTenantData() {
 
 function buildResidentAuthPayload() {
   return {
-    buildingId: authBuildingIdEl.value,
+    buildingId: String(authBuildingIdEl.value || "").trim() || undefined,
     houseNumber: normalizeHouseNumber(authHouseNumberEl.value),
     phoneNumber: authPhoneNumberEl.value.trim(),
     password: authPasswordEl.value
@@ -3650,7 +3656,7 @@ async function requestResidentPasswordRecovery() {
 
   if (!payload.buildingId || !payload.houseNumber || !payload.phoneNumber) {
     showResidentAuthFeedback(
-      "Provide building, house number, and phone number first.",
+      "Provide building, house number, and phone number for password recovery.",
       "error",
       { reveal: true }
     );
@@ -3764,6 +3770,14 @@ async function signupResident() {
   }
 
   const payload = buildResidentSignupPayload();
+  if (!payload.buildingId || !payload.houseNumber || !payload.phoneNumber) {
+    showResidentAuthFeedback(
+      "Choose the building, enter your house number, and add your phone number to request access.",
+      "error",
+      { reveal: true }
+    );
+    return;
+  }
   if (!payload.password || payload.password.length < 8) {
     showResidentAuthFeedback(
       "Set a password with at least 8 characters to request access.",
@@ -4705,7 +4719,7 @@ async function boot() {
   } finally {
     document.body.classList.remove("app-loading");
     if (!Array.isArray(state.buildings) || state.buildings.length === 0) {
-      residentForgotBtnEl.disabled = false;
+      residentLoginBtnEl.disabled = false;
     }
   }
 }

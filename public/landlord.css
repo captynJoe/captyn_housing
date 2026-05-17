@@ -95,6 +95,15 @@
   margin-bottom: 0;
 }
 
+.room-account-audit-card {
+  margin-bottom: 0;
+  border-left: 3px solid rgba(28, 126, 124, 0.45);
+}
+
+.room-account-audit-card h4 {
+  margin: 4px 0;
+}
+
 @media (max-width: 960px) {
   .room-account-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -882,6 +891,91 @@ button.resident-overview-card.is-active {
 
 .landlord-drawer-form {
   gap: 12px;
+}
+
+.building-room-preview,
+.building-room-list {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid rgba(16, 35, 49, 0.12);
+  padding-top: 10px;
+}
+
+.building-room-preview-head,
+.building-room-list summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.building-room-preview-head h4 {
+  margin: 0;
+  font-size: 0.86rem;
+  color: #102331;
+}
+
+.building-room-preview-head span,
+.building-room-list summary small {
+  color: rgba(16, 35, 49, 0.7);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.building-room-list summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.building-room-list summary::-webkit-details-marker {
+  display: none;
+}
+
+.building-room-list summary span {
+  font-size: 0.86rem;
+  font-weight: 800;
+  color: #102331;
+}
+
+.building-room-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 172px;
+  overflow: auto;
+}
+
+.building-room-chip,
+.building-room-empty {
+  min-height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(24, 110, 110, 0.2);
+  background: rgba(232, 246, 246, 0.9);
+  color: #116060;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 7px 10px;
+}
+
+.building-room-chip.is-existing {
+  border-color: rgba(149, 42, 42, 0.18);
+  background: rgba(248, 228, 228, 0.9);
+  color: #8e1d1d;
+}
+
+.building-room-chip.is-muted {
+  border-color: rgba(16, 35, 49, 0.14);
+  background: rgba(16, 35, 49, 0.06);
+  color: rgba(16, 35, 49, 0.68);
+}
+
+.building-room-empty {
+  margin: 0;
+  border-radius: 8px;
+  background: rgba(16, 35, 49, 0.04);
+  color: rgba(16, 35, 49, 0.68);
+  font-weight: 700;
 }
 
 .resident-summary h3 {

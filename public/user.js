@@ -3,6 +3,7 @@ import {
   getResidentProfileTitle,
   getResidentShellBrand
 } from "./portal-branding.js";
+import { notifyError, notifyStatus } from "./notifications.js";
 
 const RESIDENT_SW_URL = "/resident-sw.js?v=20260325b";
 
@@ -82,6 +83,11 @@ function showFeedback(message, tone = "info") {
 
   feedbackBoxEl.textContent = message;
   feedbackBoxEl.className = `feedback ${tone}`;
+  if (tone === "error") {
+    notifyError(message);
+  } else {
+    notifyStatus(message, { tone: tone === "success" ? "success" : "warning" });
+  }
 }
 
 async function apiRequest(url, init = {}) {
@@ -214,7 +220,7 @@ function renderProfile(profile) {
       : `Signed in for house ${session.houseNumber}. Session expires ${formatDateTime(
           session.expiresAt
         )}.`;
-  profileBuildingNameEl.textContent = building.name || building.id || "-";
+  profileBuildingNameEl.textContent = building.name || "Assigned building";
   profileBuildingAddressEl.textContent = [building.address, building.county]
     .filter(Boolean)
     .join(" • ");

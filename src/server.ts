@@ -3429,22 +3429,38 @@ async function bootstrap() {
       return null;
     }
 
-    const activeTenancy = await repositoryContext.prisma.tenancy.findFirst({
-      where: {
-        userId: userSession.userId,
-        active: true
-      },
-      include: {
-        unit: {
-          select: { houseNumber: true }
-        }
-      },
-      orderBy: { createdAt: "desc" }
-    });
+    const activeTenancy = userSession.residentTenancyId
+      ? await repositoryContext.prisma.tenancy.findFirst({
+          where: {
+            id: userSession.residentTenancyId,
+            userId: userSession.userId,
+            active: true
+          },
+          include: {
+            unit: {
+              select: { houseNumber: true }
+            }
+          },
+          orderBy: { createdAt: "desc" }
+        })
+      : await repositoryContext.prisma.tenancy.findFirst({
+          where: {
+            userId: userSession.userId,
+            active: true
+          },
+          include: {
+            unit: {
+              select: { houseNumber: true }
+            }
+          },
+          orderBy: { createdAt: "desc" }
+        });
 
     if (!activeTenancy) {
       res.status(403).json({
-        error: "Tenant approval required before resident access."
+        error: userSession.residentTenancyId
+          ? "This resident session is no longer active for that room. Sign in again."
+          : "Tenant approval required before resident access."
       });
       return null;
     }
@@ -3473,11 +3489,13 @@ async function bootstrap() {
       token: "user-session",
       role: "resident" as const,
       userId: userSession.userId,
+      tenancyId: activeTenancy.id,
       buildingId: activeTenancy.buildingId,
       houseNumber: activeTenancy.unit.houseNumber,
       phoneNumber: userSession.phone,
       verificationStatus,
       mustChangePassword: userSession.mustChangePassword,
+      residentTenancyId: activeTenancy.id,
       createdAt: new Date().toISOString(),
       expiresAt: userSession.expiresAt
     };
@@ -4516,6 +4534,159 @@ async function bootstrap() {
     return results;
   };
 
+  const sanitizeAuditMetadata = (value: unknown) => {
+    if (value === undefined) {
+      return undefined;
+    }
+
+    return JSON.parse(JSON.stringify(value));
+  };
+
+  const mapRoomAccountAuditEvent = (event: {
+    id: string;
+    buildingId: string;
+    houseNumber: string;
+    tenancyId: string | null;
+    actorUserId: string | null;
+    actorRole: string | null;
+    actorName: string | null;
+    action: string;
+    summary: string;
+    metadata: unknown;
+    createdAt: Date;
+  }) => ({
+    id: event.id,
+    buildingId: event.buildingId,
+    houseNumber: event.houseNumber,
+    tenancyId: event.tenancyId ?? undefined,
+    action: event.action,
+    summary: event.summary,
+    actor: {
+      userId: event.actorUserId ?? undefined,
+      role: event.actorRole ?? undefined,
+      name: event.actorName ?? undefined
+    },
+    metadata: event.metadata ?? undefined,
+    createdAt: event.createdAt.toISOString()
+  });
+
+  const actorFromUserSession = (session: {
+    userId?: string;
+    role?: string;
+    fullName?: string;
+  }) => ({
+    userId: String(session.userId ?? "").trim() || undefined,
+    role: String(session.role ?? "").trim() || undefined,
+    name: String(session.fullName ?? "").trim() || undefined
+  });
+
+  const actorFromLandlordContext = (context: {
+    userId?: string;
+    role?: string;
+    userSession?: { userId: string; role: UserRole; fullName: string } | null;
+  }) => ({
+    userId:
+      String(context.userSession?.userId ?? context.userId ?? "").trim() || undefined,
+    role: String(context.role ?? context.userSession?.role ?? "").trim() || undefined,
+    name: String(context.userSession?.fullName ?? "").trim() || undefined
+  });
+
+  const findActiveTenancyIdForRoomAudit = async (
+    buildingId: string,
+    houseNumber: string
+  ) => {
+    if (!repositoryContext.prisma) {
+      return undefined;
+    }
+
+    const tenancy = await repositoryContext.prisma.tenancy.findFirst({
+      where: {
+        buildingId,
+        active: true,
+        unit: {
+          houseNumber: normalizeHouseNumber(houseNumber)
+        }
+      },
+      select: { id: true },
+      orderBy: { createdAt: "desc" }
+    });
+
+    return tenancy?.id;
+  };
+
+  const recordRoomAccountAuditEvent = async (input: {
+    buildingId: string;
+    houseNumber: string;
+    action: string;
+    summary: string;
+    tenancyId?: string;
+    actor?: {
+      userId?: string;
+      role?: string;
+      name?: string;
+    };
+    metadata?: unknown;
+  }) => {
+    if (!repositoryContext.prisma) {
+      return null;
+    }
+
+    const buildingId = String(input.buildingId ?? "").trim();
+    const houseNumber = normalizeHouseNumber(input.houseNumber);
+    if (!buildingId || !houseNumber) {
+      return null;
+    }
+
+    try {
+      const tenancyId =
+        String(input.tenancyId ?? "").trim() ||
+        (await findActiveTenancyIdForRoomAudit(buildingId, houseNumber));
+      const event = await repositoryContext.prisma.roomAccountAuditEvent.create({
+        data: {
+          buildingId,
+          houseNumber,
+          tenancyId: tenancyId || undefined,
+          actorUserId: String(input.actor?.userId ?? "").trim() || undefined,
+          actorRole: String(input.actor?.role ?? "").trim() || undefined,
+          actorName: String(input.actor?.name ?? "").trim() || undefined,
+          action: input.action,
+          summary: input.summary,
+          metadata: sanitizeAuditMetadata(input.metadata)
+        }
+      });
+      return mapRoomAccountAuditEvent(event);
+    } catch (error) {
+      console.warn("Failed to record room account audit event:", error);
+      return null;
+    }
+  };
+
+  const listRoomAccountAuditEvents = async (
+    buildingId: string,
+    houseNumber: string,
+    limit = 80
+  ) => {
+    if (!repositoryContext.prisma) {
+      return [];
+    }
+
+    try {
+      const rows = await repositoryContext.prisma.roomAccountAuditEvent.findMany({
+        where: {
+          buildingId,
+          houseNumber: normalizeHouseNumber(houseNumber)
+        },
+        orderBy: { createdAt: "desc" },
+        take: Math.min(Math.max(Math.trunc(limit), 1), 200)
+      });
+
+      return rows.map(mapRoomAccountAuditEvent);
+    } catch (error) {
+      console.warn("Failed to list room account audit events:", error);
+      return [];
+    }
+  };
+
   const buildLandlordRoomLedgerPayload = async (
     building: Awaited<ReturnType<typeof store.getBuilding>>,
     houseNumber: string
@@ -4525,12 +4696,13 @@ async function bootstrap() {
     }
 
     const normalizedHouseNumber = normalizeHouseNumber(houseNumber);
-    const [roomRows, visibleHouseNumbers, buildingConfiguration] = await Promise.all([
+    const [roomRows, visibleHouseNumbers, buildingConfiguration, auditEvents] = await Promise.all([
       buildLandlordUtilityRegistryRows(building.id, [normalizedHouseNumber]),
       listVisibleHouseNumbersForBuildings([building]),
       buildingConfigurationService
         ? buildingConfigurationService.getForBuilding(building.id)
-        : Promise.resolve(null)
+        : Promise.resolve(null),
+      listRoomAccountAuditEvents(building.id, normalizedHouseNumber)
     ]);
 
     const room =
@@ -4745,6 +4917,7 @@ async function bootstrap() {
       utilityPayments,
       expenditures,
       tickets,
+      auditEvents,
       monthlyCombinedCharge,
       buildingConfiguration
     };
@@ -5980,6 +6153,7 @@ async function bootstrap() {
           status: application.status,
           verificationStatus: "pending_review",
           role: "resident",
+          tenancyId: application.session.residentTenancyId,
           building: application.building,
           buildingId: application.building.id,
           houseNumber: application.houseNumber,
@@ -6035,7 +6209,8 @@ async function bootstrap() {
       }
 
       const parsed = residentPhoneLoginSchema.parse(req.body);
-      const session = await userAccountService.createResidentPhoneSession(parsed);
+      const login = await userAccountService.createResidentPhoneSession(parsed);
+      const { session } = login;
 
       const expiresAtMs = new Date(session.expiresAt).getTime();
       const maxAgeMs = Math.max(0, expiresAtMs - Date.now());
@@ -6051,16 +6226,17 @@ async function bootstrap() {
         data: {
           token: session.token,
           role: "resident",
-          buildingId: parsed.buildingId,
-          houseNumber: parsed.houseNumber.trim().toUpperCase(),
+          tenancyId: login.tenancyId,
+          buildingId: login.buildingId,
+          houseNumber: login.houseNumber,
           phoneMask: maskPhone(session.phone),
           verificationStatus: toResidentVerificationStatus(
             (
               await repositoryContext.prisma.tenantApplication.findFirst({
                 where: {
                   userId: session.userId,
-                  buildingId: parsed.buildingId,
-                  houseNumber: parsed.houseNumber.trim().toUpperCase()
+                  buildingId: login.buildingId,
+                  houseNumber: login.houseNumber
                 },
                 select: { status: true },
                 orderBy: { updatedAt: "desc" }
@@ -6075,7 +6251,8 @@ async function bootstrap() {
       const message = error instanceof Error ? error.message : "Unable to login resident";
       if (message === "TENANCY_NOT_FOUND") {
         return res.status(404).json({
-          error: "Active tenancy not found for the provided building, house number, and phone."
+          error:
+            "No active resident room is linked to those credentials. Confirm the phone number or request access."
         });
       }
       if (message === "RESIDENT_PASSWORD_INCORRECT") {
@@ -6200,6 +6377,7 @@ async function bootstrap() {
     return res.json({
       data: {
         role: session.role,
+        tenancyId: session.tenancyId,
         buildingId: session.buildingId,
         houseNumber: session.houseNumber,
         phoneMask: maskPhone(session.phoneNumber),
@@ -6245,6 +6423,7 @@ async function bootstrap() {
         data: {
           session: {
             role: session.role,
+            tenancyId: session.tenancyId,
             buildingId: session.buildingId,
             houseNumber: session.houseNumber,
             phoneMask: maskPhone(session.phoneNumber),
@@ -6340,6 +6519,7 @@ async function bootstrap() {
         data: {
           session: {
             role: session.role,
+            tenancyId: session.tenancyId,
             buildingId: session.buildingId,
             houseNumber: session.houseNumber,
             phoneMask: maskPhone(session.phoneNumber),
@@ -6384,7 +6564,7 @@ async function bootstrap() {
 
       const parsed = residentChangePasswordSchema.parse(req.body ?? {});
       const nextSession = await userAccountService.changeResidentPassword(
-        { userId: session.userId },
+        { userId: session.userId, residentTenancyId: session.tenancyId },
         parsed
       );
 
@@ -6402,6 +6582,7 @@ async function bootstrap() {
         data: {
           token: nextSession.token,
           role: "resident",
+          tenancyId: session.tenancyId,
           buildingId: session.buildingId,
           houseNumber: session.houseNumber,
           phoneMask: maskPhone(nextSession.phone),
@@ -10887,6 +11068,22 @@ async function bootstrap() {
       ]);
 
       await persistRentLedgerStateNow();
+      await recordRoomAccountAuditEvent({
+        buildingId,
+        houseNumber,
+        action: "rent.payment.recorded",
+        summary: `${providerLabel} rent payment of KSh ${outcome.event.amountKsh.toLocaleString("en-US")} recorded.`,
+        actor: actorFromLandlordContext(context),
+        metadata: {
+          paymentId: outcome.event.id,
+          provider: outcome.event.provider,
+          providerReference: outcome.event.providerReference,
+          amountKsh: outcome.event.amountKsh,
+          billingMonth: outcome.event.billingMonth,
+          paidAt: outcome.event.paidAt,
+          applied: outcome.applied
+        }
+      });
       return res.status(outcome.applied ? 201 : 202).json({
         data: {
           buildingId: outcome.event.buildingId,
@@ -10905,9 +11102,11 @@ async function bootstrap() {
     }
   });
 
-  app.delete(
-    "/api/landlord/rent/:houseNumber/payments/:paymentId",
-    async (req, res, next) => {
+  const handleLandlordUnrecordRentPayment = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
       try {
         const context = await resolveLandlordAccessContext(req, res);
         if (!context) {
@@ -10956,6 +11155,20 @@ async function bootstrap() {
         }
 
         await persistRentLedgerStateNow();
+        await recordRoomAccountAuditEvent({
+          buildingId,
+          houseNumber,
+          action: "rent.payment.unrecorded",
+          summary: `Rent payment of KSh ${outcome.event.amountKsh.toLocaleString("en-US")} unrecorded.`,
+          actor: actorFromLandlordContext(context),
+          metadata: {
+            paymentId: outcome.event.id,
+            provider: outcome.event.provider,
+            providerReference: outcome.event.providerReference,
+            amountKsh: outcome.event.amountKsh,
+            applied: outcome.applied
+          }
+        });
         return res.json({
           data: {
             buildingId: outcome.event.buildingId,
@@ -10978,7 +11191,15 @@ async function bootstrap() {
         }
         return next(error);
       }
-    }
+    };
+
+  app.delete(
+    "/api/landlord/rent/:houseNumber/payments/:paymentId",
+    handleLandlordUnrecordRentPayment
+  );
+  app.post(
+    "/api/landlord/rent/:houseNumber/payments/:paymentId/unrecord",
+    handleLandlordUnrecordRentPayment
   );
 
   app.get(
@@ -11923,6 +12144,27 @@ async function bootstrap() {
           }
         );
 
+        await recordRoomAccountAuditEvent({
+          buildingId,
+          houseNumber,
+          action: "utility.payment.recorded",
+          summary: `${utilityType === "water" ? "Water" : "Electricity"} payment of KSh ${data.event.amountKsh.toLocaleString("en-US")} recorded.`,
+          actor: actorFromLandlordContext(context),
+          metadata: {
+            utilityType,
+            paymentId: data.event.id,
+            provider: data.event.provider,
+            providerReference: data.event.providerReference,
+            amountKsh: data.event.amountKsh,
+            billingMonth: data.event.billingMonth,
+            paidAt: data.event.paidAt,
+            allocations: data.allocations.map((item) => ({
+              billingMonth: item.bill.billingMonth,
+              amountKsh: item.appliedAmountKsh,
+              balanceKsh: item.bill.balanceKsh
+            }))
+          }
+        });
         return res.status(201).json({ data, role: context.role });
       } catch (error) {
         const mapped = mapUtilityDomainError(error);
@@ -11934,9 +12176,11 @@ async function bootstrap() {
     }
   );
 
-  app.delete(
-    "/api/landlord/utilities/:utilityType/:houseNumber/payments/:paymentId",
-    async (req, res, next) => {
+  const handleLandlordUnrecordUtilityPayment = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
       try {
         const context = await resolveLandlordAccessContext(req, res);
         if (!context) {
@@ -11987,6 +12231,24 @@ async function bootstrap() {
         }
 
         await persistUtilityBillingStateNow();
+        await recordRoomAccountAuditEvent({
+          buildingId,
+          houseNumber,
+          action: "utility.payment.unrecorded",
+          summary: `${utilityType === "water" ? "Water" : "Electricity"} payment of KSh ${outcome.totalAmountKsh.toLocaleString("en-US")} unrecorded.`,
+          actor: actorFromLandlordContext(context),
+          metadata: {
+            utilityType,
+            paymentIds: outcome.events.map((event) => event.id),
+            amountKsh: outcome.totalAmountKsh,
+            allocations: outcome.allocations.map((item) => ({
+              paymentId: item.event.id,
+              billingMonth: item.bill.billingMonth,
+              amountKsh: item.appliedAmountKsh,
+              balanceKsh: item.bill.balanceKsh
+            }))
+          }
+        });
         return res.json({
           data: {
             utilityType,
@@ -12010,7 +12272,15 @@ async function bootstrap() {
         }
         return next(error);
       }
-    }
+    };
+
+  app.delete(
+    "/api/landlord/utilities/:utilityType/:houseNumber/payments/:paymentId",
+    handleLandlordUnrecordUtilityPayment
+  );
+  app.post(
+    "/api/landlord/utilities/:utilityType/:houseNumber/payments/:paymentId/unrecord",
+    handleLandlordUnrecordUtilityPayment
   );
 
   app.get("/api/admin/utilities/meters", (req, res, next) => {
@@ -12590,6 +12860,16 @@ async function bootstrap() {
       }
 
       purgeRuntimeStateForHouse(buildingId, houseNumber);
+      await recordRoomAccountAuditEvent({
+        buildingId,
+        houseNumber,
+        action: "room.removed",
+        summary: `Room ${houseNumber} removed from ${updated.building.name}.`,
+        actor: actorFromUserSession(session),
+        metadata: {
+          removedHouseNumber: updated.removedHouseNumber
+        }
+      });
 
       return res.status(200).json({
         data: {
@@ -12650,6 +12930,20 @@ async function bootstrap() {
           buildingId,
           userId,
           note: parsed.note
+        });
+        await recordRoomAccountAuditEvent({
+          buildingId,
+          houseNumber: data.houseNumber,
+          tenancyId: data.tenancyId,
+          action: "resident.removed",
+          summary: `${data.user.fullName} removed from house ${data.houseNumber}.`,
+          actor: actorFromUserSession(session),
+          metadata: {
+            removedUserId: data.user.id,
+            residentPhone: data.user.phone,
+            note: data.note,
+            removedAt: data.removedAt
+          }
         });
         return res.json({ data });
       } catch (error) {
@@ -12818,6 +13112,13 @@ async function bootstrap() {
         return next(error);
       }
     }
+  );
+
+  app.use("/api", (req, res) =>
+    res.status(404).json({
+      error: "API route not found",
+      path: req.path
+    })
   );
 
   app.use(

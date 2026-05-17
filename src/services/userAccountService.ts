@@ -35,6 +35,14 @@ export interface AuthenticatedUserSession {
   phone: string;
   expiresAt: string;
   mustChangePassword: boolean;
+  residentTenancyId?: string;
+}
+
+export interface ResidentPhoneSessionResult {
+  session: AuthenticatedUserSession;
+  tenancyId: string;
+  buildingId: string;
+  houseNumber: string;
 }
 
 export interface UserAccountServiceOptions {
@@ -416,49 +424,38 @@ export class UserAccountService {
 
     this.loginRateByPhone.delete(phone);
     this.loginRateByEmail.delete(normalizeEmail(user.email));
-    return this.issueSessionForUser(user);
+    const scopedTenancy =
+      tenancy ??
+      (await this.findActiveTenancyByHouseAndPhone({
+        buildingId: input.buildingId,
+        houseNumber,
+        phoneNumber: phone
+      }));
+    return this.issueSessionForUser(user, {
+      residentTenancyId: scopedTenancy?.id
+    });
   }
 
   async createResidentPhoneSession(
     input: ResidentPhoneLoginInput
-  ): Promise<AuthenticatedUserSession> {
+  ): Promise<ResidentPhoneSessionResult> {
     await this.purgeExpiredSessions();
     const phone = normalizeKenyaPhone(input.phoneNumber);
-    const houseNumber = normalizeHouseNumber(input.houseNumber);
+    const requestedBuildingId = normalizeOptionalText(input.buildingId);
+    const requestedHouseNumber = input.houseNumber
+      ? normalizeHouseNumber(input.houseNumber)
+      : undefined;
 
     if (this.isRateLimited(this.loginRateByPhone, phone)) {
       throw new Error("LOGIN_RATE_LIMITED");
     }
 
-    let tenancy = await this.findActiveTenancyByHouseAndPhone({
-      buildingId: input.buildingId,
-      houseNumber,
-      phoneNumber: phone
+    let user = await this.prisma.housingUser.findUnique({
+      where: { phone }
     });
-
-    let user = tenancy?.user ?? null;
     if (!user) {
-      const pendingApplication = await this.prisma.tenantApplication.findFirst({
-        where: {
-          buildingId: input.buildingId,
-          houseNumber,
-          status: "pending",
-          user: {
-            phone
-          }
-        },
-        include: {
-          user: true
-        },
-        orderBy: { updatedAt: "desc" }
-      });
-
-      if (!pendingApplication) {
-        this.trackFailedPhoneLogin(phone);
-        throw new Error("TENANCY_NOT_FOUND");
-      }
-
-      user = pendingApplication.user;
+      this.trackFailedPhoneLogin(phone);
+      throw new Error("TENANCY_NOT_FOUND");
     }
 
     if (!verifyPassword(input.password, user.passwordHash)) {
@@ -473,18 +470,55 @@ export class UserAccountService {
       throw new Error("RESIDENT_LOGIN_ROLE_CONFLICT");
     }
 
+    let tenancy =
+      requestedBuildingId && requestedHouseNumber
+        ? await this.findActiveTenancyByHouseAndPhone({
+            buildingId: requestedBuildingId,
+            houseNumber: requestedHouseNumber,
+            phoneNumber: phone
+          })
+        : await this.findLatestActiveTenancyByResidentUser(user.id);
+
     if (!tenancy) {
+      const pendingApplication = await this.findPendingTenantApplicationForResidentUser({
+        userId: user.id,
+        buildingId: requestedBuildingId,
+        houseNumber: requestedHouseNumber
+      });
+
+      if (!pendingApplication) {
+        throw new Error("TENANCY_NOT_FOUND");
+      }
+
       user = await this.provisionResidentForSetup({
-        buildingId: input.buildingId,
-        houseNumber,
+        buildingId: pendingApplication.buildingId,
+        houseNumber: pendingApplication.houseNumber,
         phoneNumber: phone,
         password: input.password
       });
+      tenancy = await this.findActiveTenancyByHouseAndPhone({
+        buildingId: pendingApplication.buildingId,
+        houseNumber: pendingApplication.houseNumber,
+        phoneNumber: phone
+      });
+    }
+
+    if (!tenancy) {
+      throw new Error("TENANCY_NOT_FOUND");
     }
 
     this.loginRateByPhone.delete(phone);
     this.loginRateByEmail.delete(normalizeEmail(user.email));
-    return this.issueSessionForUser(user);
+    const session = await this.issueSessionForUser(user, {
+      residentTenancyId: tenancy.id
+    });
+
+    return {
+      session,
+      tenancyId: tenancy.id,
+      buildingId: tenancy.buildingId,
+      houseNumber: tenancy.unit.houseNumber
+    };
   }
 
   async resetResidentPasswordByTenancy(input: ResidentAdminPasswordResetInput) {
@@ -662,7 +696,7 @@ export class UserAccountService {
   }
 
   async changeResidentPassword(
-    session: Pick<AuthenticatedUserSession, "userId">,
+    session: Pick<AuthenticatedUserSession, "userId" | "residentTenancyId">,
     input: ResidentChangePasswordInput
   ): Promise<AuthenticatedUserSession> {
     await this.purgeExpiredSessions();
@@ -686,24 +720,31 @@ export class UserAccountService {
 
     this.loginRateByPhone.delete(normalizeKenyaPhone(user.phone));
     this.loginRateByEmail.delete(normalizeEmail(user.email));
-    return this.issueSessionForUser(user);
+    return this.issueSessionForUser(user, {
+      residentTenancyId: session.residentTenancyId
+    });
   }
 
-  private async issueSessionForUser(user: {
-    id: string;
-    role: UserRole;
-    fullName: string;
-    email: string;
-    phone: string;
-    requirePasswordChange: boolean;
-  }): Promise<AuthenticatedUserSession> {
+  private async issueSessionForUser(
+    user: {
+      id: string;
+      role: UserRole;
+      fullName: string;
+      email: string;
+      phone: string;
+      requirePasswordChange: boolean;
+    },
+    options: { residentTenancyId?: string } = {}
+  ): Promise<AuthenticatedUserSession> {
     const token = createSessionToken();
     const tokenHash = hashSessionToken(token);
     const expiresAt = new Date(nowMs() + this.sessionTtlHours * 60 * 60 * 1000);
+    const residentTenancyId = normalizeOptionalText(options.residentTenancyId);
 
     await this.prisma.userSession.create({
       data: {
         userId: user.id,
+        residentTenancyId,
         tokenHash,
         expiresAt
       }
@@ -717,7 +758,8 @@ export class UserAccountService {
       email: user.email,
       phone: user.phone,
       expiresAt: expiresAt.toISOString(),
-      mustChangePassword: Boolean(user.requirePasswordChange)
+      mustChangePassword: Boolean(user.requirePasswordChange),
+      residentTenancyId
     };
   }
 
@@ -740,9 +782,55 @@ export class UserAccountService {
         }
       },
       include: {
-        user: true
+        user: true,
+        unit: {
+          select: { houseNumber: true }
+        }
       },
       orderBy: { createdAt: "desc" }
+    });
+  }
+
+  private async findLatestActiveTenancyByResidentUser(userId: string) {
+    return this.prisma.tenancy.findFirst({
+      where: {
+        active: true,
+        userId
+      },
+      include: {
+        user: true,
+        unit: {
+          select: { houseNumber: true }
+        }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+  }
+
+  private async findPendingTenantApplicationForResidentUser(input: {
+    userId: string;
+    buildingId?: string;
+    houseNumber?: string;
+  }) {
+    const where: Prisma.TenantApplicationWhereInput = {
+      userId: input.userId,
+      status: "pending"
+    };
+
+    if (input.buildingId) {
+      where.buildingId = input.buildingId;
+    }
+    if (input.houseNumber) {
+      where.houseNumber = input.houseNumber;
+    }
+
+    return this.prisma.tenantApplication.findFirst({
+      where,
+      select: {
+        buildingId: true,
+        houseNumber: true
+      },
+      orderBy: { updatedAt: "desc" }
     });
   }
 
@@ -847,6 +935,7 @@ export class UserAccountService {
       if (!existingHouseTenancy || existingHouseTenancy.userId !== user.id) {
         await tx.tenancy.updateMany({
           where: {
+            buildingId: input.buildingId,
             userId: user.id,
             active: true
           },
@@ -932,7 +1021,8 @@ export class UserAccountService {
       email: session.user.email,
       phone: session.user.phone,
       expiresAt: session.expiresAt.toISOString(),
-      mustChangePassword: Boolean(session.user.requirePasswordChange)
+      mustChangePassword: Boolean(session.user.requirePasswordChange),
+      residentTenancyId: session.residentTenancyId ?? undefined
     };
   }
 
@@ -1096,6 +1186,7 @@ export class UserAccountService {
         email: tenancy.user.email,
         phone: tenancy.user.phone
       },
+      tenancyId: tenancy.id,
       houseNumber: tenancy.unit.houseNumber,
       note,
       removedAt: endedAt.toISOString()
@@ -1317,7 +1408,14 @@ export class UserAccountService {
       phoneNumber,
       password: input.password
     });
-    const session = await this.issueSessionForUser(provisionedUser);
+    const tenancy = await this.findActiveTenancyByHouseAndPhone({
+      buildingId: input.buildingId,
+      houseNumber,
+      phoneNumber
+    });
+    const session = await this.issueSessionForUser(provisionedUser, {
+      residentTenancyId: tenancy?.id
+    });
 
     this.loginRateByPhone.delete(phoneNumber);
     this.loginRateByEmail.delete(normalizeEmail(provisionedUser.email));
@@ -1529,6 +1627,7 @@ export class UserAccountService {
       if (existingTenancy) {
         await tx.tenancy.updateMany({
           where: {
+            buildingId: application.buildingId,
             userId: application.userId,
             active: true,
             id: { not: existingTenancy.id }
@@ -1541,6 +1640,7 @@ export class UserAccountService {
       } else {
         await tx.tenancy.updateMany({
           where: {
+            buildingId: application.buildingId,
             userId: application.userId,
             active: true
           },

@@ -428,8 +428,11 @@ export const residentPasswordSetupSchema = z.object({
 });
 
 export const residentPhoneLoginSchema = z.object({
-  buildingId: nonEmptyString,
-  houseNumber: nonEmptyString.max(24),
+  buildingId: z.preprocess(emptyStringToUndefined, nonEmptyString.optional()),
+  houseNumber: z.preprocess(
+    emptyStringToUndefined,
+    nonEmptyString.max(24).optional()
+  ),
   phoneNumber: kenyaPhoneSchema,
   password: z.string().min(1).max(128)
 });

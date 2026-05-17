@@ -1,4 +1,5 @@
 import { initResponsiveTables } from "./mobile-table.js";
+import { notifyError, notifyStatus } from "./notifications.js";
 import {
   createUploadedImageGallery,
   renderSelectedImagePreviews,
@@ -85,6 +86,14 @@ const generateHouseNumbersBtnEl = document.getElementById(
   "generate-house-numbers-btn"
 );
 const buildingHousePreviewEl = document.getElementById("building-house-preview");
+const buildingCandidateRoomsEl = document.getElementById("building-candidate-rooms");
+const buildingCandidateRoomsCountEl = document.getElementById(
+  "building-candidate-rooms-count"
+);
+const buildingExistingRoomsEl = document.getElementById("building-existing-rooms");
+const buildingExistingRoomsSummaryEl = document.getElementById(
+  "building-existing-rooms-summary"
+);
 const buildingsBodyEl = document.getElementById("buildings-body");
 const refreshBuildingsBtnEl = document.getElementById("refresh-buildings");
 const buildingManagementSearchEl = document.getElementById("building-management-search");
@@ -498,6 +507,7 @@ function setBuildings(rows) {
       .map((item) => [normalizeLookupBuildingId(item.id), item])
       .filter(([key]) => Boolean(key))
   );
+  renderBuildingRoomDrawerState();
 }
 
 function setPaymentAccess(rows) {
@@ -517,6 +527,7 @@ function setRegistryRows(rows) {
 function setResidentDirectory(rows) {
   state.residentDirectory = Array.isArray(rows) ? rows : [];
   state.residentDirectoryByKey = buildRoomIndex(state.residentDirectory);
+  renderBuildingRoomDrawerState();
 }
 
 function setMeters(rows) {
@@ -608,12 +619,16 @@ function getUtilityBillForMonth(utilityType, buildingId, houseNumber, billingMon
 }
 
 function setStatus(message) {
-  authStatusEl.textContent = formatHouseManagerText(message);
+  const formatted = formatHouseManagerText(message);
+  authStatusEl.textContent = formatted;
+  notifyStatus(formatted);
 }
 
 function showError(message) {
-  landlordErrorEl.textContent = formatHouseManagerText(message);
+  const formatted = formatHouseManagerText(message);
+  landlordErrorEl.textContent = formatted;
   landlordErrorEl.classList.remove("hidden");
+  notifyError(formatted);
 }
 
 function clearError() {
@@ -698,6 +713,15 @@ function redirectToLogin() {
 
 function getBuildingNameById(buildingId) {
   return getBuildingRecord(buildingId)?.name ?? "";
+}
+
+function getBuildingDisplayName(building, fallback = "Building") {
+  const name = String(building?.name ?? "").trim();
+  return name || fallback;
+}
+
+function getBuildingDisplayNameById(buildingId, fallback = "Selected building") {
+  return getBuildingDisplayName(getBuildingRecord(buildingId), fallback);
 }
 
 function compareBuildingRecords(a, b) {
@@ -887,6 +911,7 @@ function openBuildingDrawer(buildingId) {
     state.selectedRoomBuildingId = buildingId;
   }
 
+  renderBuildingRoomDrawerState();
   buildingDrawerEl.classList.remove("hidden");
   if (buildingDrawerBackdropEl instanceof HTMLElement) {
     buildingDrawerBackdropEl.classList.remove("hidden");
@@ -2984,18 +3009,114 @@ async function saveResidentRentPayment(form) {
 }
 
 function parseHouseNumbers(value) {
-  const raw = String(value ?? "");
-  const items = raw
-    .split(/[\n,]/)
-    .map((item) => normalizeHouse(item))
-    .filter((item) => item.length > 0);
+  const items = splitHouseNumberEntries(value).flatMap((item) => {
+    const expanded = expandHouseRangeExpression(item);
+    return expanded ?? [normalizeHouse(item)];
+  });
 
-  return [...new Set(items)];
+  const unique = [...new Set(items)];
+  if (unique.length > 1000) {
+    throw new Error("Add rooms in batches of 1000 or fewer.");
+  }
+  return unique;
+}
+
+function splitHouseNumberEntries(value) {
+  return String(value ?? "")
+    .replace(/\s+\band\b\s+/gi, "\n")
+    .split(/[\n,;]+/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function parseRoomRangeEndpoint(value) {
+  const normalized = String(value ?? "").trim().toUpperCase().replace(/\s+/g, "");
+  const match = normalized.match(/^(.*?)(\d+)$/);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    prefix: match[1] ?? "",
+    number: Number(match[2]),
+    width: /^0\d/.test(match[2]) ? match[2].length : 0
+  };
+}
+
+function getRangePadWidth(...values) {
+  return values.reduce((maxWidth, value) => {
+    const text = String(value ?? "");
+    return /^0\d/.test(text) ? Math.max(maxWidth, text.length) : maxWidth;
+  }, 0);
+}
+
+function expandRoomRange(prefix, start, end, width = 0) {
+  if (!Number.isInteger(start) || !Number.isInteger(end)) {
+    return [];
+  }
+
+  const direction = end >= start ? 1 : -1;
+  const count = Math.abs(end - start) + 1;
+  if (count > 1000) {
+    throw new Error("Room ranges can include at most 1000 rooms at a time.");
+  }
+
+  return Array.from({ length: count }, (_item, index) => {
+    const value = start + index * direction;
+    const numberText = String(value).padStart(width, "0");
+    return normalizeHouse(`${prefix}${numberText}`);
+  });
+}
+
+function expandHouseRangeExpression(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return [];
+  }
+
+  const blockMatch = raw.match(/^(.+?):\s*(\d+)\s*(?:-|to|through|thru)\s*(\d+)$/i);
+  if (blockMatch) {
+    const prefix = normalizeHouse(blockMatch[1]);
+    const start = Number(blockMatch[2]);
+    const end = Number(blockMatch[3]);
+    const width = getRangePadWidth(blockMatch[2], blockMatch[3]);
+    return expandRoomRange(prefix, start, end, width);
+  }
+
+  const toMatch = raw.match(/^(.+?)\s+(?:to|through|thru)\s+(.+)$/i);
+  const dashMatch = raw.match(/^(.*?\d)\s*-\s*(.*\d)$/);
+  const match = toMatch ?? dashMatch;
+  if (!match) {
+    return null;
+  }
+
+  const start = parseRoomRangeEndpoint(match[1]);
+  const end = parseRoomRangeEndpoint(match[2]);
+  if (!start || !end) {
+    return null;
+  }
+
+  const prefix =
+    start.prefix && end.prefix
+      ? start.prefix === end.prefix
+        ? start.prefix
+        : null
+      : start.prefix || end.prefix;
+  if (prefix === null) {
+    return null;
+  }
+
+  return expandRoomRange(
+    prefix,
+    start.number,
+    end.number,
+    Math.max(start.width, end.width)
+  );
 }
 
 function buildGeneratedHouseNumbers() {
   const format = String(buildingHouseFormatEl?.value ?? "numbers");
-  const prefix = String(buildingHousePrefixEl?.value ?? "")
+  const prefixRaw = String(buildingHousePrefixEl?.value ?? "")
     .trim()
     .toUpperCase();
   const separator = String(buildingHouseSeparatorEl?.value ?? "-");
@@ -3014,15 +3135,17 @@ function buildGeneratedHouseNumbers() {
     throw new Error("Start, count, and step must be positive whole numbers.");
   }
 
-  const list = [];
-  for (let i = 0; i < count; i += 1) {
-    const value = start + i * step;
-    if (format === "prefix_number") {
-      const safePrefix = prefix || "A";
-      list.push(`${safePrefix}${separator}${value}`);
-    } else {
-      list.push(String(value));
-    }
+  const list = buildHouseNumberBlocks({
+    format,
+    prefixRaw,
+    separator,
+    start,
+    count,
+    step
+  });
+
+  if (list.length > 1000) {
+    throw new Error("Add rooms in batches of 1000 or fewer.");
   }
 
   if (order === "desc") {
@@ -3030,6 +3153,36 @@ function buildGeneratedHouseNumbers() {
   }
 
   return list.map((item) => normalizeHouse(item));
+}
+
+function buildHouseNumberBlocks({ format, prefixRaw, separator, start, count, step }) {
+  if (format !== "prefix_number") {
+    return Array.from({ length: count }, (_item, index) => String(start + index * step));
+  }
+
+  const prefixEntries = splitHouseNumberEntries(prefixRaw);
+  const blocks = prefixEntries.length > 0 ? prefixEntries : ["A"];
+
+  return blocks.flatMap((entry) => {
+    const blockMatch = entry.match(/^(.+?):\s*(\d+)\s*(?:-|to|through|thru)\s*(\d+)$/i);
+    const prefix = normalizeHouse(blockMatch ? blockMatch[1] : entry);
+    if (blockMatch) {
+      const blockStart = Number(blockMatch[2]);
+      const blockEnd = Number(blockMatch[3]);
+      const width = getRangePadWidth(blockMatch[2], blockMatch[3]);
+      return expandRoomRange(
+        `${prefix}${separator}`,
+        blockStart,
+        blockEnd,
+        width
+      );
+    }
+
+    return Array.from({ length: count }, (_item, index) => {
+      const value = start + index * step;
+      return `${prefix}${separator}${value}`;
+    });
+  });
 }
 
 function renderGeneratedHousePreview(houses) {
@@ -3044,7 +3197,134 @@ function renderGeneratedHousePreview(houses) {
 
   const preview = houses.slice(0, 12).join(", ");
   const suffix = houses.length > 12 ? "..." : "";
-  buildingHousePreviewEl.textContent = `Preview: ${preview}${suffix}`;
+  const existingSet = new Set(
+    getSelectedBuildingHouseNumbers().map((item) => normalizeHouse(item))
+  );
+  const newCount = houses.filter((item) => !existingSet.has(normalizeHouse(item))).length;
+  const existingCount = houses.length - newCount;
+  const summary =
+    existingCount > 0
+      ? `${houses.length} selected, ${newCount} new, ${existingCount} already exists`
+      : `${houses.length} selected`;
+  buildingHousePreviewEl.textContent = `Preview: ${summary}: ${preview}${suffix}`;
+}
+
+function getSelectedRoomBuilding() {
+  const buildingId = normalizeLookupBuildingId(state.selectedRoomBuildingId);
+  if (!buildingId) {
+    return null;
+  }
+
+  return state.buildingById.get(buildingId) ?? null;
+}
+
+function getSelectedBuildingHouseNumbers() {
+  const building = getSelectedRoomBuilding();
+  const fromBuilding = Array.isArray(building?.houseNumbers) ? building.houseNumbers : [];
+  const fromDirectory = state.residentDirectory
+    .filter(
+      (item) =>
+        normalizeLookupBuildingId(item.buildingId) ===
+        normalizeLookupBuildingId(building?.id)
+    )
+    .map((item) => item.houseNumber);
+
+  return [
+    ...new Set([...fromBuilding, ...fromDirectory].map((item) => normalizeHouse(item)))
+  ]
+    .filter(Boolean)
+    .sort(compareHouseNumber);
+}
+
+function renderRoomChipList(container, rooms, options = {}) {
+  if (!(container instanceof HTMLElement)) {
+    return;
+  }
+
+  container.replaceChildren();
+  const list = Array.isArray(rooms) ? rooms : [];
+  if (list.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "building-room-empty";
+    empty.textContent = options.emptyText ?? "-";
+    container.append(empty);
+    return;
+  }
+
+  const visibleLimit = Number(options.limit ?? 240);
+  const visibleRooms = list.slice(0, visibleLimit);
+  const existingSet = new Set(
+    (options.existingRooms ?? []).map((item) => normalizeHouse(item))
+  );
+
+  visibleRooms.forEach((room) => {
+    const chip = document.createElement("span");
+    const normalized = normalizeHouse(room);
+    chip.className = existingSet.has(normalized)
+      ? "building-room-chip is-existing"
+      : "building-room-chip";
+    chip.textContent = normalized;
+    container.append(chip);
+  });
+
+  if (list.length > visibleRooms.length) {
+    const more = document.createElement("span");
+    more.className = "building-room-chip is-muted";
+    more.textContent = `+${list.length - visibleRooms.length}`;
+    container.append(more);
+  }
+}
+
+function renderBuildingRoomDrawerState() {
+  const existingRooms = getSelectedBuildingHouseNumbers();
+  const existingSet = new Set(existingRooms.map((item) => normalizeHouse(item)));
+  let candidateRooms = [];
+  let parseErrorMessage = "";
+
+  try {
+    candidateRooms = parseHouseNumbers(buildingHouseNumbersEl?.value ?? "");
+  } catch (error) {
+    candidateRooms = [];
+    parseErrorMessage = error instanceof Error ? error.message : "Invalid room range.";
+  }
+
+  const newCandidateRooms = candidateRooms.filter(
+    (item) => !existingSet.has(normalizeHouse(item))
+  );
+
+  if (buildingCandidateRoomsCountEl instanceof HTMLElement) {
+    const existingCandidateCount = candidateRooms.length - newCandidateRooms.length;
+    buildingCandidateRoomsCountEl.textContent = parseErrorMessage
+      ? "Invalid"
+      : existingCandidateCount > 0
+        ? `${newCandidateRooms.length} new / ${candidateRooms.length} selected`
+        : `${newCandidateRooms.length}`;
+  }
+
+  if (buildingCandidateRoomsEl instanceof HTMLElement && parseErrorMessage) {
+    renderRoomChipList(buildingCandidateRoomsEl, [], {
+      emptyText: parseErrorMessage
+    });
+  } else if (buildingCandidateRoomsEl instanceof HTMLElement && candidateRooms.length > 0) {
+    renderRoomChipList(buildingCandidateRoomsEl, candidateRooms, {
+      existingRooms,
+      emptyText: "No rooms queued."
+    });
+  } else if (buildingCandidateRoomsEl instanceof HTMLElement && candidateRooms.length === 0) {
+    renderRoomChipList(buildingCandidateRoomsEl, [], {
+      emptyText: "No rooms queued."
+    });
+  }
+
+  if (buildingExistingRoomsSummaryEl instanceof HTMLElement) {
+    buildingExistingRoomsSummaryEl.textContent = `${existingRooms.length} room${
+      existingRooms.length === 1 ? "" : "s"
+    }`;
+  }
+
+  renderRoomChipList(buildingExistingRoomsEl, existingRooms, {
+    emptyText: "No rooms in this building yet."
+  });
 }
 
 function toIsoFromDateTimeLocal(value) {
@@ -3735,7 +4015,7 @@ function syncUtilitySheetBuildingOptions() {
   state.buildings.forEach((building) => {
     const option = document.createElement("option");
     option.value = building.id;
-    option.textContent = `${building.name} (${building.id})`;
+    option.textContent = getBuildingDisplayName(building);
     if (building.id === state.selectedRegistryBuildingId) {
       option.selected = true;
     }
@@ -4592,7 +4872,7 @@ function renderBuildingPhotoOptions() {
   state.buildings.forEach((building) => {
     const option = document.createElement("option");
     option.value = building.id;
-    option.textContent = `${building.name} (${building.id})`;
+    option.textContent = getBuildingDisplayName(building);
     option.selected = building.id === nextSelected;
     buildingPhotoBuildingSelectEl.append(option);
   });
@@ -4615,7 +4895,7 @@ function renderGlobalSearchBuildingOptions() {
   (Array.isArray(state.buildings) ? state.buildings : []).forEach((building) => {
     const option = document.createElement("option");
     option.value = building.id;
-    option.textContent = `${building.name} (${building.id})`;
+    option.textContent = getBuildingDisplayName(building);
     landlordGlobalSearchBuildingEl.append(option);
   });
 
@@ -4749,7 +5029,7 @@ function renderLandlordFocusPanel() {
   orderedBuildings.forEach((building) => {
     const option = document.createElement("option");
     option.value = building.id;
-    option.textContent = `${building.name} (${building.id})`;
+    option.textContent = getBuildingDisplayName(building);
     if (building.id === selectedBuildingId) {
       option.selected = true;
     }
@@ -4924,7 +5204,7 @@ function handleDeleteBuildingClick(target, buildingId, buildingName) {
   }
 
   const shouldProceed = window.confirm(
-    `Delete ${buildingName || buildingId} (${buildingId})?\nThis permanently removes the building, rooms, active tenancy links, and linked unit records.`
+    `Delete ${buildingName || getBuildingDisplayNameById(buildingId)}?\nThis permanently removes the building, rooms, active tenancy links, and linked unit records.`
   );
   if (!shouldProceed) {
     return;
@@ -4946,7 +5226,7 @@ function handleDeleteBuildingClick(target, buildingId, buildingName) {
         })
       });
 
-      setStatus(`Deleted building ${buildingName || buildingId}.`);
+      setStatus(`Deleted building ${buildingName || getBuildingDisplayNameById(buildingId)}.`);
       await loadBuildings();
 
       const nextBuildingId = state.selectedRegistryBuildingId || state.buildings[0]?.id || "";
@@ -5049,12 +5329,13 @@ function renderRoomBuildingOptions() {
   state.buildings.forEach((building) => {
     const option = document.createElement("option");
     option.value = building.id;
-    option.textContent = `${building.name} (${building.id})`;
+    option.textContent = getBuildingDisplayName(building);
     if (building.id === selected) {
       option.selected = true;
     }
     roomTargetBuildingEl.append(option);
   });
+  renderBuildingRoomDrawerState();
 }
 
 function syncRentPaymentBuildingOptions() {
@@ -5093,7 +5374,7 @@ function syncRentPaymentBuildingOptions() {
   rentEnabledBuildings.forEach((building) => {
     const option = document.createElement("option");
     option.value = building.id;
-    option.textContent = `${building.name} (${building.id})`;
+    option.textContent = getBuildingDisplayName(building);
     if (building.id === selected) {
       option.selected = true;
     }
@@ -5142,7 +5423,7 @@ function renderRegistryBuildingOptions() {
   state.buildings.forEach((building) => {
     const option = document.createElement("option");
     option.value = building.id;
-    option.textContent = `${building.name} (${building.id})`;
+    option.textContent = getBuildingDisplayName(building);
     if (building.id === knownSelection) {
       option.selected = true;
     }
@@ -5194,7 +5475,7 @@ function renderResidentsBuildingOptions() {
   state.buildings.forEach((building) => {
     const option = document.createElement("option");
     option.value = building.id;
-    option.textContent = `${building.name} (${building.id})`;
+    option.textContent = getBuildingDisplayName(building);
     if (building.id === selected) {
       option.selected = true;
     }
@@ -5239,7 +5520,7 @@ function syncOverviewLookupBuildingOptions() {
   state.buildings.forEach((building) => {
     const option = document.createElement("option");
     option.value = building.id;
-    option.textContent = `${building.name} (${building.id})`;
+    option.textContent = getBuildingDisplayName(building);
     if (building.id === selected) {
       option.selected = true;
     }
@@ -5277,7 +5558,7 @@ function syncCaretakerBuildingOptions() {
   state.buildings.forEach((building) => {
     const option = document.createElement("option");
     option.value = building.id;
-    option.textContent = `${building.name} (${building.id})`;
+    option.textContent = getBuildingDisplayName(building);
     if (building.id === selected) {
       option.selected = true;
     }
@@ -5315,7 +5596,7 @@ function syncLandlordTicketBuildingOptions() {
   state.buildings.forEach((building) => {
     const option = document.createElement("option");
     option.value = building.id;
-    option.textContent = `${building.name} (${building.id})`;
+    option.textContent = getBuildingDisplayName(building);
     if (building.id === state.selectedTicketBuildingId) {
       option.selected = true;
     }
@@ -5522,7 +5803,7 @@ function renderExpenditures(rows) {
 
   rows.forEach((item) => {
     const row = document.createElement("tr");
-    const buildingLabel = getBuildingNameById(item.buildingId) || item.buildingId || "-";
+    const buildingLabel = getBuildingDisplayNameById(item.buildingId, "-");
     const actorLabel = item.createdByName
       ? `${item.createdByName} (${formatRoleLabel(item.createdByRole)})`
       : formatRoleLabel(item.createdByRole);
@@ -5867,7 +6148,7 @@ function renderRentStatus(rows) {
 
   rows.forEach((item) => {
     const row = document.createElement("tr");
-    const buildingLabel = getBuildingNameById(item.buildingId) || item.buildingId || "-";
+    const buildingLabel = getBuildingDisplayNameById(item.buildingId, "-");
     const currentDueKsh = Number(item.currentMonthOutstandingKsh ?? item.balanceKsh ?? 0);
     const totalOutstandingKsh = Number(item.balanceKsh ?? currentDueKsh ?? 0);
     const quickPaymentAmountKsh = Math.max(0, totalOutstandingKsh || currentDueKsh);
@@ -5929,7 +6210,7 @@ function renderOverviewCollections(rows) {
 
   rankedRows.forEach((item) => {
     const row = document.createElement("tr");
-    const buildingLabel = getBuildingNameById(item.buildingId) || item.buildingId || "-";
+    const buildingLabel = getBuildingDisplayNameById(item.buildingId, "-");
     const latestPayment = Number(item.latestPaymentAmountKsh ?? 0) > 0
       ? `${formatCurrency(item.latestPaymentAmountKsh)} • ${formatDateTime(item.latestPaymentAt)}`
       : "-";
@@ -6919,10 +7200,13 @@ function renderPaymentAccess(rows) {
 
   rows.forEach((item) => {
     const row = document.createElement("tr");
-    const safeBuildingName = item.buildingName ?? item.buildingId;
+    const safeBuildingName = getBuildingDisplayNameById(
+      item.buildingId,
+      item.buildingName ?? "Building"
+    );
     const canEdit = !isCaretakerRole();
     row.innerHTML = `
-      <td><strong>${safeBuildingName}</strong><br /><small>${item.buildingId}</small></td>
+      <td><strong>${escapeHtml(safeBuildingName)}</strong></td>
       <td><label><input type="checkbox" data-setting="rentEnabled" ${item.rentEnabled ? "checked" : ""} ${canEdit ? "" : "disabled"} /> Enabled</label></td>
       <td><label><input type="checkbox" data-setting="waterEnabled" ${item.waterEnabled ? "checked" : ""} ${canEdit ? "" : "disabled"} /> Enabled</label></td>
       <td><label><input type="checkbox" data-setting="electricityEnabled" ${item.electricityEnabled ? "checked" : ""} ${canEdit ? "" : "disabled"} /> Enabled</label></td>
@@ -6976,7 +7260,7 @@ function renderWifiPackageBuildingOptions(rows) {
   visibleRows.forEach((building) => {
     const option = document.createElement("option");
     option.value = building.id;
-    option.textContent = `${building.name} (${building.id})`;
+    option.textContent = getBuildingDisplayName(building);
     wifiPackageBuildingSelectEl.append(option);
   });
 
@@ -7423,7 +7707,7 @@ function openOverviewUtilityPaymentModal(action) {
     return;
   }
 
-  const buildingLabel = getBuildingNameById(buildingId) || buildingId;
+  const buildingLabel = getBuildingDisplayNameById(buildingId);
 
   if (overviewUtilityPaymentFormEl instanceof HTMLFormElement) {
     overviewUtilityPaymentFormEl.dataset.buildingId = buildingId;
@@ -7525,7 +7809,7 @@ function prefillRentPaymentFromStatus(action) {
     rentPaymentDetailsEl.open = true;
   }
   if (rentPaymentHelpEl instanceof HTMLElement) {
-    const buildingLabel = getBuildingNameById(buildingId) || buildingId;
+    const buildingLabel = getBuildingDisplayNameById(buildingId);
     rentPaymentHelpEl.textContent = `${formatCurrency(amountKsh)} for ${buildingLabel} ${houseNumber}.`;
   }
 
@@ -8153,14 +8437,25 @@ generateHouseNumbersBtnEl?.addEventListener("click", () => {
     const generated = buildGeneratedHouseNumbers();
     buildingHouseNumbersEl.value = generated.join(", ");
     renderGeneratedHousePreview(generated);
+    renderBuildingRoomDrawerState();
     clearError();
   } catch (error) {
     handleLandlordError(error, "Unable to generate room numbers.");
   }
 });
 
+buildingHouseNumbersEl?.addEventListener("input", () => {
+  try {
+    renderGeneratedHousePreview(parseHouseNumbers(buildingHouseNumbersEl.value));
+  } catch (_error) {
+    renderGeneratedHousePreview([]);
+  }
+  renderBuildingRoomDrawerState();
+});
+
 roomTargetBuildingEl?.addEventListener("change", () => {
   state.selectedRoomBuildingId = String(roomTargetBuildingEl.value || "").trim();
+  renderBuildingRoomDrawerState();
   updateLandlordBranding();
 });
 
@@ -8469,7 +8764,13 @@ buildingFormEl.addEventListener("submit", (event) => {
     return;
   }
 
-  let houseNumbers = parseHouseNumbers(buildingHouseNumbersEl.value);
+  let houseNumbers;
+  try {
+    houseNumbers = parseHouseNumbers(buildingHouseNumbersEl.value);
+  } catch (error) {
+    showError(error instanceof Error ? error.message : "Invalid room range.");
+    return;
+  }
   if (houseNumbers.length === 0) {
     try {
       houseNumbers = buildGeneratedHouseNumbers();
@@ -8493,10 +8794,10 @@ buildingFormEl.addEventListener("submit", (event) => {
       const payload = await requestJson(
         `/api/landlord/buildings/${encodeURIComponent(buildingId)}/houses`,
         {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
           body: JSON.stringify({ houseNumbers })
         }
       );
@@ -8505,10 +8806,14 @@ buildingFormEl.addEventListener("submit", (event) => {
       renderGeneratedHousePreview([]);
 
       const addedCount = Number(payload?.data?.addedCount ?? houseNumbers.length);
-      setStatus(`Added ${addedCount} room(s) to building ${buildingId}.`);
+      setStatus(
+        addedCount > 0
+          ? `Added ${addedCount} room(s) to building ${buildingId}.`
+          : `No new rooms added to building ${buildingId}.`
+      );
       await Promise.all([loadBuildings(), loadApplications()]);
       await loadRegistryRows();
-      closeBuildingDrawer();
+      renderBuildingRoomDrawerState();
     } catch (error) {
       handleLandlordError(error, "Failed to add rooms to building.");
     } finally {
@@ -8524,7 +8829,13 @@ createBuildingFormEl?.addEventListener("submit", (event) => {
   const name = String(createBuildingNameEl?.value ?? "").trim();
   const county = String(createBuildingCountyEl?.value ?? "").trim();
   const address = String(createBuildingAddressEl?.value ?? "").trim();
-  const houseNumbers = parseHouseNumbers(createBuildingHouseNumbersEl?.value ?? "");
+  let houseNumbers;
+  try {
+    houseNumbers = parseHouseNumbers(createBuildingHouseNumbersEl?.value ?? "");
+  } catch (error) {
+    showError(error instanceof Error ? error.message : "Invalid room range.");
+    return;
+  }
 
   if (!name || !county || !address) {
     showError("Building name, county, and address are required.");
@@ -8697,7 +9008,9 @@ buildingsBodyEl.addEventListener("click", (event) => {
   }
 
   if (target.dataset.action === "delete-building") {
-    const buildingName = String(target.dataset.buildingName || buildingId).trim();
+    const buildingName = String(
+      target.dataset.buildingName || getBuildingDisplayNameById(buildingId)
+    ).trim();
     handleDeleteBuildingClick(target, buildingId, buildingName);
     return;
   }
@@ -8711,7 +9024,9 @@ buildingsBodyEl.addEventListener("click", (event) => {
 
   void activateBuilding(buildingId)
     .then(() => {
-      const buildingName = String(target.dataset.buildingName || buildingId).trim();
+      const buildingName = String(
+        target.dataset.buildingName || getBuildingDisplayNameById(buildingId)
+      ).trim();
       setStatus(`Focused on ${buildingName}. The main landlord tools now follow this building.`);
     })
     .catch((error) => {
@@ -9346,7 +9661,7 @@ utilitySheetFormEl?.addEventListener("submit", (event) => {
             id: auditId,
             createdAt: new Date().toISOString(),
             buildingId,
-            buildingName: selectedBuilding?.name || buildingId,
+            buildingName: getBuildingDisplayName(selectedBuilding),
             billingMonth,
             dueDate,
             note: bulkNote,
@@ -9911,7 +10226,7 @@ landlordFocusBuildingSelectEl?.addEventListener("change", () => {
   clearError();
   void activateBuilding(buildingId)
     .then(() => {
-      const buildingName = getBuildingNameById(buildingId) || buildingId;
+      const buildingName = getBuildingDisplayNameById(buildingId);
       setStatus(`Focused on ${buildingName}.`);
     })
     .catch((error) => {

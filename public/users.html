@@ -85,28 +85,11 @@
         <section class="section-head">
           <h2>Resident access</h2>
           <p>
-            Sign in with house number, phone number, and password, or request resident access.
+            Sign in with phone number and password. Add room details only for access requests or password recovery.
           </p>
         </section>
 
         <form id="resident-auth-form" class="report-form">
-          <div class="field-grid">
-            <label>
-              Building
-              <select id="auth-building-id" required></select>
-            </label>
-            <label>
-              House Number
-              <input
-                id="auth-house-number"
-                type="text"
-                maxlength="24"
-                placeholder="A-12"
-                required
-              />
-            </label>
-          </div>
-
           <label>
             Phone Number
             <input
@@ -148,6 +131,27 @@
             <input id="resident-remember-device" type="checkbox" />
             Remember this device for faster sign-in next time
           </label>
+
+          <section class="section-head">
+            <h2>Room details</h2>
+            <p>Used for access requests and password recovery.</p>
+          </section>
+
+          <div class="field-grid">
+            <label>
+              Building
+              <select id="auth-building-id"></select>
+            </label>
+            <label>
+              House Number
+              <input
+                id="auth-house-number"
+                type="text"
+                maxlength="24"
+                placeholder="A-12"
+              />
+            </label>
+          </div>
 
           <section class="section-head">
             <h2>Access request details</h2>
@@ -830,6 +834,6 @@
       </article>
     </section>
 
-    <script type="module" src="/users.js?v=20260516a"></script>
+    <script type="module" src="/users.js?v=20260516b"></script>
   </body>
 </html>

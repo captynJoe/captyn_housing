@@ -1,5 +1,6 @@
 import { initPasswordVisibilityToggles } from "./password-visibility.js";
 import { initResponsiveTables } from "./mobile-table.js";
+import { notifyError, notifyStatus } from "./notifications.js";
 
 const authStatusEl = document.getElementById("auth-status");
 const adminRoleEl = document.getElementById("admin-role");
@@ -120,6 +121,7 @@ function showError(message) {
 
   adminErrorEl.textContent = message;
   adminErrorEl.classList.remove("hidden");
+  notifyError(message);
 }
 
 function clearError() {
@@ -135,6 +137,7 @@ function setStatus(message) {
   if (authStatusEl instanceof HTMLElement) {
     authStatusEl.textContent = message;
   }
+  notifyStatus(message);
 }
 
 function redirectToLogin() {
@@ -246,6 +249,18 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function getBuildingDisplayName(building, fallback = "Building") {
+  const name = String(building?.name ?? "").trim();
+  return name || fallback;
+}
+
+function getBuildingDisplayNameById(buildingId, fallback = "Selected building") {
+  return getBuildingDisplayName(
+    state.buildings.find((item) => item.id === buildingId),
+    fallback
+  );
 }
 
 function normalizeHouse(value) {
@@ -647,7 +662,7 @@ function renderPasswordRecoveryRequests(requests) {
     if (request.status === "pending") {
       row.innerHTML = `
         <td>${formatDateTime(request.requestedAt)}</td>
-        <td>${escapeHtml(request.buildingId)}</td>
+        <td>${escapeHtml(getBuildingDisplayNameById(request.buildingId))}</td>
         <td>${escapeHtml(request.houseNumber)}</td>
         <td>${escapeHtml(request.phoneMask ?? request.phoneNumber)}</td>
         <td><strong>${escapeHtml(request.status)}</strong></td>
@@ -718,7 +733,7 @@ function renderPasswordRecoveryRequests(requests) {
     } else {
       row.innerHTML = `
         <td>${formatDateTime(request.requestedAt)}</td>
-        <td>${escapeHtml(request.buildingId)}</td>
+        <td>${escapeHtml(getBuildingDisplayNameById(request.buildingId))}</td>
         <td>${escapeHtml(request.houseNumber)}</td>
         <td>${escapeHtml(request.phoneMask ?? request.phoneNumber)}</td>
         <td><strong>${escapeHtml(request.status)}</strong></td>
@@ -952,11 +967,10 @@ function renderOwnershipGaps(buildings) {
   }
 
   gaps.forEach((building) => {
-    const row = document.createElement("tr");
-    row.innerHTML = `
+      const row = document.createElement("tr");
+      row.innerHTML = `
       <td>
-        <strong>${escapeHtml(building.name)}</strong><br />
-        <small>${escapeHtml(building.id)}</small>
+        <strong>${escapeHtml(getBuildingDisplayName(building))}</strong>
       </td>
       <td>${escapeHtml(building.county)}</td>
       <td>${escapeHtml(building.units ?? "-")}</td>
@@ -995,7 +1009,7 @@ function getSelectedAdminBillingBuildingId() {
 
 async function deleteBuildingFromAdmin(buildingId, buildingName) {
   const shouldProceed = window.confirm(
-    `Delete ${buildingName} (${buildingId})? This permanently removes the building and linked unit records.`
+    `Delete ${buildingName}? This permanently removes the building and linked unit records.`
   );
   if (!shouldProceed) {
     return false;
@@ -1016,7 +1030,7 @@ async function deleteBuildingFromAdmin(buildingId, buildingName) {
     state.selectedAdminBillingBuildingId = "";
   }
 
-  setStatus(`Deleted building ${buildingName} (${buildingId}).`);
+  setStatus(`Deleted building ${buildingName}.`);
   await Promise.all([loadOverview(), loadBuildings()]);
   return true;
 }
@@ -1116,7 +1130,7 @@ function renderAdminBillingSummary() {
     ? state.adminUtilityPayments.length
     : 0;
   adminBillingSummaryEl.textContent =
-    `${building?.name ?? buildingId} (${buildingId}) has ${roomCount} room billing row(s) in view and ${paymentCount} recent utility payment(s) loaded.`;
+    `${getBuildingDisplayName(building)} has ${roomCount} room billing row(s) in view and ${paymentCount} recent utility payment(s) loaded.`;
 }
 
 function syncAdminBillingBuildingOptions() {
@@ -1146,7 +1160,7 @@ function syncAdminBillingBuildingOptions() {
   sortedBuildings.forEach((building) => {
     const option = document.createElement("option");
     option.value = building.id;
-    option.textContent = `${building.name} (${building.id})`;
+    option.textContent = getBuildingDisplayName(building);
     adminBillingBuildingSelectEl.append(option);
   });
 
@@ -1242,7 +1256,7 @@ function renderBuildings(rows) {
   buildingsBodyEl.replaceChildren();
 
   if (!Array.isArray(rows) || rows.length === 0) {
-    appendEmptyRow(buildingsBodyEl, 9, "No buildings configured.");
+    appendEmptyRow(buildingsBodyEl, 8, "No buildings configured.");
     return;
   }
 
@@ -1258,8 +1272,7 @@ function renderBuildings(rows) {
 
       const row = document.createElement("tr");
       row.innerHTML = `
-        <td><small>${escapeHtml(building.id)}</small></td>
-        <td>${escapeHtml(building.name)}</td>
+        <td><strong>${escapeHtml(getBuildingDisplayName(building))}</strong></td>
         <td>${escapeHtml(building.county)}</td>
         <td>${escapeHtml(building.address)}</td>
         <td>${escapeHtml(building.units ?? "-")}</td>
@@ -1468,7 +1481,9 @@ if (buildingsBodyEl instanceof HTMLElement) {
 
     const action = String(target.dataset.action || "");
     const buildingId = String(target.dataset.buildingId || "").trim();
-    const buildingName = String(target.dataset.buildingName || buildingId).trim();
+    const buildingName = String(
+      target.dataset.buildingName || getBuildingDisplayNameById(buildingId)
+    ).trim();
     if (!buildingId) {
       return;
     }
@@ -1476,7 +1491,7 @@ if (buildingsBodyEl instanceof HTMLElement) {
     if (action === "assign-building-landlord") {
       const currentOwnerPhone = String(target.dataset.ownerPhone || "").trim();
       const identifierRaw = window.prompt(
-        `Assign landlord for ${buildingName} (${buildingId}).\nEnter landlord phone or email:`,
+        `Assign landlord for ${buildingName}.\nEnter landlord phone or email:`,
         currentOwnerPhone
       );
       if (identifierRaw == null) {

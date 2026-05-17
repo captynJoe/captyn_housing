@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=20260322b" />
-    <link rel="stylesheet" href="/landlord.css?v=20260516i" />
+    <link rel="stylesheet" href="/landlord.css?v=20260516j" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -1255,7 +1255,7 @@
             <textarea
               id="create-building-house-numbers"
               rows="5"
-              placeholder="A-1, A-2, A-3"
+              placeholder="A1-A20, B1-B16"
               required
             ></textarea>
           </label>
@@ -1300,21 +1300,26 @@
               <label>
                 Format
                 <select id="building-house-format">
+                  <option value="prefix_number">Prefix + number (A1, A2)</option>
                   <option value="numbers">Numbers only (1, 2, 3)</option>
-                  <option value="prefix_number">Prefix + number (A-1, A-2)</option>
                 </select>
               </label>
               <label>
-                Prefix (optional)
-                <input id="building-house-prefix" type="text" maxlength="6" placeholder="A" />
+                Prefix/block(s)
+                <input
+                  id="building-house-prefix"
+                  type="text"
+                  maxlength="80"
+                  placeholder="A:1-20, B:1-16"
+                />
               </label>
             </div>
             <div class="inline-fields compact-fields">
               <label>
                 Separator
                 <select id="building-house-separator">
-                  <option value="-">Dash (-)</option>
                   <option value="">None</option>
+                  <option value="-">Dash (-)</option>
                 </select>
               </label>
               <label>
@@ -1331,8 +1336,8 @@
                 <input id="building-house-start" type="number" min="1" value="1" required />
               </label>
               <label>
-                How many houses
-                <input id="building-house-count" type="number" min="1" max="2000" value="12" required />
+                Count
+                <input id="building-house-count" type="number" min="1" max="1000" value="12" required />
               </label>
               <label>
                 Step
@@ -1343,14 +1348,28 @@
               <button id="generate-house-numbers-btn" type="button">Generate</button>
             </div>
             <p id="building-house-preview" class="status-text">
-              Preview: A-1, A-2, A-3...
+              Preview: A1, A2, A3...
             </p>
+            <div class="building-room-preview">
+              <div class="building-room-preview-head">
+                <h4>Rooms to add</h4>
+                <span id="building-candidate-rooms-count">0</span>
+              </div>
+              <div id="building-candidate-rooms" class="building-room-chip-list"></div>
+            </div>
           </section>
 
           <label>
-            Room/House Numbers (comma or new line separated)
-            <textarea id="building-house-numbers" rows="5" placeholder="A-1, A-2, A-3" required></textarea>
+            Room/House Numbers or Ranges
+            <textarea id="building-house-numbers" rows="5" placeholder="A1-A20, B1-B16" required></textarea>
           </label>
+          <details class="building-room-list" open>
+            <summary>
+              <span>Show rooms</span>
+              <small id="building-existing-rooms-summary">0 rooms</small>
+            </summary>
+            <div id="building-existing-rooms" class="building-room-chip-list"></div>
+          </details>
           <button type="submit">Add Rooms To Building</button>
         </form>
       </aside>
@@ -1367,6 +1386,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=20260516h"></script>
+    <script type="module" src="/landlord.js?v=20260516k"></script>
   </body>
 </html>

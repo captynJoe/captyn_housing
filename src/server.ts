@@ -6294,7 +6294,18 @@ async function bootstrap() {
   app.use(express.json({ limit: "1mb" }));
   await mkdir(uploadsDir, { recursive: true });
   app.use("/uploads", express.static(uploadsDir));
-  app.use(express.static(publicDir));
+  app.use(
+    express.static(publicDir, {
+      setHeaders(res, filePath) {
+        const fileName = path.basename(filePath);
+        if (fileName === "landlord.html" || fileName === "landlord.js" || fileName === "landlord.css") {
+          res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+          res.setHeader("Pragma", "no-cache");
+          res.setHeader("Expires", "0");
+        }
+      }
+    })
+  );
   app.use((req, res, next) => {
     const pathValue = req.path ?? "";
     const shouldLog =

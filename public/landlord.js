@@ -5091,6 +5091,7 @@ function renderLandlordFocusPanel() {
   landlordFocusOutstandingEl.textContent = formatCurrency(summary.outstanding);
   landlordFocusNoteEl.textContent = `${summary.building.name} • ${summary.building.county} • ${summary.building.address} • Updated ${formatDateTime(summary.building.updatedAt)}`;
 }
+
 function matchesBuildingManagementQuery(building, query) {
   const normalizedQuery = String(query ?? "").trim().toLowerCase();
   if (!normalizedQuery) {
@@ -5557,6 +5558,7 @@ function syncOverviewLookupBuildingOptions() {
     overviewRoomBuildingSelectEl.append(option);
   });
 }
+
 function syncCaretakerBuildingOptions() {
   if (!(caretakerBuildingSelectEl instanceof HTMLSelectElement)) {
     return;
@@ -8066,13 +8068,27 @@ function renderMetrics() {
         )
       : actionableBills.reduce((sum, item) => sum + utilityAmount(item.balanceKsh), 0);
 
-  metricMetersEl.textContent = String(meters);
-  metricUsersEl.textContent = String(residentUsers);
-  metricBillsEl.textContent = String(bills);
-  metricUnpaidEl.textContent = String(unpaid);
-  metricOverdueEl.textContent = String(overdue);
-  metricPaymentsEl.textContent = formatCurrency(paidTotal);
-  metricBalanceEl.textContent = formatCurrency(outstanding);
+  if (metricMetersEl instanceof HTMLElement) {
+    metricMetersEl.textContent = String(meters);
+  }
+  if (metricUsersEl instanceof HTMLElement) {
+    metricUsersEl.textContent = String(residentUsers);
+  }
+  if (metricBillsEl instanceof HTMLElement) {
+    metricBillsEl.textContent = String(bills);
+  }
+  if (metricUnpaidEl instanceof HTMLElement) {
+    metricUnpaidEl.textContent = String(unpaid);
+  }
+  if (metricOverdueEl instanceof HTMLElement) {
+    metricOverdueEl.textContent = String(overdue);
+  }
+  if (metricPaymentsEl instanceof HTMLElement) {
+    metricPaymentsEl.textContent = formatCurrency(paidTotal);
+  }
+  if (metricBalanceEl instanceof HTMLElement) {
+    metricBalanceEl.textContent = formatCurrency(outstanding);
+  }
   renderLandlordFocusPanel();
 }
 
@@ -8652,6 +8668,7 @@ async function activateBuilding(buildingId, options = {}) {
     loadResidents()
   ]);
 }
+
 function applyLandlordStartupData(startup) {
   const selection = startup?.selection ?? {};
   setBuildings(startup?.buildings ?? []);
@@ -11023,6 +11040,7 @@ overviewRoomBuildingSelectEl?.addEventListener("change", () => {
       overviewRoomBuildingSelectEl.disabled = false;
     });
 });
+
 overviewRoomSearchInputEl?.addEventListener("input", () => {
   const value = String(overviewRoomSearchInputEl.value || "").trim();
   state.residentSearchQuery = value;

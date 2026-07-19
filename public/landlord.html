@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=20260322b" />
-    <link rel="stylesheet" href="/landlord.css?v=20260517g" />
+    <link rel="stylesheet" href="/landlord.css?v=20260719b" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -27,35 +27,19 @@
             </p>
           </div>
           <div class="landlord-navbar-actions">
-            <a href="/resident" class="home-link">Resident Portal</a>
-            <span id="landlord-role" class="status-text">role: -</span>
-            <button id="refresh-all-btn" type="button">Refresh All</button>
+            <a href="/resident" class="home-link" aria-label="Open resident portal">Resident</a>
+            <span id="landlord-role" class="status-text hidden" aria-hidden="true">role: -</span>
+            <button id="refresh-all-btn" type="button">Refresh</button>
             <button id="landlord-logout-btn" type="button">Sign Out</button>
             <button
               type="button"
               class="landlord-primary-cta"
               data-action="open-create-building-drawer"
             >
-              + New Building
+              + Building
             </button>
           </div>
         </div>
-        <form id="landlord-global-search-form" class="landlord-global-search">
-          <label class="landlord-global-search-field">
-            Quick Room Search
-            <input
-              id="landlord-global-search-input"
-              type="search"
-              maxlength="120"
-              placeholder="Name, phone, house"
-            />
-          </label>
-          <label class="landlord-global-search-field">
-            Building
-            <select id="landlord-global-search-building"></select>
-          </label>
-          <button id="landlord-global-search-btn" type="submit">Open Room</button>
-        </form>
         <nav class="landlord-nav" aria-label="Landlord sections">
           <button
             type="button"
@@ -155,10 +139,6 @@
           </div>
         </div>
         <div class="landlord-focus-grid">
-          <label class="landlord-focus-field">
-            Working Building
-            <select id="landlord-focus-building-select"></select>
-          </label>
           <div class="landlord-focus-summary" aria-live="polite">
             <div class="landlord-focus-stat">
               <span>Units</span>
@@ -286,7 +266,7 @@
                 type="button"
                 data-action="open-create-building-drawer"
               >
-                + New Building
+                + Building
               </button>
               <button id="refresh-buildings" type="button">Refresh</button>
             </div>
@@ -1485,6 +1465,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=20260517g"></script>
+    <script type="module" src="/landlord.js?v=20260719b"></script>
   </body>
 </html>

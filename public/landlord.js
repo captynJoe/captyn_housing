@@ -5000,7 +5000,7 @@ async function ensureSession() {
     }
 
     state.role = role;
-    landlordRoleEl.textContent = `role: ${formatRoleLabel(role)}`;
+    landlordRoleEl.textContent = formatRoleLabel(role);
     applyRoleCapabilities();
     setStatus(`Signed in as ${formatRoleLabel(role)}.`);
     return true;
@@ -5055,7 +5055,6 @@ function getFocusedBuildingSummary(buildingId) {
 
 function renderLandlordFocusPanel() {
   if (
-    !(landlordFocusBuildingSelectEl instanceof HTMLSelectElement) ||
     !(landlordFocusUnitsEl instanceof HTMLElement) ||
     !(landlordFocusResidentsEl instanceof HTMLElement) ||
     !(landlordFocusOpenBillsEl instanceof HTMLElement) ||
@@ -5065,14 +5064,7 @@ function renderLandlordFocusPanel() {
     return;
   }
 
-  landlordFocusBuildingSelectEl.replaceChildren();
-
   if (!Array.isArray(state.buildings) || state.buildings.length === 0) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "No buildings available";
-    landlordFocusBuildingSelectEl.append(option);
-    landlordFocusBuildingSelectEl.disabled = true;
     landlordFocusUnitsEl.textContent = "-";
     landlordFocusResidentsEl.textContent = "-";
     landlordFocusOpenBillsEl.textContent = "-";
@@ -5083,19 +5075,6 @@ function renderLandlordFocusPanel() {
   }
 
   const selectedBuildingId = getFocusedBuildingId() || state.buildings[0]?.id || "";
-  const orderedBuildings = [...state.buildings].sort(compareBuildingRecords);
-  landlordFocusBuildingSelectEl.disabled = false;
-
-  orderedBuildings.forEach((building) => {
-    const option = document.createElement("option");
-    option.value = building.id;
-    option.textContent = getBuildingDisplayName(building);
-    if (building.id === selectedBuildingId) {
-      option.selected = true;
-    }
-    landlordFocusBuildingSelectEl.append(option);
-  });
-
   const summary = getFocusedBuildingSummary(selectedBuildingId);
   if (!summary) {
     landlordFocusUnitsEl.textContent = "-";
@@ -5112,7 +5091,6 @@ function renderLandlordFocusPanel() {
   landlordFocusOutstandingEl.textContent = formatCurrency(summary.outstanding);
   landlordFocusNoteEl.textContent = `${summary.building.name} • ${summary.building.county} • ${summary.building.address} • Updated ${formatDateTime(summary.building.updatedAt)}`;
 }
-
 function matchesBuildingManagementQuery(building, query) {
   const normalizedQuery = String(query ?? "").trim().toLowerCase();
   if (!normalizedQuery) {
@@ -5553,7 +5531,7 @@ function syncOverviewLookupBuildingOptions() {
   overviewRoomBuildingSelectEl.replaceChildren();
 
   if (!Array.isArray(state.buildings) || state.buildings.length === 0) {
-    state.selectedOverviewRoomBuildingId = "all";
+    state.selectedOverviewRoomBuildingId = "";
     overviewRoomBuildingSelectEl.disabled = true;
     const option = document.createElement("option");
     option.value = "";
@@ -5562,22 +5540,14 @@ function syncOverviewLookupBuildingOptions() {
     return;
   }
 
-  const validSelection =
-    state.selectedOverviewRoomBuildingId === "all" ||
-    state.buildings.some((item) => item.id === state.selectedOverviewRoomBuildingId);
-  const selected = validSelection ? state.selectedOverviewRoomBuildingId : "all";
+  const focusedBuildingId = getFocusedBuildingId() || state.buildings[0]?.id || "";
+  const selected = state.buildings.some((item) => item.id === focusedBuildingId)
+    ? focusedBuildingId
+    : state.buildings[0]?.id || "";
   state.selectedOverviewRoomBuildingId = selected;
   overviewRoomBuildingSelectEl.disabled = false;
 
-  const allOption = document.createElement("option");
-  allOption.value = "all";
-  allOption.textContent = "All buildings";
-  if (selected === "all") {
-    allOption.selected = true;
-  }
-  overviewRoomBuildingSelectEl.append(allOption);
-
-  state.buildings.forEach((building) => {
+  [...state.buildings].sort(compareBuildingRecords).forEach((building) => {
     const option = document.createElement("option");
     option.value = building.id;
     option.textContent = getBuildingDisplayName(building);
@@ -5587,7 +5557,6 @@ function syncOverviewLookupBuildingOptions() {
     overviewRoomBuildingSelectEl.append(option);
   });
 }
-
 function syncCaretakerBuildingOptions() {
   if (!(caretakerBuildingSelectEl instanceof HTMLSelectElement)) {
     return;
@@ -8629,6 +8598,33 @@ async function loadMoveOutSettlements() {
   }
 }
 
+function confirmBuildingFocusSwitch(buildingId) {
+  const normalizedBuildingId = String(buildingId ?? "").trim();
+  if (!normalizedBuildingId) {
+    return false;
+  }
+
+  const currentBuildingId = getFocusedBuildingId();
+  if (normalizedBuildingId === currentBuildingId) {
+    return true;
+  }
+
+  const nextBuildingName = getBuildingDisplayNameById(normalizedBuildingId, normalizedBuildingId);
+  const currentBuildingName = currentBuildingId
+    ? getBuildingDisplayNameById(currentBuildingId, currentBuildingId)
+    : "the current workspace";
+
+  return window.confirm(
+    "Switch workspace from " +
+      currentBuildingName +
+      " to " +
+      nextBuildingName +
+      "?\nDashboard, rooms, tenants, requests, and billing tools will follow " +
+      nextBuildingName +
+      "."
+  );
+}
+
 async function activateBuilding(buildingId, options = {}) {
   const normalizedBuildingId = String(buildingId ?? "").trim();
   if (!normalizedBuildingId) {
@@ -8656,7 +8652,6 @@ async function activateBuilding(buildingId, options = {}) {
     loadResidents()
   ]);
 }
-
 function applyLandlordStartupData(startup) {
   const selection = startup?.selection ?? {};
   setBuildings(startup?.buildings ?? []);
@@ -9499,6 +9494,10 @@ buildingsBodyEl.addEventListener("click", (event) => {
   }
 
   if (target.dataset.action !== "switch-building") {
+    return;
+  }
+
+  if (!confirmBuildingFocusSwitch(buildingId)) {
     return;
   }
 
@@ -10851,23 +10850,6 @@ buildingManagementSearchEl?.addEventListener("input", () => {
   renderBuildings(state.buildings);
 });
 
-landlordFocusBuildingSelectEl?.addEventListener("change", () => {
-  const buildingId = String(landlordFocusBuildingSelectEl.value || "").trim();
-  if (!buildingId) {
-    return;
-  }
-
-  clearError();
-  void activateBuilding(buildingId)
-    .then(() => {
-      const buildingName = getBuildingDisplayNameById(buildingId);
-      setStatus(`Focused on ${buildingName}.`);
-    })
-    .catch((error) => {
-      handleLandlordError(error, "Failed to switch current building.");
-    });
-});
-
 landlordFocusTargetButtons.forEach((button) => {
   if (!(button instanceof HTMLButtonElement)) {
     return;
@@ -11014,19 +10996,33 @@ residentsOpenMatchBtnEl?.addEventListener("click", () => {
 });
 
 overviewRoomBuildingSelectEl?.addEventListener("change", () => {
-  state.selectedOverviewRoomBuildingId = String(
-    overviewRoomBuildingSelectEl.value || "all"
-  ).trim() || "all";
-  state.selectedResidentsBuildingId = state.selectedOverviewRoomBuildingId;
-  if (residentsBuildingSelectEl instanceof HTMLSelectElement) {
-    residentsBuildingSelectEl.value = state.selectedOverviewRoomBuildingId;
+  const buildingId = String(overviewRoomBuildingSelectEl.value || "").trim();
+  const previousBuildingId = getFocusedBuildingId();
+  if (!buildingId) {
+    syncOverviewLookupBuildingOptions();
+    return;
   }
-  if (landlordGlobalSearchBuildingEl instanceof HTMLSelectElement) {
-    landlordGlobalSearchBuildingEl.value = state.selectedOverviewRoomBuildingId;
-  }
-  updateLandlordBranding();
-});
 
+  if (!confirmBuildingFocusSwitch(buildingId)) {
+    overviewRoomBuildingSelectEl.value = previousBuildingId;
+    return;
+  }
+
+  overviewRoomBuildingSelectEl.disabled = true;
+  clearError();
+  void activateBuilding(buildingId)
+    .then(() => {
+      const buildingName = getBuildingDisplayNameById(buildingId);
+      setStatus("Focused on " + buildingName + ". The dashboard and landlord tools now follow this building.");
+    })
+    .catch((error) => {
+      handleLandlordError(error, "Failed to switch dashboard building.");
+      syncOverviewLookupBuildingOptions();
+    })
+    .finally(() => {
+      overviewRoomBuildingSelectEl.disabled = false;
+    });
+});
 overviewRoomSearchInputEl?.addEventListener("input", () => {
   const value = String(overviewRoomSearchInputEl.value || "").trim();
   state.residentSearchQuery = value;

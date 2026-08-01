@@ -11,17 +11,19 @@
       rel="stylesheet"
     />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#0f7b76" />
+    <meta name="theme-color" content="#2f5d50" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Resident Portal" />
     <link rel="icon" href="/icons/housing-app.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/users.css?v=20260509a" />
+    <link rel="stylesheet" href="/users.css?v=20260717c" />
+    <link rel="stylesheet" href="/captyn-theme.css?v=20260717c" />
+    <link rel="stylesheet" href="/resident-app/assets/resident.css?v=20260801a" />
   </head>
   <body class="app-loading">
     <div class="ambient" aria-hidden="true"></div>
     <main class="shell">
       <header class="topbar">
-        <a id="resident-brand" class="brand" href="/">Resident Portal</a>
+        <a id="resident-brand" class="brand" href="/resident">Resident Portal</a>
         <div class="user-menu">
           <button
             id="user-menu-toggle"
@@ -48,13 +50,14 @@
               <p id="resident-session-summary" class="item-details"></p>
             </section>
             <a class="user-panel-link" href="/resident">Open resident workspace</a>
+            <a id="resident-profile-link" class="user-panel-link" href="/user">Profile &amp; ID</a>
           </div>
         </div>
       </header>
 
       <header class="hero portal-header">
         <div class="portal-copy">
-          <h1 id="resident-hero-title">Resident Portal</h1>
+          <h1 id="resident-hero-title">Sign in</h1>
         </div>
 
         <div class="hero-workspace portal-nav" aria-label="Workspace quick navigation">
@@ -80,6 +83,7 @@
       </header>
 
       <section id="feedback-box" class="feedback hidden"></section>
+      <section id="resident-id-notice" class="feedback info hidden"></section>
 
       <section id="resident-auth-panel" class="panel-card auth-stack">
         <section class="section-head">
@@ -155,7 +159,10 @@
 
           <section class="section-head">
             <h2>Access request details</h2>
-            <p>Optional details. You can add them now or skip them and continue with access request.</p>
+            <p>
+              Add ID details now if ready, or complete Profile &amp; ID within
+              48 hours after signing in.
+            </p>
           </section>
 
           <div class="field-grid">
@@ -204,7 +211,8 @@
             </label>
           </div>
           <p class="item-guidance">
-            These details help management complete your resident profile, but they are not required to sign in or request access.
+            ID type and ID number complete the resident ID requirement. Management
+            may still attach an ID photo from the room account when they need one.
           </p>
 
           <div class="action-row auth-request-actions">
@@ -261,7 +269,19 @@
                 <h2>Overview</h2>
               </section>
 
-              <section class="overview-grid">
+              <section class="resident-home-card">
+                <div class="resident-home-copy">
+                  <p class="subheading">Today</p>
+                  <h3 id="resident-home-balance">KSh 0 due</h3>
+                  <p id="resident-home-summary" class="item-details">Your room balance will appear after sign-in.</p>
+                </div>
+                <div class="resident-home-actions">
+                  <button id="open-payments-view-btn" type="button" data-resident-pay-open="auto">Pay</button>
+                  <button id="open-support-view-btn" type="button" class="ghost-btn">Report Issue</button>
+                </div>
+              </section>
+
+              <section class="overview-grid resident-home-grid">
                 <article class="overview-card">
                   <p class="subheading">Building</p>
                   <p id="overview-building" class="overview-value">-</p>
@@ -270,7 +290,19 @@
                   <p class="subheading">House Number</p>
                   <p id="overview-house-number" class="overview-value">-</p>
                 </article>
+                <article class="overview-card">
+                  <p class="subheading">Rent</p>
+                  <p id="overview-rent-balance" class="overview-value">KSh 0</p>
+                </article>
+                <article class="overview-card">
+                  <p class="subheading">Utilities</p>
+                  <p id="overview-utility-balance" class="overview-value">KSh 0</p>
+                </article>
               </section>
+
+              <div class="resident-home-secondary-actions">
+                <button id="open-notices-view-btn" type="button" class="ghost-btn">View Notices</button>
+              </div>
 
               <p id="overview-session-expiry" class="item-details"></p>
             </article>
@@ -429,14 +461,54 @@
               <section class="section-head">
                 <h2>Payments</h2>
               </section>
-              <section class="payment-summary-card">
-                <div class="payment-summary-copy">
-                  <p class="subheading">Payment plan</p>
-                  <h3>Pay any amount today</h3>
-                  <p id="payments-summary-action" class="item-details">
-                    Even a small payment is recorded instantly and reduces what you owe.
-                  </p>
+              <section class="payment-summary-card resident-pay-card">
+                <div class="resident-pay-card-main">
+                  <div class="payment-summary-copy">
+                    <p class="subheading">Amount due</p>
+                    <h3 id="resident-pay-headline">KSh 0 due</h3>
+                    <p id="payments-summary-action" class="item-details">
+                      Your payment options will appear after your balance loads.
+                    </p>
+                  </div>
+                  <button id="resident-main-pay-btn" type="button" class="resident-pay-primary" data-resident-pay-open="auto">Pay</button>
                 </div>
+
+                <section id="resident-pay-sheet" class="resident-pay-sheet hidden" aria-label="Payment options">
+                  <div class="resident-pay-sheet-head">
+                    <div>
+                      <p class="subheading">Pay now</p>
+                      <h3 id="resident-pay-sheet-title">Choose what to pay</h3>
+                    </div>
+                    <button id="resident-pay-cancel" type="button" class="ghost-btn">Close</button>
+                  </div>
+                  <div class="resident-pay-mode-row" role="group" aria-label="Payment type">
+                    <button type="button" data-resident-pay-mode="utility">Utilities</button>
+                    <button type="button" data-resident-pay-mode="rent">Rent</button>
+                  </div>
+                  <div class="field-grid resident-pay-fields">
+                    <label id="resident-pay-utility-field">
+                      Utility
+                      <select id="resident-pay-utility-type">
+                        <option value="water">Water</option>
+                        <option value="electricity">Electricity</option>
+                      </select>
+                    </label>
+                    <label>
+                      Amount (KSh)
+                      <input id="resident-pay-amount" type="number" min="1" inputmode="numeric" />
+                    </label>
+                    <label id="resident-pay-phone-field">
+                      M-PESA Number
+                      <input id="resident-pay-phone" type="tel" inputmode="tel" placeholder="07XXXXXXXX" />
+                    </label>
+                  </div>
+                  <p id="resident-pay-note" class="item-details resident-pay-note">Select a payment type to continue.</p>
+                  <div class="resident-pay-sheet-actions">
+                    <button id="resident-pay-submit" type="button">Continue</button>
+                    <button id="resident-pay-instructions" type="button" class="ghost-btn">How to pay</button>
+                  </div>
+                </section>
+
                 <dl class="payment-summary-grid">
                   <div>
                     <dt>Total outstanding</dt>
@@ -467,9 +539,19 @@
                   </button>
                 </div>
                 <p class="quick-pay-note payment-summary-note">
-                  Pick a shortcut and the form below fills in for you. Rent and utilities still
-                  pay separately.
+                  Rent and utilities still pay separately. Use the room/account reference shown below.
                 </p>
+              </section>
+              <section id="payment-instructions-card" class="payment-instructions-card">
+                <div class="payment-instructions-head">
+                  <div>
+                    <p class="subheading">Where to pay</p>
+                    <h3 id="payment-instructions-title">Payment instructions</h3>
+                  </div>
+                  <span id="payment-instructions-method" class="item-chip">-</span>
+                </div>
+                <dl id="payment-instructions-list" class="payment-instructions-grid"></dl>
+                <p id="payment-instructions-note" class="item-details"></p>
               </section>
               <div class="payments-grid">
                 <div class="payments-column">
@@ -587,15 +669,18 @@
                   <section class="payment-cluster payment-cluster-rent">
                     <section id="rent-due" class="rent-wrap"></section>
 
-                    <section id="rent-payment-section" class="payment-section mpesa-section">
-                      <p class="subheading">Pay rent (M-PESA)</p>
+                    <section id="rent-payment-section" class="payment-section manual-payment-section">
+                      <p class="subheading">Rent payment instructions</p>
                       <p id="rent-payment-state" class="item-details payment-state">
-                        Active for your building.
+                        Payment instructions will load with your room details.
                       </p>
-                      <form id="rent-payment-form" class="report-form">
+                      <p class="item-details payment-inline-note">
+                        Use the building payment details above and include your house number or account reference.
+                        Rent receipts are confirmed by management after payment is received.
+                      </p>
+                      <form id="rent-payment-form" class="report-form hidden" aria-hidden="true">
                         <p class="item-details payment-encouragement">
-                          Pay any amount today. You do not need to clear the full rent balance at
-                          once.
+                          Online rent payment is disabled until automated payment confirmation is enabled.
                         </p>
                         <div class="field-grid payment-channel-grid">
                           <label class="hidden">
@@ -611,7 +696,7 @@
                             </select>
                           </label>
                           <label class="payment-phone-field">
-                            M-PESA Number (optional)
+                            Payment Phone
                             <input
                               id="rent-payment-phone"
                               type="tel"
@@ -621,8 +706,7 @@
                           </label>
                         </div>
                         <p class="item-details payment-inline-note">
-                          Your rent payment reduces the open balance immediately and the receipt
-                          month stays in sync automatically.
+                          This hidden form is retained for future automated payment support.
                         </p>
                         <label>
                           Amount (KSh)
@@ -647,7 +731,7 @@
                         </p>
 
                         <div class="action-row">
-                          <button id="rent-payment-btn" type="submit">Pay with M-PESA</button>
+                          <button id="rent-payment-btn" type="submit">Online Rent Payment Disabled</button>
                         </div>
                       </form>
                     </section>
@@ -834,6 +918,6 @@
       </article>
     </section>
 
-    <script type="module" src="/users.js?v=20260516b"></script>
+    <script type="module" src="/resident-app/assets/resident.js?v=20260801a"></script>
   </body>
 </html>

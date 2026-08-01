@@ -1,0 +1,519 @@
+:root {
+  --resident-bg: #f4f7f3;
+  --resident-ink: #152226;
+  --resident-muted: #5d6f73;
+  --resident-line: rgba(21, 34, 38, 0.13);
+  --resident-panel: #ffffff;
+  --resident-panel-soft: #f8fbf8;
+  --resident-teal: #0f7b76;
+  --resident-teal-dark: #0a5f5a;
+  --resident-green: #23835a;
+  --resident-amber: #a96412;
+  --resident-red: #bb3f38;
+  --resident-blue: #276aa4;
+  --resident-shadow: 0 18px 50px rgba(27, 44, 45, 0.1);
+}
+
+html[data-captyn-ui-runtime="typescript"] body {
+  background:
+    linear-gradient(90deg, rgba(15, 123, 118, 0.055) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(15, 123, 118, 0.045) 1px, transparent 1px),
+    var(--resident-bg) !important;
+  background-size: 34px 34px !important;
+  color: var(--resident-ink);
+  font-family: Inter, Aptos, "Segoe UI", Arial, sans-serif;
+}
+
+.resident-ts-shell .ambient {
+  display: none;
+}
+
+.resident-ts-shell .shell {
+  width: min(1460px, calc(100% - 28px));
+  margin: 14px auto 42px;
+}
+
+.resident-ts-shell .topbar {
+  position: sticky;
+  top: 10px;
+  z-index: 20;
+  min-height: 58px;
+  padding: 8px 10px 8px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: #102426;
+  box-shadow: 0 16px 34px rgba(16, 36, 38, 0.18);
+}
+
+.resident-ts-shell .brand {
+  color: #ffffff !important;
+  font-size: 0.95rem;
+  font-weight: 850;
+  text-transform: none;
+}
+
+.resident-ts-shell .brand::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 10px;
+  border-radius: 50%;
+  background: #44c27f;
+  box-shadow: 0 0 0 5px rgba(68, 194, 127, 0.14);
+}
+
+.resident-ts-shell .user-link {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.resident-ts-shell .user-panel {
+  border-radius: 8px !important;
+  box-shadow: var(--resident-shadow);
+}
+
+.resident-ts-shell .hero.portal-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: end;
+  min-height: 118px;
+  margin-top: 14px;
+  padding: 22px;
+  border-radius: 8px !important;
+  border: 1px solid var(--resident-line) !important;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbf8 100%) !important;
+  box-shadow: var(--resident-shadow);
+}
+
+.resident-ts-shell .portal-copy h1 {
+  margin: 0;
+  color: var(--resident-ink);
+  font-family: Inter, Aptos, "Segoe UI", Arial, sans-serif !important;
+  font-size: clamp(1.45rem, 2vw, 2.15rem) !important;
+  letter-spacing: 0;
+}
+
+.resident-ts-shell .portal-copy h1::after {
+  content: "";
+  display: block;
+  width: 76px;
+  height: 4px;
+  margin-top: 12px;
+  border-radius: 999px;
+  background: var(--resident-teal);
+}
+
+.resident-ts-shell .hero-workspace {
+  width: min(100%, 460px);
+  min-width: 320px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.resident-ts-shell .hero-workspace-label {
+  margin: 0 0 7px;
+  color: var(--resident-muted);
+  font-size: 0.74rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.resident-ts-shell .hero-workspace-nav {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid var(--resident-line);
+  border-radius: 8px;
+  background: #eef5f1;
+}
+
+.resident-ts-shell .hero-workspace-btn {
+  min-height: 42px;
+  padding: 0 10px;
+  border-radius: 8px !important;
+  background: transparent !important;
+  color: var(--resident-muted) !important;
+  box-shadow: none !important;
+  font-weight: 850;
+}
+
+.resident-ts-shell .hero-workspace-btn.active,
+.resident-ts-shell .hero-workspace-btn:hover {
+  background: #ffffff !important;
+  color: var(--resident-teal-dark) !important;
+  box-shadow: 0 6px 16px rgba(21, 34, 38, 0.08) !important;
+}
+
+.resident-ts-shell .feedback,
+.resident-ts-shell .panel-card {
+  border-radius: 8px !important;
+  border: 1px solid var(--resident-line) !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  box-shadow: 0 14px 36px rgba(27, 44, 45, 0.08) !important;
+}
+
+.resident-ts-shell .panel-card {
+  padding: 18px;
+}
+
+.resident-ts-shell .auth-stack {
+  width: min(780px, 100%);
+  margin: 16px auto 0;
+}
+
+.resident-ts-shell .resident-workspace {
+  margin-top: 16px;
+}
+
+.resident-ts-shell .resident-content {
+  display: grid;
+  gap: 16px;
+}
+
+.resident-ts-shell .resident-view:not(.hidden) {
+  display: grid;
+  gap: 16px;
+}
+
+.resident-ts-shell .section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.resident-ts-shell .section-head h2,
+.resident-ts-shell .section-head h3,
+.resident-ts-shell .section-head h4 {
+  margin: 0;
+  color: var(--resident-ink);
+  font-size: 1.05rem;
+  line-height: 1.25;
+}
+
+.resident-ts-shell .section-head p,
+.resident-ts-shell .item-details {
+  color: var(--resident-muted);
+}
+
+.resident-ts-shell .resident-home-card,
+.resident-ts-shell .payment-summary-card {
+  border: 1px solid rgba(15, 123, 118, 0.14);
+  border-radius: 8px;
+  background: #102426;
+  color: #ffffff;
+}
+
+.resident-ts-shell .resident-home-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 18px;
+}
+
+.resident-ts-shell .resident-home-card .subheading,
+.resident-ts-shell .payment-summary-card .subheading {
+  color: #a9cfca !important;
+}
+
+.resident-ts-shell .resident-home-card h3,
+.resident-ts-shell .payment-summary-card h3 {
+  margin: 3px 0;
+  color: #ffffff;
+  font-size: clamp(1.45rem, 3vw, 2.25rem);
+}
+
+.resident-ts-shell .resident-home-card .item-details,
+.resident-ts-shell .payment-summary-card .item-details {
+  color: #c6dfdc;
+}
+
+.resident-ts-shell .resident-home-actions,
+.resident-ts-shell .resident-home-secondary-actions,
+.resident-ts-shell .action-row,
+.resident-ts-shell .payment-summary-actions,
+.resident-ts-shell .resident-pay-sheet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.resident-ts-shell .overview-grid,
+.resident-ts-shell .payment-summary-grid,
+.resident-ts-shell .field-grid,
+.resident-ts-shell .payments-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.resident-ts-shell .overview-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.resident-ts-shell .overview-card,
+.resident-ts-shell .summary-card,
+.resident-ts-shell .payment-instructions-card,
+.resident-ts-shell .stack-list > article,
+.resident-ts-shell .stack-list > div {
+  border: 1px solid var(--resident-line);
+  border-radius: 8px;
+  background: var(--resident-panel-soft);
+}
+
+.resident-ts-shell .overview-card {
+  min-height: 92px;
+  padding: 14px;
+}
+
+.resident-ts-shell .overview-value {
+  margin: 7px 0 0;
+  color: var(--resident-ink);
+  font-size: 1.25rem;
+  font-weight: 850;
+  word-break: break-word;
+}
+
+.resident-ts-shell .subheading,
+.resident-ts-shell label {
+  color: var(--resident-teal-dark) !important;
+  font-size: 0.76rem;
+  font-weight: 850;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.resident-ts-shell label {
+  display: grid;
+  gap: 7px;
+}
+
+.resident-ts-shell input,
+.resident-ts-shell select,
+.resident-ts-shell textarea {
+  min-height: 44px;
+  border: 1px solid rgba(21, 34, 38, 0.18) !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+  color: var(--resident-ink) !important;
+  box-shadow: inset 0 1px 0 rgba(21, 34, 38, 0.04) !important;
+}
+
+.resident-ts-shell textarea {
+  min-height: 128px;
+}
+
+.resident-ts-shell button,
+.resident-ts-shell .ghost-btn {
+  min-height: 42px;
+  border-radius: 8px !important;
+  font-weight: 850;
+  letter-spacing: 0;
+}
+
+.resident-ts-shell button:not(.ghost-btn):not(.user-link):not(.hero-workspace-btn):not(.modal-backdrop) {
+  background: var(--resident-teal) !important;
+  border-color: var(--resident-teal) !important;
+  color: #ffffff !important;
+  box-shadow: 0 8px 18px rgba(15, 123, 118, 0.18) !important;
+}
+
+.resident-ts-shell button:not(.ghost-btn):not(.user-link):not(.hero-workspace-btn):not(.modal-backdrop):hover {
+  background: var(--resident-teal-dark) !important;
+}
+
+.resident-ts-shell .ghost-btn {
+  border: 1px solid rgba(15, 123, 118, 0.24) !important;
+  background: #ffffff !important;
+  color: var(--resident-teal-dark) !important;
+  box-shadow: none !important;
+}
+
+.resident-ts-shell .payment-summary-card {
+  padding: 18px;
+}
+
+.resident-ts-shell .resident-pay-card-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+}
+
+.resident-ts-shell .resident-pay-primary {
+  min-width: 118px;
+  background: #44c27f !important;
+  border-color: #44c27f !important;
+  color: #102426 !important;
+}
+
+.resident-ts-shell .resident-pay-sheet {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.resident-ts-shell .resident-pay-sheet-head,
+.resident-ts-shell .payment-instructions-head,
+.resident-ts-shell .payment-priority-bar,
+.resident-ts-shell .payment-priority-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.resident-ts-shell .resident-pay-mode-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.resident-ts-shell .resident-pay-mode-row button {
+  background: rgba(255, 255, 255, 0.14) !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+}
+
+.resident-ts-shell .payment-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 16px 0 0;
+}
+
+.resident-ts-shell .payment-summary-grid div {
+  min-height: 76px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.resident-ts-shell .payment-summary-grid dt,
+.resident-ts-shell .payment-summary-grid dd {
+  margin: 0;
+}
+
+.resident-ts-shell .payment-summary-grid dt {
+  color: #a9cfca;
+  font-size: 0.76rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.resident-ts-shell .payment-summary-grid dd {
+  margin-top: 7px;
+  color: #ffffff;
+  font-size: 1.15rem;
+  font-weight: 850;
+}
+
+.resident-ts-shell .payment-instructions-card {
+  margin-top: 14px;
+  padding: 14px;
+}
+
+.resident-ts-shell .payments-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.72fr);
+  margin-top: 14px;
+}
+
+.resident-ts-shell .payment-section,
+.resident-ts-shell .payment-cluster {
+  border-radius: 8px;
+}
+
+.resident-ts-shell .stack-list {
+  display: grid;
+  gap: 10px;
+}
+
+.resident-ts-shell .stack-list:empty::before {
+  content: "No items yet";
+  display: grid;
+  place-items: center;
+  min-height: 86px;
+  border: 1px dashed rgba(21, 34, 38, 0.2);
+  border-radius: 8px;
+  color: var(--resident-muted);
+  font-weight: 750;
+}
+
+.resident-ts-shell .hidden {
+  display: none !important;
+}
+
+.resident-ts-shell .modal-card {
+  border-radius: 8px !important;
+}
+
+.resident-ts-shell.resident-ts-ready .panel-card,
+.resident-ts-shell.resident-ts-ready .hero.portal-header {
+  animation-duration: 220ms;
+}
+
+@media (max-width: 980px) {
+  .resident-ts-shell .hero.portal-header,
+  .resident-ts-shell .resident-home-card,
+  .resident-ts-shell .resident-pay-card-main {
+    grid-template-columns: 1fr;
+  }
+
+  .resident-ts-shell .hero-workspace {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .resident-ts-shell .overview-grid,
+  .resident-ts-shell .payment-summary-grid,
+  .resident-ts-shell .payments-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .resident-ts-shell .shell {
+    width: min(100% - 18px, 100%);
+    margin-top: 9px;
+  }
+
+  .resident-ts-shell .topbar {
+    top: 6px;
+  }
+
+  .resident-ts-shell .hero.portal-header,
+  .resident-ts-shell .panel-card,
+  .resident-ts-shell .payment-summary-card {
+    padding: 14px;
+  }
+
+  .resident-ts-shell .hero-workspace-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .resident-ts-shell .overview-grid,
+  .resident-ts-shell .payment-summary-grid,
+  .resident-ts-shell .payments-grid,
+  .resident-ts-shell .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .resident-ts-shell .section-head,
+  .resident-ts-shell .payment-instructions-head,
+  .resident-ts-shell .resident-pay-sheet-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "src/resident/main.ts": {
+    "file": "assets/resident.js",
+    "name": "main",
+    "src": "src/resident/main.ts",
+    "isEntry": true,
+    "css": [
+      "assets/resident.css"
+    ]
+  }
+}

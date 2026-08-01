@@ -594,6 +594,105 @@ test("records utility payment against oldest outstanding bill", () => {
   assert.equal(payments[0].providerReference, "UTIL-123");
 });
 
+test("allows multiple utility payments for the same billing month", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.createBill("water", BUILDING_A, "B-15", {
+    billingMonth: "2026-02",
+    fixedChargeKsh: 1000,
+    dueDate
+  });
+
+  const first = service.recordPayment("water", BUILDING_A, "B-15", {
+    billingMonth: "2026-02",
+    amountKsh: 300,
+    provider: "cash",
+    providerReference: "util-multi-001"
+  });
+  const second = service.recordPayment("water", BUILDING_A, "B-15", {
+    billingMonth: "2026-02",
+    amountKsh: 250,
+    provider: "bank",
+    providerReference: "util-multi-002"
+  });
+
+  assert.equal(first.bill.balanceKsh, 700);
+  assert.equal(second.bill.balanceKsh, 450);
+  assert.equal(service.listBills({ buildingId: BUILDING_A, houseNumber: "B-15" })[0].balanceKsh, 450);
+  assert.deepEqual(
+    service
+      .listPayments({ buildingId: BUILDING_A, houseNumber: "B-15" })
+      .map((item) => item.providerReference)
+      .sort(),
+    ["UTIL-MULTI-001", "UTIL-MULTI-002"]
+  );
+});
+
+test("keeps advance utility payments pending until the future bill is created", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+
+  const pending = service.recordPayment("water", BUILDING_A, "B-16", {
+    billingMonth: "2026-09",
+    amountKsh: 500,
+    provider: "cash",
+    providerReference: "util-advance-001",
+    paidAt: dueDate,
+    source: "manual"
+  });
+
+  assert.equal(pending.allocations.length, 0);
+  assert.equal(pending.totalAppliedAmountKsh, 500);
+  assert.equal(service.listPayments({ buildingId: BUILDING_A, houseNumber: "B-16" }).length, 1);
+
+  const bill = service.createBill("water", BUILDING_A, "B-16", {
+    billingMonth: "2026-09",
+    fixedChargeKsh: 500,
+    dueDate
+  });
+
+  assert.equal(bill.balanceKsh, 0);
+  assert.equal(bill.payments.length, 1);
+  assert.equal(bill.payments[0].providerReference, "UTIL-ADVANCE-001");
+  assert.equal(service.listPayments({ buildingId: BUILDING_A, houseNumber: "B-16" }).length, 1);
+});
+
+test("parks the unapplied part of a utility payment for a future billing month", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.createBill("water", BUILDING_A, "B-17", {
+    billingMonth: "2026-08",
+    fixedChargeKsh: 300,
+    dueDate
+  });
+
+  const paid = service.recordPayment("water", BUILDING_A, "B-17", {
+    billingMonth: "2026-09",
+    amountKsh: 700,
+    provider: "cash",
+    providerReference: "util-ahead-split-001",
+    source: "manual"
+  });
+
+  assert.equal(paid.allocations.length, 1);
+  assert.equal(paid.allocations[0].appliedAmountKsh, 300);
+  assert.equal(paid.totalAppliedAmountKsh, 700);
+  assert.equal(service.listPayments({ buildingId: BUILDING_A, houseNumber: "B-17" }).length, 2);
+
+  const futureBill = service.createBill("water", BUILDING_A, "B-17", {
+    billingMonth: "2026-09",
+    fixedChargeKsh: 400,
+    dueDate
+  });
+
+  assert.equal(futureBill.balanceKsh, 0);
+  assert.equal(futureBill.payments.length, 1);
+  assert.equal(futureBill.payments[0].amountKsh, 400);
+  assert.equal(service.listPayments({ buildingId: BUILDING_A, houseNumber: "B-17" }).length, 2);
+});
+
 test("spreads utility payment across the selected month and the next open month", () => {
   const service = new UtilityBillingService();
   const dueDate = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();

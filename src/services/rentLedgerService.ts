@@ -971,13 +971,7 @@ export class RentLedgerService {
 
     const record = this.resolveRecord(normalizedBuildingId, normalizedHouse);
     if (!record) {
-      const key = ledgerKey(normalizedBuildingId, normalizedHouse);
-      const current = this.pendingPayments.get(key) ?? [];
-      this.pendingPayments.set(key, [event, ...current]);
-      this.paymentReferenceIndex.set(event.providerReference, {
-        event,
-        applied: false
-      });
+      this.addPendingPayment(event);
       this.emitStateChange();
 
       return {
@@ -988,6 +982,17 @@ export class RentLedgerService {
     }
 
     this.refreshRecordForBilling(record, new Date(paidAt));
+    const currentBillingMonth = billingMonthFromDateTime(record.dueDate);
+    if (billingMonth > currentBillingMonth) {
+      this.addPendingPayment(event);
+      this.emitStateChange();
+
+      return {
+        event,
+        applied: false,
+        snapshot: this.toSnapshot(record)
+      };
+    }
 
     if (record.buildingId !== normalizedBuildingId) {
       const migratedRecord: RentDueRecord = {
@@ -1173,7 +1178,9 @@ export class RentLedgerService {
   }
 
   private refreshRecordForBilling(record: RentDueRecord, now = new Date()): boolean {
-    return this.advanceRecordCyclesIfNeeded(record, now);
+    const advanced = this.advanceRecordCyclesIfNeeded(record, now);
+    const appliedPending = this.applyPendingPayments(record.buildingId, record.houseNumber);
+    return advanced || appliedPending;
   }
 
   private advanceRecordCyclesIfNeeded(record: RentDueRecord, now = new Date()): boolean {
@@ -1272,11 +1279,21 @@ export class RentLedgerService {
     return true;
   }
 
-  private applyPendingPayments(buildingId: string, houseNumber: string) {
+  private addPendingPayment(event: RentPaymentEvent): void {
+    const key = ledgerKey(event.buildingId, event.houseNumber);
+    const current = this.pendingPayments.get(key) ?? [];
+    this.pendingPayments.set(key, [event, ...current]);
+    this.paymentReferenceIndex.set(event.providerReference, {
+      event,
+      applied: false
+    });
+  }
+
+  private applyPendingPayments(buildingId: string, houseNumber: string): boolean {
     const key = ledgerKey(buildingId, houseNumber);
     const record = this.records.get(key);
     if (!record) {
-      return;
+      return false;
     }
 
     const pendingKeys = [key];
@@ -1288,12 +1305,33 @@ export class RentLedgerService {
       pendingKeys.push(legacyKey);
     }
 
-    const byOldestFirst = pendingKeys
-      .flatMap((pendingKey) => this.pendingPayments.get(pendingKey) ?? [])
-      .sort((a, b) => a.paidAt.localeCompare(b.paidAt));
+    const currentBillingMonth = billingMonthFromDateTime(record.dueDate);
+    const applicable: RentPaymentEvent[] = [];
+
+    for (const pendingKey of pendingKeys) {
+      const pending = this.pendingPayments.get(pendingKey) ?? [];
+      const remaining: RentPaymentEvent[] = [];
+      for (const event of pending) {
+        if (event.billingMonth <= currentBillingMonth) {
+          applicable.push(event);
+        } else {
+          remaining.push(event);
+        }
+      }
+
+      if (remaining.length > 0) {
+        this.pendingPayments.set(pendingKey, remaining);
+      } else {
+        this.pendingPayments.delete(pendingKey);
+      }
+    }
+
+    const byOldestFirst = applicable.sort((a, b) =>
+      `${a.billingMonth}:${a.paidAt}`.localeCompare(`${b.billingMonth}:${b.paidAt}`)
+    );
 
     if (byOldestFirst.length === 0) {
-      return;
+      return false;
     }
 
     for (const event of byOldestFirst) {
@@ -1309,9 +1347,7 @@ export class RentLedgerService {
       });
     }
 
-    pendingKeys.forEach((pendingKey) => {
-      this.pendingPayments.delete(pendingKey);
-    });
+    return true;
   }
 
   private applyPaymentToRecord(record: RentDueRecord, event: RentPaymentEvent) {

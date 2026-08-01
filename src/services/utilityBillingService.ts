@@ -172,6 +172,7 @@ type UtilityBillingHoldPredicate = (input: UtilityBillingHoldCheck) => boolean;
 export interface UtilityBillingPersistedState {
   meters: UtilityMeterRecord[];
   bills: UtilityBillSnapshot[];
+  pendingPayments?: UtilityPaymentEvent[];
 }
 
 export interface UtilityRoomBalanceSummary {
@@ -392,6 +393,7 @@ function hasUsableMeterNumber(value: string | undefined): boolean {
 export class UtilityBillingService {
   private readonly meters = new Map<string, UtilityMeterRecord>();
   private readonly billsByLedger = new Map<string, UtilityBillRecord[]>();
+  private readonly pendingPayments = new Map<string, UtilityPaymentEvent[]>();
   private readonly paymentReferenceIndex = new Map<
     string,
     UtilityPaymentReferenceIndexEntry
@@ -501,13 +503,18 @@ export class UtilityBillingService {
       .flatMap((items) => items)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .map((item) => this.toSnapshot(item));
+    const pendingPayments = [...this.pendingPayments.values()]
+      .flatMap((items) => items)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((item) => ({ ...item }));
 
-    return { meters, bills };
+    return { meters, bills, pendingPayments };
   }
 
   importState(state: UtilityBillingPersistedState | null | undefined): boolean {
     this.meters.clear();
     this.billsByLedger.clear();
+    this.pendingPayments.clear();
     this.paymentReferenceIndex.clear();
 
     let normalizedLegacyPlaceholders = false;
@@ -603,6 +610,34 @@ export class UtilityBillingService {
 
         records.push(record);
         this.billsByLedger.set(key, records);
+      }
+    }
+
+    if (Array.isArray(state.pendingPayments)) {
+      for (const payment of state.pendingPayments) {
+        if (!payment || !payment.utilityType || !payment.houseNumber) {
+          continue;
+        }
+        const normalizedBuildingId = normalizeBuildingId(payment.buildingId);
+        const normalizedHouse = normalizeHouseNumber(payment.houseNumber);
+        const normalizedPayment: UtilityPaymentEvent = {
+          ...payment,
+          utilityType: payment.utilityType,
+          buildingId: normalizedBuildingId,
+          houseNumber: normalizedHouse,
+          billingMonth: payment.billingMonth ?? billingMonthFromDate(new Date(payment.paidAt)),
+          providerReference: payment.providerReference
+            ? normalizeProviderReference(payment.providerReference)
+            : undefined
+        };
+        const key = ledgerKey(
+          normalizedPayment.utilityType,
+          normalizedPayment.buildingId,
+          normalizedPayment.houseNumber
+        );
+        const current = this.pendingPayments.get(key) ?? [];
+        current.push(normalizedPayment);
+        this.pendingPayments.set(key, current);
       }
     }
 
@@ -1005,6 +1040,7 @@ export class UtilityBillingService {
     records.push(bill);
     records.sort((a, b) => monthSortDesc(a.billingMonth, b.billingMonth));
     this.billsByLedger.set(key, records);
+    this.applyPendingPaymentsToBill(bill);
     this.emitStateChange();
 
     return this.toSnapshot(bill);
@@ -1339,19 +1375,9 @@ export class UtilityBillingService {
     houseNumber: string,
     input: InternalRecordUtilityPaymentInput
   ): RecordUtilityPaymentResult {
-    const {
-      normalizedHouse,
-      candidateBills,
-      availableBalanceKsh,
-      requestedAmountKsh
-    } = this.resolvePaymentContext(utilityType, buildingId, houseNumber, input);
-
-    if (requestedAmountKsh > availableBalanceKsh) {
-      throw new Error(
-        `Payment is larger than the open ${utilityType} balance for house ${normalizedHouse}.`
-      );
-    }
-
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const normalizedHouse = normalizeHouseNumber(houseNumber);
+    const requestedAmountKsh = Math.max(0, Math.round(Number(input.amountKsh ?? 0)));
     const normalizedReference = input.providerReference?.trim()
       ? normalizeProviderReference(input.providerReference)
       : undefined;
@@ -1362,19 +1388,46 @@ export class UtilityBillingService {
           existingReference.events,
           existingReference.billIds
         );
-        if (existingResult) {
-          return existingResult;
-        }
+        return existingResult ?? this.buildPendingPaymentResult(existingReference.events[0]);
       }
+    }
+
+    let context: ResolvedUtilityPaymentContext | null = null;
+    try {
+      context = this.resolvePaymentContext(utilityType, buildingId, houseNumber, input);
+    } catch (error) {
+      if (!input.billingMonth) {
+        throw error;
+      }
+    }
+
+    if (!context) {
+      const event = this.createPendingPaymentEvent(
+        utilityType,
+        normalizedBuildingId,
+        normalizedHouse,
+        input,
+        requestedAmountKsh,
+        normalizedReference
+      );
+      this.addPendingPayment(event);
+      this.emitStateChange();
+      return this.buildPendingPaymentResult(event);
+    }
+
+    if (requestedAmountKsh > context.availableBalanceKsh && !input.billingMonth) {
+      throw new Error(
+        `Payment is larger than the open ${utilityType} balance for house ${normalizedHouse}.`
+      );
     }
 
     const paidAt = input.paidAt ?? nowIso();
     const createdAt = nowIso();
-    let remainingAmountKsh = requestedAmountKsh;
+    let remainingAmountKsh = Math.min(requestedAmountKsh, context.availableBalanceKsh);
     const appliedEvents: UtilityPaymentEvent[] = [];
     const appliedBillIds: string[] = [];
 
-    for (const bill of candidateBills) {
+    for (const bill of context.candidateBills) {
       if (remainingAmountKsh <= 0) {
         break;
       }
@@ -1408,22 +1461,53 @@ export class UtilityBillingService {
       remainingAmountKsh -= appliedAmountKsh;
     }
 
+    const unappliedAmountKsh = Math.max(
+      0,
+      requestedAmountKsh - appliedEvents.reduce((sum, event) => sum + event.amountKsh, 0)
+    );
+    let pendingEvent: UtilityPaymentEvent | null = null;
+    if (unappliedAmountKsh > 0) {
+      if (!input.billingMonth) {
+        throw new Error(
+          `Payment is larger than the open ${utilityType} balance for house ${normalizedHouse}.`
+        );
+      }
+      pendingEvent = this.createPendingPaymentEvent(
+        utilityType,
+        normalizedBuildingId,
+        normalizedHouse,
+        input,
+        unappliedAmountKsh,
+        normalizedReference
+      );
+      this.addPendingPayment(pendingEvent);
+    }
+
     if (normalizedReference) {
       this.paymentReferenceIndex.set(normalizedReference, {
-        events: appliedEvents.map((event) => ({ ...event })),
-        billIds: [...appliedBillIds]
+        events: [
+          ...appliedEvents.map((event) => ({ ...event })),
+          ...(pendingEvent ? [{ ...pendingEvent }] : [])
+        ],
+        billIds: [...appliedBillIds, ...(pendingEvent ? [""] : [])]
       });
     }
     this.emitStateChange();
 
     const result = this.buildRecordPaymentResult(appliedEvents, appliedBillIds);
-    if (!result) {
-      throw new Error(
-        `Failed to record ${utilityType} payment for house ${normalizedHouse}.`
-      );
+    if (result) {
+      return {
+        ...result,
+        totalAppliedAmountKsh: requestedAmountKsh
+      };
+    }
+    if (pendingEvent) {
+      return this.buildPendingPaymentResult(pendingEvent);
     }
 
-    return result;
+    throw new Error(
+      `Failed to record ${utilityType} payment for house ${normalizedHouse}.`
+    );
   }
 
   unrecordCashPayment(
@@ -1463,6 +1547,15 @@ export class UtilityBillingService {
     }
 
     if (!targetEvent) {
+      const pendingRemoved = this.unrecordPendingPayment(
+        utilityType,
+        normalizedBuildingId,
+        normalizedHouse,
+        normalizedPaymentId
+      );
+      if (pendingRemoved) {
+        return pendingRemoved;
+      }
       return null;
     }
     if (targetEvent.provider === "mpesa" || (targetEvent.provider !== "cash" && targetEvent.source !== "manual")) {
@@ -1517,6 +1610,16 @@ export class UtilityBillingService {
           touchedBills.push({ bill, event: { ...event } });
         }
       }
+    }
+
+    if (normalizedReference) {
+      this.removePendingPaymentsByReference(
+        utilityType,
+        normalizedBuildingId,
+        normalizedHouse,
+        normalizedReference,
+        removed
+      );
     }
 
     if (removed.length === 0) {
@@ -1757,9 +1860,12 @@ export class UtilityBillingService {
       ? normalizeHouseNumber(options.houseNumber)
       : undefined;
 
-    return [...this.billsByLedger.values()]
-      .flatMap((items) => items)
-      .flatMap((item) => item.payments)
+    return [
+      ...[...this.billsByLedger.values()]
+        .flatMap((items) => items)
+        .flatMap((item) => item.payments),
+      ...[...this.pendingPayments.values()].flatMap((items) => items)
+    ]
       .filter((item) => {
         if (options.utilityType && item.utilityType !== options.utilityType) {
           return false;
@@ -1841,6 +1947,153 @@ export class UtilityBillingService {
     return null;
   }
 
+  private createPendingPaymentEvent(
+    utilityType: UtilityType,
+    buildingId: string,
+    houseNumber: string,
+    input: InternalRecordUtilityPaymentInput,
+    amountKsh: number,
+    providerReference?: string
+  ): UtilityPaymentEvent {
+    const paidAt = input.paidAt ?? nowIso();
+    return {
+      id: randomUUID(),
+      utilityType,
+      buildingId: normalizeBuildingId(buildingId),
+      houseNumber: normalizeHouseNumber(houseNumber),
+      billingMonth: input.billingMonth ?? billingMonthFromDate(new Date(paidAt)),
+      provider: input.provider,
+      providerReference,
+      amountKsh: Math.max(0, Math.round(amountKsh)),
+      paidAt,
+      note: input.note?.trim() || undefined,
+      createdAt: nowIso(),
+      source: input.source
+    };
+  }
+
+  private addPendingPayment(event: UtilityPaymentEvent): void {
+    const key = ledgerKey(event.utilityType, event.buildingId, event.houseNumber);
+    const current = this.pendingPayments.get(key) ?? [];
+    this.pendingPayments.set(key, [event, ...current]);
+    if (event.providerReference) {
+      this.paymentReferenceIndex.set(event.providerReference, {
+        events: [{ ...event }],
+        billIds: [""]
+      });
+    }
+  }
+
+  private applyPendingPaymentsToBill(bill: UtilityBillRecord): boolean {
+    const key = ledgerKey(bill.utilityType, bill.buildingId, bill.houseNumber);
+    const legacyKey =
+      bill.buildingId === UTILITY_LEGACY_BUILDING_ID
+        ? null
+        : ledgerKey(bill.utilityType, UTILITY_LEGACY_BUILDING_ID, bill.houseNumber);
+    const pendingKeys = [key, ...(legacyKey ? [legacyKey] : [])];
+    const applicable: UtilityPaymentEvent[] = [];
+
+    for (const pendingKey of pendingKeys) {
+      const pending = this.pendingPayments.get(pendingKey) ?? [];
+      const remaining: UtilityPaymentEvent[] = [];
+      for (const event of pending) {
+        if ((event.billingMonth ?? "") <= bill.billingMonth) {
+          applicable.push(event);
+        } else {
+          remaining.push(event);
+        }
+      }
+      if (remaining.length > 0) {
+        this.pendingPayments.set(pendingKey, remaining);
+      } else {
+        this.pendingPayments.delete(pendingKey);
+      }
+    }
+
+    if (applicable.length === 0) {
+      return false;
+    }
+
+    const ordered = applicable.sort((a, b) =>
+      `${a.billingMonth ?? ""}:${a.paidAt}`.localeCompare(`${b.billingMonth ?? ""}:${b.paidAt}`)
+    );
+    const stillPending: UtilityPaymentEvent[] = [];
+    const updatedAt = nowIso();
+
+    for (const event of ordered) {
+      const openBalanceKsh = Math.max(0, Math.round(bill.balanceKsh));
+      if (openBalanceKsh <= 0) {
+        stillPending.push(event);
+        continue;
+      }
+
+      const appliedAmountKsh = Math.min(openBalanceKsh, Math.max(0, Math.round(event.amountKsh)));
+      const appliedEvent: UtilityPaymentEvent = {
+        ...event,
+        buildingId: bill.buildingId,
+        houseNumber: bill.houseNumber,
+        billingMonth: bill.billingMonth,
+        amountKsh: appliedAmountKsh
+      };
+      bill.payments.unshift(appliedEvent);
+      bill.balanceKsh = Math.max(0, bill.balanceKsh - appliedAmountKsh);
+      bill.updatedAt = updatedAt;
+
+      const remainingAmountKsh = Math.max(0, Math.round(event.amountKsh - appliedAmountKsh));
+      if (remainingAmountKsh > 0) {
+        stillPending.push({
+          ...event,
+          id: randomUUID(),
+          amountKsh: remainingAmountKsh
+        });
+      }
+    }
+
+    if (stillPending.length > 0) {
+      const current = this.pendingPayments.get(key) ?? [];
+      this.pendingPayments.set(key, [...stillPending, ...current]);
+    }
+    this.rebuildPaymentReferenceIndex();
+    return true;
+  }
+
+  private buildPendingPaymentResult(event: UtilityPaymentEvent | undefined): RecordUtilityPaymentResult {
+    if (!event) {
+      throw new Error("Pending utility payment is missing.");
+    }
+
+    const billingMonth = event.billingMonth ?? billingMonthFromDate(new Date(event.paidAt));
+    const bill: UtilityBillSnapshot = {
+      id: `pending-${event.id}`,
+      utilityType: event.utilityType,
+      buildingId: event.buildingId,
+      houseNumber: event.houseNumber,
+      billingMonth,
+      meterNumber: "PENDING",
+      previousReading: 0,
+      currentReading: 0,
+      unitsConsumed: 0,
+      ratePerUnitKsh: 0,
+      fixedChargeKsh: 0,
+      amountKsh: 0,
+      balanceKsh: 0,
+      dueDate: event.paidAt,
+      note: "Advance payment waiting for bill.",
+      createdAt: event.createdAt,
+      updatedAt: event.createdAt,
+      payments: [{ ...event }],
+      status: "clear",
+      daysToDue: 0
+    };
+
+    return {
+      event: { ...event },
+      bill,
+      allocations: [],
+      totalAppliedAmountKsh: Math.max(0, Math.round(event.amountKsh))
+    };
+  }
+
   private buildRecordPaymentResult(
     events: UtilityPaymentEvent[],
     billIds: string[]
@@ -1905,7 +2158,139 @@ export class UtilityBillingService {
       }
     }
 
+    for (const pending of this.pendingPayments.values()) {
+      const event = pending.find(
+        (payment) =>
+          payment.utilityType === utilityType &&
+          buildingMatchesScope(payment.buildingId, normalizedBuildingId) &&
+          payment.houseNumber === normalizedHouse &&
+          payment.id === normalizedPaymentId
+      );
+      if (event) {
+        return { ...event };
+      }
+    }
+
     return null;
+  }
+
+  private unrecordPendingPayment(
+    utilityType: UtilityType,
+    buildingId: string,
+    houseNumber: string,
+    paymentId: string
+  ): UnrecordUtilityPaymentResult | null {
+    let targetEvent: UtilityPaymentEvent | null = null;
+    for (const pending of this.pendingPayments.values()) {
+      const event = pending.find(
+        (payment) =>
+          payment.utilityType === utilityType &&
+          buildingMatchesScope(payment.buildingId, buildingId) &&
+          payment.houseNumber === houseNumber &&
+          payment.id === paymentId
+      );
+      if (event) {
+        targetEvent = event;
+        break;
+      }
+    }
+    if (!targetEvent) {
+      return null;
+    }
+    if (targetEvent.provider === "mpesa" || (targetEvent.provider !== "cash" && targetEvent.source !== "manual")) {
+      throw new Error("Only manually recorded non-M-PESA utility payments can be unrecorded.");
+    }
+
+    const removed: UtilityPaymentEvent[] = [];
+    const normalizedReference = targetEvent.providerReference
+      ? normalizeProviderReference(targetEvent.providerReference)
+      : undefined;
+    if (normalizedReference) {
+      this.removePendingPaymentsByReference(
+        utilityType,
+        buildingId,
+        houseNumber,
+        normalizedReference,
+        removed
+      );
+    } else {
+      this.removePendingPaymentsById(utilityType, buildingId, houseNumber, paymentId, removed);
+    }
+
+    if (removed.length === 0) {
+      return null;
+    }
+    this.rebuildPaymentReferenceIndex();
+    this.emitStateChange();
+    return {
+      events: removed,
+      allocations: [],
+      totalAmountKsh: removed.reduce(
+        (sum, event) => sum + Math.max(0, Number(event.amountKsh ?? 0)),
+        0
+      )
+    };
+  }
+
+  private removePendingPaymentsByReference(
+    utilityType: UtilityType,
+    buildingId: string,
+    houseNumber: string,
+    providerReference: string,
+    removed: UtilityPaymentEvent[]
+  ): void {
+    for (const [key, pending] of this.pendingPayments.entries()) {
+      const remaining: UtilityPaymentEvent[] = [];
+      for (const event of pending) {
+        const eventReference = event.providerReference
+          ? normalizeProviderReference(event.providerReference)
+          : undefined;
+        const shouldRemove =
+          event.utilityType === utilityType &&
+          buildingMatchesScope(event.buildingId, buildingId) &&
+          event.houseNumber === houseNumber &&
+          eventReference === providerReference;
+        if (shouldRemove) {
+          removed.push({ ...event });
+        } else {
+          remaining.push(event);
+        }
+      }
+      if (remaining.length > 0) {
+        this.pendingPayments.set(key, remaining);
+      } else {
+        this.pendingPayments.delete(key);
+      }
+    }
+  }
+
+  private removePendingPaymentsById(
+    utilityType: UtilityType,
+    buildingId: string,
+    houseNumber: string,
+    paymentId: string,
+    removed: UtilityPaymentEvent[]
+  ): void {
+    for (const [key, pending] of this.pendingPayments.entries()) {
+      const remaining: UtilityPaymentEvent[] = [];
+      for (const event of pending) {
+        const shouldRemove =
+          event.utilityType === utilityType &&
+          buildingMatchesScope(event.buildingId, buildingId) &&
+          event.houseNumber === houseNumber &&
+          event.id === paymentId;
+        if (shouldRemove) {
+          removed.push({ ...event });
+        } else {
+          remaining.push(event);
+        }
+      }
+      if (remaining.length > 0) {
+        this.pendingPayments.set(key, remaining);
+      } else {
+        this.pendingPayments.delete(key);
+      }
+    }
   }
 
   private normalizeCombinedChargeState(): void {
@@ -1936,6 +2321,24 @@ export class UtilityBillingService {
             billIds: [record.id]
           });
         }
+      }
+    }
+
+    for (const pending of this.pendingPayments.values()) {
+      for (const payment of pending) {
+        if (!payment.providerReference) {
+          continue;
+        }
+        const existing = this.paymentReferenceIndex.get(payment.providerReference);
+        if (existing) {
+          existing.events.push({ ...payment });
+          existing.billIds.push("");
+          continue;
+        }
+        this.paymentReferenceIndex.set(payment.providerReference, {
+          events: [{ ...payment }],
+          billIds: [""]
+        });
       }
     }
   }

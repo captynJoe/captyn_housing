@@ -121,6 +121,87 @@ test("records admin rent payments with provider metadata against an existing pro
   assert.equal(service.listCollectionStatus(10, BUILDING_A)[0]?.totalPaidKsh, 1500);
 });
 
+test("allows multiple admin rent payments for the same billing month", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString();
+  const billingMonth = dueDate.slice(0, 7);
+
+  service.upsertRentDue(BUILDING_A, "ADV-1", {
+    monthlyRentKsh: 10000,
+    balanceKsh: 10000,
+    dueDate
+  });
+
+  const first = service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "ADV-1",
+    billingMonth,
+    amountKsh: 3000,
+    provider: "cash",
+    providerReference: "rent-multi-001"
+  });
+  const second = service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "ADV-1",
+    billingMonth,
+    amountKsh: 2500,
+    provider: "bank",
+    providerReference: "rent-multi-002"
+  });
+
+  assert.equal(first.applied, true);
+  assert.equal(second.applied, true);
+  assert.equal(second.snapshot?.balanceKsh, 4500);
+  assert.equal(second.snapshot?.payments.length, 2);
+  assert.deepEqual(
+    service
+      .listPayments({ buildingId: BUILDING_A, houseNumber: "ADV-1" })
+      .map((item) => item.providerReference)
+      .sort(),
+    ["RENT-MULTI-001", "RENT-MULTI-002"]
+  );
+});
+
+test("keeps advance rent payments pending until that billing month is active", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString();
+  const nextDueDate = new Date(dueDate);
+  nextDueDate.setUTCMonth(nextDueDate.getUTCMonth() + 1);
+  const nextBillingMonth = nextDueDate.toISOString().slice(0, 7);
+
+  service.upsertRentDue(BUILDING_A, "ADV-2", {
+    monthlyRentKsh: 10000,
+    balanceKsh: 10000,
+    dueDate
+  });
+
+  const pending = service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "ADV-2",
+    billingMonth: nextBillingMonth,
+    amountKsh: 10000,
+    provider: "cash",
+    providerReference: "rent-advance-001",
+    paidAt: dueDate
+  });
+
+  assert.equal(pending.applied, false);
+  assert.equal(service.getRentDue(BUILDING_A, "ADV-2")?.balanceKsh, 10000);
+  assert.equal(service.listPayments({ buildingId: BUILDING_A, houseNumber: "ADV-2" }).length, 1);
+
+  const rolledForward = service.upsertRentDue(BUILDING_A, "ADV-2", {
+    monthlyRentKsh: 10000,
+    balanceKsh: 20000,
+    dueDate: nextDueDate.toISOString()
+  });
+
+  assert.equal(rolledForward.currentBillingMonth, nextBillingMonth);
+  assert.equal(rolledForward.balanceKsh, 10000);
+  assert.equal(rolledForward.payments.length, 1);
+  assert.equal(rolledForward.payments[0].billingMonth, nextBillingMonth);
+  assert.equal(rolledForward.payments[0].providerReference, "RENT-ADVANCE-001");
+});
+
 test("unrecords cash rent payments and restores the room balance", () => {
   const service = new RentLedgerService();
   const dueDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();

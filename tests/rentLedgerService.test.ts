@@ -182,12 +182,12 @@ test("does not unrecord non-cash rent payments", () => {
         houseNumber: "M-4",
         paymentId: payment.event.id
       }),
-    /Only manually recorded rent payments/
+    /Only manually recorded non-M-PESA rent payments/
   );
   assert.equal(service.getRentDue(BUILDING_A, "M-4")?.balanceKsh, 4500);
 });
 
-test("unrecords manually entered M-PESA rent receipts", () => {
+test("does not unrecord manually entered M-PESA rent receipts", () => {
   const service = new RentLedgerService();
   const dueDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -207,14 +207,66 @@ test("unrecords manually entered M-PESA rent receipts", () => {
     source: "manual"
   });
 
+  assert.throws(
+    () =>
+      service.unrecordCashPayment({
+        buildingId: BUILDING_A,
+        houseNumber: "M-5",
+        paymentId: payment.event.id
+      }),
+    /Only manually recorded non-M-PESA rent payments/
+  );
+  assert.equal(service.getRentDue(BUILDING_A, "M-5")?.balanceKsh, 4500);
+});
+
+test("edits manual non-M-PESA rent payments and refreshes current-cycle status", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.upsertRentDue(BUILDING_A, "M-6", {
+    monthlyRentKsh: 12000,
+    balanceKsh: 12000,
+    dueDate
+  });
+
+  const payment = service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "M-6",
+    amountKsh: 12000,
+    provider: "cash",
+    providerReference: "cash-edit-001",
+    paidAt: dueDate,
+    source: "manual"
+  });
+
+  assert.equal(payment.snapshot?.paymentStatus, "paid");
+
+  const edited = service.replaceManualPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "M-6",
+    paymentId: payment.event.id,
+    amountKsh: 6000,
+    provider: "bank",
+    providerReference: "bank-edit-001",
+    paidAt: dueDate
+  });
+
+  assert.ok(edited);
+  assert.equal(edited.event.provider, "bank");
+  assert.equal(edited.event.providerReference, "BANK-EDIT-001");
+  assert.equal(edited.snapshot?.balanceKsh, 6000);
+  assert.equal(edited.snapshot?.paymentStatus, "partial");
+
   const unrecorded = service.unrecordCashPayment({
     buildingId: BUILDING_A,
-    houseNumber: "M-5",
-    paymentId: payment.event.id
+    houseNumber: "M-6",
+    paymentId: edited.event.id
   });
 
   assert.ok(unrecorded);
-  assert.equal(unrecorded.snapshot?.balanceKsh, 6000);
+  assert.equal(unrecorded.snapshot?.balanceKsh, 12000);
+  assert.equal(unrecorded.snapshot?.paymentStatus, "not_paid");
+  assert.equal(service.listCollectionStatus(10, BUILDING_A)[0]?.paymentStatus, "not_paid");
 });
 
 test("exposes current-month paid, current-month outstanding, and arrears separately", () => {
@@ -285,6 +337,44 @@ test("purges room-scoped rent state when a room is removed", () => {
   assert.equal(service.listPayments({ buildingId: BUILDING_A, houseNumber: "Z-9" }).length, 0);
 });
 
+test("purges building-scoped rent state when a building is removed", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.upsertRentDue(BUILDING_A, "Z-9", {
+    monthlyRentKsh: 9000,
+    balanceKsh: 9000,
+    dueDate
+  });
+  service.upsertRentDue(BUILDING_A, "Z-10", {
+    monthlyRentKsh: 8000,
+    balanceKsh: 4000,
+    dueDate
+  });
+  service.upsertRentDue(BUILDING_B, "Z-9", {
+    monthlyRentKsh: 7000,
+    balanceKsh: 2000,
+    dueDate
+  });
+  service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "Z-9",
+    amountKsh: 1200,
+    provider: "cash",
+    providerReference: "z9-building-purge-cash"
+  });
+
+  assert.equal(service.purgeBuilding(BUILDING_A), true);
+  assert.equal(service.purgeBuilding(BUILDING_A), false);
+  assert.equal(service.getRentDue(BUILDING_A, "Z-9"), null);
+  assert.equal(service.getRentDue(BUILDING_A, "Z-10"), null);
+  assert.ok(service.getRentDue(BUILDING_B, "Z-9"));
+  assert.deepEqual(
+    service.exportState().records.map((item) => item.buildingId),
+    [BUILDING_B]
+  );
+});
+
 test("does not add next month rent before the rollover window opens", () => {
   const service = new RentLedgerService();
   const dueDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
@@ -299,6 +389,68 @@ test("does not add next month rent before the rollover window opens", () => {
   assert.ok(snapshot);
   assert.equal(snapshot.balanceKsh, 350);
   assert.equal(snapshot.dueDate, dueDate);
+});
+
+test("applies fixed late rent penalty once after the grace period", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.setLatePenaltyPolicyResolver((buildingId) =>
+    buildingId === BUILDING_A
+      ? {
+          enabled: true,
+          amountKsh: 250,
+          graceDays: 1
+        }
+      : null
+  );
+  service.upsertRentDue(BUILDING_A, "LP-1", {
+    monthlyRentKsh: 1000,
+    balanceKsh: 1000,
+    dueDate
+  });
+
+  const first = service.getRentDue(BUILDING_A, "LP-1");
+  assert.ok(first);
+  assert.equal(first.balanceKsh, 1250);
+  assert.equal(first.currentMonthLatePenaltyKsh, 250);
+  assert.equal(first.totalLatePenaltyKsh, 250);
+  assert.equal(first.latePenaltyCharges.length, 1);
+  assert.equal(first.currentMonthOutstandingKsh, 1250);
+
+  const second = service.getRentDue(BUILDING_A, "LP-1");
+  assert.ok(second);
+  assert.equal(second.balanceKsh, 1250);
+  assert.equal(second.latePenaltyCharges.length, 1);
+});
+
+test("does not apply fixed late rent penalty after the room is cleared", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.setLatePenaltyPolicyResolver(() => ({
+    enabled: true,
+    amountKsh: 250,
+    graceDays: 1
+  }));
+  service.upsertRentDue(BUILDING_A, "LP-2", {
+    monthlyRentKsh: 1000,
+    balanceKsh: 1000,
+    dueDate
+  });
+  service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "LP-2",
+    amountKsh: 1000,
+    provider: "cash",
+    providerReference: "lp-clear-1",
+    paidAt: new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString()
+  });
+
+  const snapshot = service.getRentDue(BUILDING_A, "LP-2");
+  assert.ok(snapshot);
+  assert.equal(snapshot.balanceKsh, 0);
+  assert.equal(snapshot.latePenaltyCharges.length, 0);
 });
 
 test("rolls a cleared room into the next month with one month rent, not two", () => {

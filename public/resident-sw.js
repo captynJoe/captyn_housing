@@ -1,9 +1,18 @@
-const CACHE_NAME = "resident-portal-v20260516a";
+const CACHE_NAME = "captyn-resident-v20260717d";
 const RESIDENT_SHELL_URL = "/resident";
+const PROFILE_SHELL_URL = "/user";
+const LANDLORD_SHELL_URL = "/landlord";
 const APP_ASSETS = [
   RESIDENT_SHELL_URL,
-  "/users.css?v=20260509a",
-  "/users.js?v=20260516a",
+  PROFILE_SHELL_URL,
+  LANDLORD_SHELL_URL,
+  "/users.css?v=20260717c",
+  "/user.css?v=20260523b",
+  "/landlord.css?v=20260717c",
+  "/captyn-theme.css?v=20260717c",
+  "/users.js?v=20260717c",
+  "/user.js?v=20260717c",
+  "/landlord.js?v=20260717c",
   "/password-visibility.js",
   "/manifest.webmanifest",
   "/icons/housing-app.svg",
@@ -11,12 +20,18 @@ const APP_ASSETS = [
 ];
 
 function getShellCacheKey(pathname) {
+  if (pathname === "/landlord" || pathname.startsWith("/landlord/")) {
+    return LANDLORD_SHELL_URL;
+  }
+
   if (
     pathname === "/user" ||
-    pathname === "/user/" ||
-    pathname === "/users" ||
-    pathname === "/users/"
+    pathname === "/user/"
   ) {
+    return PROFILE_SHELL_URL;
+  }
+
+  if (pathname === "/users" || pathname === "/users/") {
     return RESIDENT_SHELL_URL;
   }
 
@@ -66,6 +81,10 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
 
   if (request.mode === "navigate" && url.origin === self.location.origin) {
+    if (url.pathname === "/landlord/login" || url.pathname === "/admin/login") {
+      return;
+    }
+
     const shellCacheKey = getShellCacheKey(url.pathname);
     event.respondWith(
       fetch(request)
@@ -122,7 +141,7 @@ self.addEventListener("push", (event) => {
     body: data.body || "New resident update available.",
     icon: "/icons/housing-app.svg",
     badge: "/icons/housing-badge.svg",
-    tag: data.tag || "captyn-housing-resident",
+    tag: data.tag || "jk-flats-resident",
     data: {
       url: data.url || "/resident"
     }
@@ -138,11 +157,17 @@ self.addEventListener("notificationclick", (event) => {
     event.notification.data?.url || "/resident",
     self.location.origin
   ).href;
+  const targetPath = new URL(targetUrl).pathname;
+  const targetShellPrefix = targetPath.startsWith("/landlord")
+    ? "/landlord"
+    : targetPath.startsWith("/user")
+      ? "/user"
+      : "/resident";
 
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
       for (const client of clients) {
-        if (client.url.startsWith(`${self.location.origin}/resident`)) {
+        if (client.url.startsWith(`${self.location.origin}${targetShellPrefix}`)) {
           return client.focus();
         }
       }

@@ -1,8 +1,8 @@
 const DEFAULT_RESIDENT_BRAND = "Resident Portal";
-const DEFAULT_RESIDENT_PROFILE = "Resident Profile";
-const DEFAULT_LANDLORD_BRAND = "Management Portal";
-const DEFAULT_PUBLIC_HOME = "Property Portal";
-const DEFAULT_PORTFOLIO_BRAND = "Property Portfolio";
+const DEFAULT_RESIDENT_PROFILE = "Captyn Profile";
+const DEFAULT_LANDLORD_BRAND = "Captyn Housing";
+const DEFAULT_PUBLIC_HOME = "Resident Portal";
+const DEFAULT_PORTFOLIO_BRAND = "Captyn Housing";
 
 export function normalizeBuildingBrand(value) {
   const normalized = String(value ?? "").trim();
@@ -29,7 +29,7 @@ export function getLandlordShellBrand(buildingName) {
 
 export function getLandlordPortalTitle(buildingName) {
   const brand = normalizeBuildingBrand(buildingName);
-  return brand ? `${brand} Management Portal` : DEFAULT_LANDLORD_BRAND;
+  return brand ? `${brand} Management` : DEFAULT_LANDLORD_BRAND;
 }
 
 export function getPublicHomeTitle(buildingName) {

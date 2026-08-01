@@ -11,63 +11,74 @@ function hashPassword(password: string): string {
 }
 
 async function main() {
-  const landlordEmail =
+  const ownerEmail =
+    process.env.SEED_OWNER_EMAIL?.trim().toLowerCase() ??
     process.env.SEED_LANDLORD_EMAIL?.trim().toLowerCase() ??
-    "landlord@captyn.housing";
-  const landlordPhone =
-    process.env.SEED_LANDLORD_PHONE?.trim() ?? "+254700000001";
-  const landlordPassword =
-    process.env.SEED_LANDLORD_PASSWORD?.trim() ?? "ChangeMeNow123!";
+    "owner@landlord.housing";
+  const ownerPhone =
+    process.env.SEED_OWNER_PHONE?.trim() ??
+    process.env.SEED_LANDLORD_PHONE?.trim() ??
+    "+254700000001";
+  const ownerPassword =
+    process.env.SEED_OWNER_PASSWORD?.trim() ??
+    process.env.SEED_LANDLORD_PASSWORD?.trim() ??
+    "ChangeMeNow123!";
+  const ownerName =
+    process.env.SEED_OWNER_NAME?.trim() ??
+    process.env.SEED_LANDLORD_NAME?.trim() ??
+    "Primary Owner";
+  const buildingId =
+    process.env.SEED_BUILDING_ID?.trim() ?? "LANDLORD-BLDG-00001";
+  const buildingName =
+    process.env.SEED_BUILDING_NAME?.trim() ?? "Main Building";
+  const buildingAddress =
+    process.env.SEED_BUILDING_ADDRESS?.trim() ?? "Set building address";
+  const buildingCounty =
+    process.env.SEED_BUILDING_COUNTY?.trim() ?? "Nairobi";
 
-  const landlord = await prisma.housingUser.upsert({
-    where: { email: landlordEmail },
+  const owner = await prisma.housingUser.upsert({
+    where: { email: ownerEmail },
     update: {
-      fullName: "Nyota Landlord",
-      phone: landlordPhone,
+      fullName: ownerName,
+      phone: ownerPhone,
       role: "landlord",
       status: "active",
-      passwordHash: hashPassword(landlordPassword)
+      passwordHash: hashPassword(ownerPassword)
     },
     create: {
-      fullName: "Nyota Landlord",
-      email: landlordEmail,
-      phone: landlordPhone,
+      fullName: ownerName,
+      email: ownerEmail,
+      phone: ownerPhone,
       role: "landlord",
       status: "active",
-      passwordHash: hashPassword(landlordPassword)
+      passwordHash: hashPassword(ownerPassword)
     }
   });
 
   await prisma.building.upsert({
-    where: { id: "CAPTYN-BLDG-00001" },
+    where: { id: buildingId },
     update: {
-      landlordUserId: landlord.id,
-      name: "Nyota Heights",
-      address: "Mirema Drive, Nairobi",
-      county: "Nairobi",
+      landlordUserId: owner.id,
+      name: buildingName,
+      address: buildingAddress,
+      county: buildingCounty,
       cctvStatus: "verified",
-      units: 24,
-      mediaImageUrls: [
-        "https://example.com/nyota-heights/room-1.jpg",
-        "https://example.com/nyota-heights/kitchen.jpg"
-      ],
-      mediaVideoUrls: ["https://example.com/nyota-heights/walkthrough.mp4"],
-      mediaNeighborhoodNotes: "Quiet street, 5 minutes to stage."
+      units: 8,
+      mediaImageUrls: [],
+      mediaVideoUrls: [],
+      mediaNeighborhoodNotes: "Initial seeded building. Update details in management."
     },
     create: {
-      id: "CAPTYN-BLDG-00001",
-      landlordUserId: landlord.id,
-      name: "Nyota Heights",
-      address: "Mirema Drive, Nairobi",
-      county: "Nairobi",
+      id: buildingId,
+      landlordUserId: owner.id,
+      name: buildingName,
+      address: buildingAddress,
+      county: buildingCounty,
       cctvStatus: "verified",
-      units: 24,
-      mediaImageUrls: [
-        "https://example.com/nyota-heights/room-1.jpg",
-        "https://example.com/nyota-heights/kitchen.jpg"
-      ],
-      mediaVideoUrls: ["https://example.com/nyota-heights/walkthrough.mp4"],
-      mediaNeighborhoodNotes: "Quiet street, 5 minutes to stage."
+      units: 8,
+      mediaImageUrls: [],
+      mediaVideoUrls: [],
+      mediaNeighborhoodNotes: "Initial seeded building. Update details in management."
     }
   });
 
@@ -85,14 +96,14 @@ async function main() {
   for (const houseNumber of defaultUnits) {
     await prisma.houseUnit.upsert({
       where: {
-        buildingId_houseNumber: {
-          buildingId: "CAPTYN-BLDG-00001",
+          buildingId_houseNumber: {
+          buildingId,
           houseNumber
         }
       },
       update: { isActive: true },
       create: {
-        buildingId: "CAPTYN-BLDG-00001",
+        buildingId,
         houseNumber,
         isActive: true
       }

@@ -243,17 +243,97 @@ export const residentPushSubscriptionSchema = z.object({
 
 export const mediaUploadCategorySchema = z.enum([
   "support_evidence",
+  "resident_identity",
   "building_profile"
 ]);
 
 export const mediaUploadSignatureRequestSchema = z.object({
   category: mediaUploadCategorySchema,
-  buildingId: nonEmptyString.optional()
+  buildingId: nonEmptyString.optional(),
+  houseNumber: nonEmptyString.max(24).optional()
 });
 
 export const deleteResidentPushSubscriptionSchema = z.object({
   endpoint: z.string().trim().url().max(2_048)
 });
+
+export const ownerNotificationReadSchema = z.object({
+  notificationIds: z.array(nonEmptyString.max(120)).max(100).optional()
+});
+
+export const landlordMessageSendSchema = z
+  .object({
+    recipientScope: z.enum(["phone", "room", "building"]),
+    buildingId: z.preprocess(
+      emptyStringToUndefined,
+      nonEmptyString.max(120).optional()
+    ),
+    houseNumber: z.preprocess(
+      emptyStringToUndefined,
+      nonEmptyString.max(24).optional()
+    ),
+    phoneNumber: z.preprocess(emptyStringToUndefined, kenyaPhoneSchema.optional()),
+    title: z.preprocess(emptyStringToUndefined, nonEmptyString.max(48).optional()),
+    message: nonEmptyString.max(160)
+  })
+  .superRefine((value, ctx) => {
+    if (value.recipientScope === "phone" && !value.phoneNumber) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["phoneNumber"],
+        message: "Phone number is required."
+      });
+    }
+
+    if (
+      (value.recipientScope === "room" || value.recipientScope === "building") &&
+      !value.buildingId
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["buildingId"],
+        message: "Building is required."
+      });
+    }
+
+    if (value.recipientScope === "room" && !value.houseNumber) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["houseNumber"],
+        message: "Room or house number is required."
+      });
+    }
+
+    const fullMessage = value.title
+      ? `${value.title}: ${value.message}`
+      : value.message;
+    if (fullMessage.length > 160) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["message"],
+        message: "Title and message together must fit within 160 characters."
+      });
+    }
+  });
+
+export const landlordAutomaticMessageRulesUpdateSchema = z
+  .object({
+    buildingId: nonEmptyString.max(120),
+    paymentReceiptsEnabled: z.boolean().optional(),
+    rentRemindersEnabled: z.boolean().optional(),
+    utilityRemindersEnabled: z.boolean().optional(),
+    overdueNoticesEnabled: z.boolean().optional()
+  })
+  .refine(
+    (value) =>
+      typeof value.paymentReceiptsEnabled === "boolean" ||
+      typeof value.rentRemindersEnabled === "boolean" ||
+      typeof value.utilityRemindersEnabled === "boolean" ||
+      typeof value.overdueNoticesEnabled === "boolean",
+    {
+      message: "Provide at least one automatic message rule to update."
+    }
+  );
 
 export const updateResidentNotificationPreferencesSchema = z
   .object({
@@ -275,7 +355,7 @@ export const updateResidentNotificationPreferencesSchema = z
 
 export const upsertRentDueSchema = z.object({
   monthlyRentKsh: z.number().int().min(0).max(500_000),
-  balanceKsh: z.number().int().min(0).max(500_000),
+  balanceKsh: z.number().int().min(0).max(5_000_000),
   dueDate: z.string().datetime(),
   note: z.string().trim().max(280).optional()
 });
@@ -295,6 +375,65 @@ export const billingMonthSchema = z
   .regex(/^\d{4}-(0[1-9]|1[0-2])$/, {
     message: "Use YYYY-MM format for billing month."
   });
+
+export const landlordRentBulkSheetSchema = z.object({
+  billingMonth: billingMonthSchema,
+  dueDate: z.string().datetime(),
+  note: z.string().trim().max(280).optional(),
+  rows: z
+    .array(
+      z.object({
+        houseNumber: nonEmptyString.max(24),
+        monthlyRentKsh: z.number().int().min(0).max(500_000),
+        depositKsh: z.number().int().min(0).max(10_000_000).optional(),
+        balanceKsh: z.number().int().min(0).max(5_000_000).optional()
+      })
+    )
+    .min(1)
+    .max(2_000)
+});
+
+const optionalRentAmountSchema = z
+  .number()
+  .int()
+  .min(0)
+  .max(10_000_000)
+  .nullable()
+  .optional();
+const optionalRentDueDaySchema = z.number().int().min(1).max(31).nullable().optional();
+const optionalRentGraceDaysSchema = z.number().int().min(0).max(31).nullable().optional();
+const optionalRentDateSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, {
+    message: "Use YYYY-MM-DD format."
+  })
+  .nullable()
+  .optional();
+
+export const landlordRentSetupSheetSchema = z.object({
+  buildingDefaultMonthlyRentKsh: optionalRentAmountSchema,
+  buildingDefaultDepositKsh: optionalRentAmountSchema,
+  buildingDefaultDueDay: optionalRentDueDaySchema,
+  buildingDefaultGraceDays: z.number().int().min(0).max(31).optional(),
+  chargeStartDate: optionalRentDateSchema,
+  note: z.string().trim().max(280).optional(),
+  rows: z
+    .array(
+      z.object({
+        houseNumber: nonEmptyString.max(24),
+        monthlyRentKsh: optionalRentAmountSchema,
+        depositKsh: optionalRentAmountSchema,
+        currentMonthPaidKsh: optionalRentAmountSchema,
+        paymentDueDay: optionalRentDueDaySchema,
+        graceDays: optionalRentGraceDaysSchema,
+        active: z.boolean().optional(),
+        note: z.string().trim().max(280).optional()
+      })
+    )
+    .max(2_000)
+    .default([])
+});
 
 const utilityMeterNumberField = z
   .string()
@@ -422,23 +561,37 @@ const optionalTenantPhoneSchema = z.preprocess(
   emptyStringToUndefined,
   kenyaPhoneSchema.optional()
 );
+const optionalTenantIdentityDocumentUrlsSchema = z
+  .array(mediaAssetUrlSchema)
+  .max(4)
+  .optional();
 
-export const residentPasswordSetupSchema = z.object({
-  buildingId: nonEmptyString,
-  houseNumber: nonEmptyString.max(24),
-  phoneNumber: kenyaPhoneSchema,
-  password: z.string().min(8).max(128),
-  identityType: optionalTenantIdentityTypeSchema,
-  identityNumber: z.preprocess(
-    emptyStringToUndefined,
-    z.string().trim().min(4).max(80).optional()
-  ),
-  occupationStatus: optionalTenantOccupationStatusSchema,
-  occupationLabel: z.preprocess(
-    emptyStringToUndefined,
-    z.string().trim().min(2).max(120).optional()
-  )
-});
+export const residentPasswordSetupSchema = z
+  .object({
+    buildingId: nonEmptyString,
+    houseNumber: nonEmptyString.max(24),
+    phoneNumber: kenyaPhoneSchema,
+    password: z.string().min(8).max(128),
+    identityType: optionalTenantIdentityTypeSchema,
+    identityNumber: z.preprocess(
+      emptyStringToUndefined,
+      z.string().trim().min(4).max(80).optional()
+    ),
+    occupationStatus: optionalTenantOccupationStatusSchema,
+    occupationLabel: z.preprocess(
+      emptyStringToUndefined,
+      z.string().trim().min(2).max(120).optional()
+    )
+  })
+  .superRefine((value, context) => {
+    if (value.identityNumber && !value.identityType) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["identityType"],
+        message: "Select the ID type for the provided ID number."
+      });
+    }
+  });
 
 export const residentPhoneLoginSchema = z.object({
   buildingId: z.preprocess(emptyStringToUndefined, nonEmptyString.optional()),
@@ -465,11 +618,43 @@ export const residentChangePasswordSchema = z
     }
   });
 
+export const accountChangePasswordSchema = z
+  .object({
+    newPassword: z.string().min(8).max(128),
+    confirmPassword: z.string().min(8).max(128)
+  })
+  .superRefine((value, context) => {
+    if (value.newPassword !== value.confirmPassword) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["confirmPassword"],
+        message: "Confirmation password must match the new password."
+      });
+    }
+  });
+
 export const residentAdminPasswordResetSchema = z.object({
   buildingId: nonEmptyString,
   houseNumber: nonEmptyString.max(24),
   phoneNumber: kenyaPhoneSchema,
   temporaryPassword: z.string().min(8).max(128)
+});
+
+export const landlordDirectTenantCreateSchema = z.object({
+  buildingId: nonEmptyString.max(120),
+  houseNumber: nonEmptyString.max(24),
+  fullName: nonEmptyString.max(120),
+  phoneNumber: kenyaPhoneSchema,
+  identityType: tenantIdentityTypeSchema.default("national_id"),
+  identityNumber: nonEmptyString.min(4).max(80),
+  billingStartDate: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, {
+      message: "Use YYYY-MM-DD format."
+    })
+    .optional(),
+  note: optionalTenantTextSchema(280)
 });
 
 export const residentPasswordRecoveryRequestSchema = z.object({
@@ -550,13 +735,33 @@ export const adminAccessCredentialUpdateSchema = z
     }
   });
 
-export const userRoleSchema = z.enum(["tenant", "landlord", "admin", "root_admin"]);
+export const userRoleSchema = z.enum([
+  "tenant",
+  "landlord",
+  "staff",
+  "admin",
+  "root_admin"
+]);
 
 export const userRegisterSchema = z.object({
   fullName: nonEmptyString.max(120),
   email: z.string().trim().email().max(160),
   phoneNumber: kenyaPhoneSchema,
   password: z.string().min(8).max(128)
+});
+
+export const ownerStaffCreateSchema = z.object({
+  fullName: nonEmptyString.max(120),
+  email: z.string().trim().email().max(160),
+  phoneNumber: kenyaPhoneSchema,
+  temporaryPassword: z.string().min(8).max(128),
+  note: z.string().trim().max(280).optional()
+});
+
+export const ownerStaffDisableSchema = z.object({
+  confirmUserId: nonEmptyString.max(120).optional(),
+  confirmationText: z.literal("DISABLE").optional(),
+  note: z.string().trim().max(280).optional()
 });
 
 export const userLoginSchema = z
@@ -603,6 +808,7 @@ export const tenantAgreementUpsertSchema = z
   .object({
     identityType: optionalTenantIdentityTypeSchema,
     identityNumber: optionalTenantTextSchema(80),
+    identityDocumentUrls: optionalTenantIdentityDocumentUrlsSchema,
     occupationStatus: optionalTenantOccupationStatusSchema,
     occupationLabel: optionalTenantTextSchema(120),
     organizationName: optionalTenantTextSchema(160),
@@ -616,6 +822,7 @@ export const tenantAgreementUpsertSchema = z
     leaseEndDate: tenantAgreementDateSchema.optional(),
     monthlyRentKsh: z.number().int().min(0).max(10_000_000).optional(),
     depositKsh: z.number().int().min(0).max(10_000_000).optional(),
+    depositPaidKsh: z.number().int().min(0).max(10_000_000).optional(),
     paymentDueDay: z.number().int().min(1).max(31).optional(),
     specialTerms: z.string().trim().max(1_200).optional()
   })
@@ -625,6 +832,14 @@ export const tenantAgreementUpsertSchema = z
         code: z.ZodIssueCode.custom,
         path: ["identityType"],
         message: "Select the ID type for the provided ID number."
+      });
+    }
+
+    if (value.identityDocumentUrls?.length && (!value.identityType || !value.identityNumber)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["identityNumber"],
+        message: "Add the ID type and ID number before uploading ID photos."
       });
     }
 
@@ -652,12 +867,33 @@ export const tenantAgreementUpsertSchema = z
         });
       }
     }
+
+    if (value.depositPaidKsh != null && value.depositKsh == null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["depositKsh"],
+        message: "Set the agreed deposit before recording how much has been paid."
+      });
+    }
+
+    if (
+      value.depositPaidKsh != null &&
+      value.depositKsh != null &&
+      value.depositPaidKsh > value.depositKsh
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["depositPaidKsh"],
+        message: "Deposit paid cannot be more than the agreed deposit amount."
+      });
+    }
   });
 
 export const residentTenantProfileUpsertSchema = z
   .object({
     identityType: optionalTenantIdentityTypeSchema,
     identityNumber: optionalTenantTextSchema(80),
+    identityDocumentUrls: optionalTenantIdentityDocumentUrlsSchema,
     occupationStatus: optionalTenantOccupationStatusSchema,
     occupationLabel: optionalTenantTextSchema(120),
     organizationName: optionalTenantTextSchema(160),
@@ -674,6 +910,14 @@ export const residentTenantProfileUpsertSchema = z
         code: z.ZodIssueCode.custom,
         path: ["identityType"],
         message: "Select the ID type for the provided ID number."
+      });
+    }
+
+    if (value.identityDocumentUrls?.length && (!value.identityType || !value.identityNumber)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["identityNumber"],
+        message: "Add the ID type and ID number before uploading ID photos."
       });
     }
 
@@ -701,6 +945,9 @@ export const landlordPaymentAccessUpdateSchema = z
     rentEnabled: z.boolean().optional(),
     waterEnabled: z.boolean().optional(),
     electricityEnabled: z.boolean().optional(),
+    rentGraceDays: z.number().int().min(0).max(31).optional(),
+    lateRentPenaltyEnabled: z.boolean().optional(),
+    lateRentPenaltyAmountKsh: z.number().int().min(0).max(500_000).optional(),
     acknowledgeImpact: z.literal(true),
     note: z.string().trim().max(280).optional()
   })
@@ -708,11 +955,36 @@ export const landlordPaymentAccessUpdateSchema = z
     (value) =>
       typeof value.rentEnabled === "boolean" ||
       typeof value.waterEnabled === "boolean" ||
-      typeof value.electricityEnabled === "boolean",
+      typeof value.electricityEnabled === "boolean" ||
+      typeof value.rentGraceDays === "number" ||
+      typeof value.lateRentPenaltyEnabled === "boolean" ||
+      typeof value.lateRentPenaltyAmountKsh === "number",
     {
-      message: "Provide at least one payment toggle to update."
+      message: "Provide at least one payment setting to update."
     }
   );
+
+export const landlordPaymentProfileUpdateSchema = z.object({
+  profileId: z.string().trim().min(1).max(80).default("default"),
+  accountReference: z.string().trim().max(40).optional(),
+  note: z.string().trim().max(280).optional()
+});
+
+export const landlordPaymentInstructionsUpdateSchema = z.object({
+  primaryMethod: z.enum(["mpesa", "bank", "cash", "manual"]).default("mpesa"),
+  mpesaBusinessNumber: z.string().trim().max(40).optional(),
+  mpesaAccountReference: z.string().trim().max(80).optional(),
+  mpesaAccountName: z.string().trim().max(120).optional(),
+  bankName: z.string().trim().max(120).optional(),
+  bankAccountName: z.string().trim().max(120).optional(),
+  bankAccountNumber: z.string().trim().max(80).optional(),
+  bankBranch: z.string().trim().max(120).optional(),
+  bankSwiftCode: z.string().trim().max(40).optional(),
+  cashLocation: z.string().trim().max(160).optional(),
+  instructions: z.string().trim().max(800).optional(),
+  proofInstructions: z.string().trim().max(800).optional(),
+  note: z.string().trim().max(280).optional()
+});
 
 export const landlordBuildingConfigurationUpdateSchema = z
   .object({
@@ -732,8 +1004,12 @@ export const landlordBuildingConfigurationUpdateSchema = z
     defaultWaterFixedChargeKsh: z.number().min(0).max(200_000).nullable().optional(),
     defaultElectricityFixedChargeKsh: z.number().min(0).max(200_000).nullable().optional(),
     defaultCombinedUtilityChargeKsh: z.number().int().min(0).max(200_000).nullable().optional(),
+    defaultMonthlyRentKsh: z.number().int().min(0).max(10_000_000).nullable().optional(),
+    defaultRentDueDay: z.number().int().min(1).max(31).nullable().optional(),
     utilityBalanceVisibleDays: z.number().int().min(0).max(60).optional(),
     rentGraceDays: z.number().int().min(0).max(31).optional(),
+    lateRentPenaltyEnabled: z.boolean().optional(),
+    lateRentPenaltyAmountKsh: z.number().int().min(0).max(500_000).optional(),
     allowManualRentPosting: z.boolean().optional(),
     allowManualUtilityPosting: z.boolean().optional(),
     wifiAccessMode: wifiAccessModeSchema.optional(),
@@ -758,7 +1034,11 @@ export const landlordBuildingConfigurationUpdateSchema = z
       value.defaultElectricityFixedChargeKsh !== undefined ||
       typeof value.utilityBalanceVisibleDays === "number" ||
       value.defaultCombinedUtilityChargeKsh !== undefined ||
+      value.defaultMonthlyRentKsh !== undefined ||
+      value.defaultRentDueDay !== undefined ||
       typeof value.rentGraceDays === "number" ||
+      typeof value.lateRentPenaltyEnabled === "boolean" ||
+      typeof value.lateRentPenaltyAmountKsh === "number" ||
       typeof value.allowManualRentPosting === "boolean" ||
       typeof value.allowManualUtilityPosting === "boolean" ||
       typeof value.utilityBillingMode === "string" ||
@@ -852,6 +1132,10 @@ export const landlordExpenditureCreateSchema = z.object({
   category: z.enum([
     "maintenance",
     "utilities",
+    "common_water",
+    "common_electricity",
+    "security_lighting",
+    "shared_services",
     "cleaning",
     "security",
     "supplies",
@@ -926,6 +1210,9 @@ export const rentMpesaCallbackSchema = z.object({
   billingMonth: billingMonthSchema.optional(),
   tenantUserId: z.string().trim().max(120).optional(),
   tenantName: z.string().trim().max(160).optional(),
+  paymentProfileId: z.string().trim().max(80).optional(),
+  paymentProfileName: z.string().trim().max(160).optional(),
+  paymentAccountReference: z.string().trim().max(40).optional(),
   paidAt: z.string().datetime().optional(),
   rawPayload: z.unknown().optional()
 });
@@ -954,6 +1241,14 @@ export const recordAdminRentPaymentSchema = z.object({
 
 export const residentDebtCollectionSchema = z.object({
   amountKsh: z.number().positive().max(5_000_000).optional(),
+  provider: utilityPaymentProviderSchema.default("cash"),
+  providerReference: nonEmptyString.max(120).optional(),
+  paidAt: z.string().datetime().optional(),
+  note: z.string().trim().max(280).optional()
+});
+
+export const depositRefundRecordSchema = z.object({
+  amountKsh: z.number().positive().max(10_000_000).optional(),
   provider: utilityPaymentProviderSchema.default("cash"),
   providerReference: nonEmptyString.max(120).optional(),
   paidAt: z.string().datetime().optional(),
@@ -1056,6 +1351,7 @@ export type RecordAdminRentPaymentInput = z.infer<typeof recordAdminRentPaymentS
 export type ResidentDebtCollectionInput = z.infer<
   typeof residentDebtCollectionSchema
 >;
+export type DepositRefundRecordInput = z.infer<typeof depositRefundRecordSchema>;
 export type UpdateTicketStatusInput = z.infer<typeof updateTicketStatusSchema>;
 export type AdminAccessCredentialUpdateInput = z.infer<
   typeof adminAccessCredentialUpdateSchema
@@ -1063,6 +1359,10 @@ export type AdminAccessCredentialUpdateInput = z.infer<
 export type MediaUploadCategoryInput = z.infer<typeof mediaUploadCategorySchema>;
 export type MediaUploadSignatureRequestInput = z.infer<
   typeof mediaUploadSignatureRequestSchema
+>;
+export type LandlordMessageSendInput = z.infer<typeof landlordMessageSendSchema>;
+export type LandlordAutomaticMessageRulesUpdateInput = z.infer<
+  typeof landlordAutomaticMessageRulesUpdateSchema
 >;
 export type ResidentPasswordSetupInput = z.infer<
   typeof residentPasswordSetupSchema
@@ -1073,6 +1373,9 @@ export type UpdateResidentNotificationPreferencesInput = z.infer<
 >;
 export type ResidentChangePasswordInput = z.infer<
   typeof residentChangePasswordSchema
+>;
+export type AccountChangePasswordInput = z.infer<
+  typeof accountChangePasswordSchema
 >;
 export type ResidentAdminPasswordResetInput = z.infer<
   typeof residentAdminPasswordResetSchema
@@ -1090,11 +1393,22 @@ export type AdminLoginInput = z.infer<typeof adminLoginSchema>;
 export type UserRoleInput = z.infer<typeof userRoleSchema>;
 export type UserRegisterInput = z.infer<typeof userRegisterSchema>;
 export type UserLoginInput = z.infer<typeof userLoginSchema>;
+export type OwnerStaffCreateInput = z.infer<typeof ownerStaffCreateSchema>;
+export type OwnerStaffDisableInput = z.infer<typeof ownerStaffDisableSchema>;
 export type TenantApplicationInput = z.infer<typeof tenantApplicationSchema>;
+export type LandlordDirectTenantCreateInput = z.infer<
+  typeof landlordDirectTenantCreateSchema
+>;
 export type TenantAgreementUpsertInput = z.infer<typeof tenantAgreementUpsertSchema>;
 export type LandlordDecisionInput = z.infer<typeof landlordDecisionSchema>;
 export type LandlordPaymentAccessUpdateInput = z.infer<
   typeof landlordPaymentAccessUpdateSchema
+>;
+export type LandlordPaymentProfileUpdateInput = z.infer<
+  typeof landlordPaymentProfileUpdateSchema
+>;
+export type LandlordPaymentInstructionsUpdateInput = z.infer<
+  typeof landlordPaymentInstructionsUpdateSchema
 >;
 export type LandlordBuildingConfigurationUpdateInput = z.infer<
   typeof landlordBuildingConfigurationUpdateSchema

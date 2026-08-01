@@ -4,8 +4,8 @@ import type {
   UpsertRentDueInput
 } from "../validation/schemas.js";
 
-type RentPaymentProvider = "mpesa" | "cash" | "bank" | "card";
-type RentPaymentSource = "manual" | "mpesa";
+type RentPaymentProvider = "mpesa" | "cash" | "bank" | "card" | "deposit_credit";
+type RentPaymentSource = "manual" | "mpesa" | "settlement";
 
 interface RecordRentPaymentInput {
   buildingId: string;
@@ -18,6 +18,9 @@ interface RecordRentPaymentInput {
   billingMonth?: string;
   tenantUserId?: string;
   tenantName?: string;
+  paymentProfileId?: string;
+  paymentProfileName?: string;
+  paymentAccountReference?: string;
   source?: RentPaymentSource;
 }
 
@@ -35,6 +38,9 @@ export interface RentPaymentEvent {
   providerReference: string;
   amountKsh: number;
   phoneNumber?: string;
+  paymentProfileId?: string;
+  paymentProfileName?: string;
+  paymentAccountReference?: string;
   paidAt: string;
   createdAt: string;
   source?: RentPaymentSource;
@@ -46,6 +52,21 @@ interface ReminderState {
   overdueDateKey?: string;
 }
 
+export interface RentLatePenaltyPolicy {
+  enabled: boolean;
+  amountKsh: number;
+  graceDays: number;
+}
+
+export interface RentLatePenaltyCharge {
+  id: string;
+  billingMonth: string;
+  amountKsh: number;
+  dueDate: string;
+  appliedAt: string;
+  note?: string;
+}
+
 export interface RentDueRecord {
   buildingId: string;
   houseNumber: string;
@@ -55,6 +76,7 @@ export interface RentDueRecord {
   note?: string;
   updatedAt: string;
   payments: RentPaymentEvent[];
+  latePenaltyCharges: RentLatePenaltyCharge[];
   reminderState: ReminderState;
 }
 
@@ -67,6 +89,11 @@ export interface RentDueSnapshot extends Omit<RentDueRecord, "reminderState"> {
   currentMonthOutstandingKsh: number;
   arrearsKsh: number;
   totalPaidKsh: number;
+  currentMonthLatePenaltyKsh: number;
+  totalLatePenaltyKsh: number;
+  graceDays: number;
+  overdueStartsAt: string;
+  daysToOverdue: number;
   daysToDue: number;
 }
 
@@ -102,6 +129,23 @@ interface UnrecordRentPaymentInput {
   paymentId: string;
 }
 
+interface ReplaceManualRentPaymentInput {
+  buildingId: string;
+  houseNumber: string;
+  paymentId: string;
+  amountKsh: number;
+  provider: RentPaymentProvider;
+  providerReference: string;
+  phoneNumber?: string;
+  paidAt?: string;
+  billingMonth?: string;
+  tenantUserId?: string;
+  tenantName?: string;
+  paymentProfileId?: string;
+  paymentProfileName?: string;
+  paymentAccountReference?: string;
+}
+
 export interface RentBillingHoldCheck {
   buildingId: string;
   houseNumber: string;
@@ -110,8 +154,18 @@ export interface RentBillingHoldCheck {
 }
 
 type RentBillingHoldPredicate = (input: RentBillingHoldCheck) => boolean;
+type RentLatePenaltyPolicyResolver = (
+  buildingId: string
+) => RentLatePenaltyPolicy | null | undefined;
 
 export interface UnrecordRentPaymentResult {
+  event: RentPaymentEvent;
+  applied: boolean;
+  snapshot: RentDueSnapshot | null;
+}
+
+export interface ReplaceManualRentPaymentResult {
+  previousEvent: RentPaymentEvent;
   event: RentPaymentEvent;
   applied: boolean;
   snapshot: RentDueSnapshot | null;
@@ -255,6 +309,7 @@ function normalizeRentPaymentProvider(value: string | undefined): RentPaymentPro
     case "cash":
     case "bank":
     case "card":
+    case "deposit_credit":
     case "mpesa":
       return value;
     default:
@@ -262,10 +317,14 @@ function normalizeRentPaymentProvider(value: string | undefined): RentPaymentPro
   }
 }
 
-function paymentStatusForRecord(record: RentDueRecord): RentDueSnapshot["paymentStatus"] {
-  if (record.balanceKsh <= 0) return "paid";
-  if (record.balanceKsh >= record.monthlyRentKsh) return "not_paid";
-  return "partial";
+function normalizeLatePenaltyPolicy(
+  policy: RentLatePenaltyPolicy | null | undefined
+): RentLatePenaltyPolicy {
+  return {
+    enabled: Boolean(policy?.enabled),
+    amountKsh: Math.max(0, Math.round(Number(policy?.amountKsh ?? 0))),
+    graceDays: Math.max(0, Math.round(Number(policy?.graceDays ?? 0)))
+  };
 }
 
 export class RentLedgerService {
@@ -274,6 +333,7 @@ export class RentLedgerService {
   private readonly paymentReferenceIndex = new Map<string, ReferenceIndexEntry>();
   private stateChangeHandler?: RentLedgerStateChangeHandler;
   private billingHoldPredicate?: RentBillingHoldPredicate;
+  private latePenaltyPolicyResolver?: RentLatePenaltyPolicyResolver;
 
   setStateChangeHandler(handler?: RentLedgerStateChangeHandler): void {
     this.stateChangeHandler = handler;
@@ -283,10 +343,15 @@ export class RentLedgerService {
     this.billingHoldPredicate = predicate;
   }
 
+  setLatePenaltyPolicyResolver(resolver?: RentLatePenaltyPolicyResolver): void {
+    this.latePenaltyPolicyResolver = resolver;
+  }
+
   exportState(): RentLedgerPersistedState {
     const records = [...this.records.values()].map((record) => ({
       ...record,
       payments: [...record.payments],
+      latePenaltyCharges: [...(record.latePenaltyCharges ?? [])],
       reminderState: { ...record.reminderState }
     }));
 
@@ -333,6 +398,18 @@ export class RentLedgerService {
                 provider: normalizeRentPaymentProvider(payment.provider),
                 providerReference: normalizeProviderReference(payment.providerReference)
               }))
+            : [],
+          latePenaltyCharges: Array.isArray(record.latePenaltyCharges)
+            ? record.latePenaltyCharges
+                .filter((charge) => charge && charge.billingMonth)
+                .map((charge) => ({
+                  id: String(charge.id ?? randomUUID()),
+                  billingMonth: String(charge.billingMonth),
+                  amountKsh: Math.max(0, Math.round(Number(charge.amountKsh ?? 0))),
+                  dueDate: String(charge.dueDate ?? record.dueDate),
+                  appliedAt: String(charge.appliedAt ?? record.updatedAt ?? nowIso()),
+                  note: typeof charge.note === "string" ? charge.note : undefined
+                }))
             : [],
           reminderState: {
             d3CycleKey: record.reminderState?.d3CycleKey,
@@ -434,6 +511,8 @@ export class RentLedgerService {
       note: input.note?.trim(),
       updatedAt: nowIso(),
       payments,
+      latePenaltyCharges:
+        existing?.latePenaltyCharges.map((charge) => ({ ...charge })) ?? [],
       reminderState
     };
 
@@ -461,7 +540,7 @@ export class RentLedgerService {
       return null;
     }
 
-    if (this.advanceRecordCyclesIfNeeded(record)) {
+    if (this.refreshRecordForBilling(record)) {
       this.emitStateChange();
     }
     return this.toSnapshot(record);
@@ -565,8 +644,8 @@ export class RentLedgerService {
       if (!event) {
         return null;
       }
-      if (event.provider !== "cash" && event.source !== "manual") {
-        throw new Error("Only manually recorded rent payments can be unrecorded.");
+      if (event.provider === "mpesa" || (event.provider !== "cash" && event.source !== "manual")) {
+        throw new Error("Only manually recorded non-M-PESA rent payments can be unrecorded.");
       }
 
       record.payments.splice(paymentIndex, 1);
@@ -600,8 +679,8 @@ export class RentLedgerService {
       if (!event) {
         return null;
       }
-      if (event.provider !== "cash" && event.source !== "manual") {
-        throw new Error("Only manually recorded rent payments can be unrecorded.");
+      if (event.provider === "mpesa" || (event.provider !== "cash" && event.source !== "manual")) {
+        throw new Error("Only manually recorded non-M-PESA rent payments can be unrecorded.");
       }
 
       pending.splice(paymentIndex, 1);
@@ -619,6 +698,88 @@ export class RentLedgerService {
     }
 
     return null;
+  }
+
+  replaceManualPayment(
+    input: ReplaceManualRentPaymentInput
+  ): ReplaceManualRentPaymentResult | null {
+    const target = this.findPaymentById(
+      input.buildingId,
+      input.houseNumber,
+      input.paymentId
+    );
+    if (!target) {
+      return null;
+    }
+
+    const existingEvent = target.event;
+    if (existingEvent.provider === "mpesa" || existingEvent.source !== "manual") {
+      throw new Error("Only manually recorded non-M-PESA rent payments can be edited.");
+    }
+
+    const originalReference = normalizeProviderReference(existingEvent.providerReference);
+    const nextReference = normalizeProviderReference(input.providerReference);
+    if (
+      nextReference !== originalReference &&
+      this.paymentReferenceIndex.has(nextReference)
+    ) {
+      throw new Error("PAYMENT_REFERENCE_ALREADY_EXISTS");
+    }
+
+    const previousEvent = { ...existingEvent };
+    const removed = this.unrecordCashPayment({
+      buildingId: input.buildingId,
+      houseNumber: input.houseNumber,
+      paymentId: input.paymentId
+    });
+    if (!removed) {
+      return null;
+    }
+
+    try {
+      const outcome = this.recordPayment({
+        buildingId: input.buildingId,
+        houseNumber: input.houseNumber,
+        amountKsh: input.amountKsh,
+        provider: input.provider,
+        providerReference: input.providerReference,
+        phoneNumber: input.phoneNumber ?? existingEvent.phoneNumber,
+        paidAt: input.paidAt ?? existingEvent.paidAt,
+        billingMonth: input.billingMonth ?? existingEvent.billingMonth,
+        tenantUserId: input.tenantUserId ?? existingEvent.tenantUserId,
+        tenantName: input.tenantName ?? existingEvent.tenantName,
+        paymentProfileId: input.paymentProfileId ?? existingEvent.paymentProfileId,
+        paymentProfileName: input.paymentProfileName ?? existingEvent.paymentProfileName,
+        paymentAccountReference:
+          input.paymentAccountReference ?? existingEvent.paymentAccountReference,
+        source: "manual"
+      });
+
+      return {
+        previousEvent,
+        event: outcome.event,
+        applied: outcome.applied,
+        snapshot: outcome.snapshot
+      };
+    } catch (error) {
+      this.recordPayment({
+        buildingId: previousEvent.buildingId,
+        houseNumber: previousEvent.houseNumber,
+        amountKsh: previousEvent.amountKsh,
+        provider: previousEvent.provider,
+        providerReference: previousEvent.providerReference,
+        phoneNumber: previousEvent.phoneNumber,
+        paidAt: previousEvent.paidAt,
+        billingMonth: previousEvent.billingMonth,
+        tenantUserId: previousEvent.tenantUserId,
+        tenantName: previousEvent.tenantName,
+        paymentProfileId: previousEvent.paymentProfileId,
+        paymentProfileName: previousEvent.paymentProfileName,
+        paymentAccountReference: previousEvent.paymentAccountReference,
+        source: previousEvent.source
+      });
+      throw error;
+    }
   }
 
   purgeHouse(buildingId: string, houseNumber: string): boolean {
@@ -666,6 +827,61 @@ export class RentLedgerService {
     return true;
   }
 
+  purgeBuilding(buildingId: string): boolean {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const referencesToDelete = new Set<string>();
+    let changed = false;
+
+    for (const [key, record] of this.records.entries()) {
+      if (record.buildingId !== normalizedBuildingId) {
+        continue;
+      }
+
+      record.payments.forEach((payment) => {
+        if (payment.providerReference) {
+          referencesToDelete.add(payment.providerReference);
+        }
+      });
+      this.records.delete(key);
+      changed = true;
+    }
+
+    for (const [key, pending] of this.pendingPayments.entries()) {
+      const remaining = pending.filter(
+        (payment) => normalizeBuildingId(payment.buildingId) !== normalizedBuildingId
+      );
+      if (remaining.length === pending.length) {
+        continue;
+      }
+
+      pending.forEach((payment) => {
+        if (
+          normalizeBuildingId(payment.buildingId) === normalizedBuildingId &&
+          payment.providerReference
+        ) {
+          referencesToDelete.add(payment.providerReference);
+        }
+      });
+
+      if (remaining.length > 0) {
+        this.pendingPayments.set(key, remaining);
+      } else {
+        this.pendingPayments.delete(key);
+      }
+      changed = true;
+    }
+
+    if (!changed) {
+      return false;
+    }
+
+    referencesToDelete.forEach((reference) => {
+      this.paymentReferenceIndex.delete(normalizeProviderReference(reference));
+    });
+    this.emitStateChange();
+    return true;
+  }
+
   writeOffHouseBalance(
     buildingId: string,
     houseNumber: string,
@@ -676,7 +892,7 @@ export class RentLedgerService {
       return null;
     }
 
-    const advanced = this.advanceRecordCyclesIfNeeded(record);
+    const advanced = this.refreshRecordForBilling(record);
     const previousBalanceKsh = Math.max(0, Math.round(Number(record.balanceKsh ?? 0)));
     if (previousBalanceKsh > 0) {
       record.balanceKsh = 0;
@@ -708,6 +924,9 @@ export class RentLedgerService {
       billingMonth: input.billingMonth,
       tenantUserId: input.tenantUserId,
       tenantName: input.tenantName,
+      paymentProfileId: input.paymentProfileId,
+      paymentProfileName: input.paymentProfileName,
+      paymentAccountReference: input.paymentAccountReference,
       source: "mpesa"
     });
   }
@@ -742,6 +961,9 @@ export class RentLedgerService {
       providerReference: normalizedReference,
       amountKsh: Math.round(input.amountKsh),
       phoneNumber: input.phoneNumber,
+      paymentProfileId: input.paymentProfileId,
+      paymentProfileName: input.paymentProfileName,
+      paymentAccountReference: input.paymentAccountReference,
       paidAt,
       createdAt: nowIso(),
       source: input.source
@@ -765,7 +987,7 @@ export class RentLedgerService {
       };
     }
 
-    this.advanceRecordCyclesIfNeeded(record);
+    this.refreshRecordForBilling(record, new Date(paidAt));
 
     if (record.buildingId !== normalizedBuildingId) {
       const migratedRecord: RentDueRecord = {
@@ -788,6 +1010,7 @@ export class RentLedgerService {
         });
       });
       this.applyPaymentToRecord(migratedRecord, event);
+      this.refreshRecordForBilling(migratedRecord);
       this.paymentReferenceIndex.set(event.providerReference, {
         event,
         applied: true
@@ -802,6 +1025,7 @@ export class RentLedgerService {
     }
 
     this.applyPaymentToRecord(record, event);
+    this.refreshRecordForBilling(record);
     this.paymentReferenceIndex.set(event.providerReference, {
       event,
       applied: true
@@ -821,7 +1045,7 @@ export class RentLedgerService {
       return [];
     }
 
-    const advanced = this.advanceRecordCyclesIfNeeded(record);
+    const advanced = this.refreshRecordForBilling(record);
     if (record.balanceKsh <= 0) {
       if (advanced) {
         this.emitStateChange();
@@ -905,8 +1129,13 @@ export class RentLedgerService {
           currentMonthOutstandingKsh: snapshot.currentMonthOutstandingKsh,
           arrearsKsh: snapshot.arrearsKsh,
           totalPaidKsh: snapshot.totalPaidKsh,
+          currentMonthLatePenaltyKsh: snapshot.currentMonthLatePenaltyKsh,
+          totalLatePenaltyKsh: snapshot.totalLatePenaltyKsh,
+          latePenaltyCharges: snapshot.latePenaltyCharges,
           latestPaymentReference: latestPayment?.providerReference,
           latestPaymentAt: latestPayment?.paidAt,
+          latestPaymentRecordedAt: latestPayment?.createdAt,
+          latestPaymentBillingMonth: latestPayment?.billingMonth,
           latestPaymentAmountKsh: latestPayment?.amountKsh
         };
       })
@@ -935,7 +1164,7 @@ export class RentLedgerService {
         continue;
       }
 
-      changed = this.advanceRecordCyclesIfNeeded(record) || changed;
+      changed = this.refreshRecordForBilling(record) || changed;
     }
 
     if (changed) {
@@ -943,17 +1172,21 @@ export class RentLedgerService {
     }
   }
 
-  private advanceRecordCyclesIfNeeded(record: RentDueRecord): boolean {
+  private refreshRecordForBilling(record: RentDueRecord, now = new Date()): boolean {
+    return this.advanceRecordCyclesIfNeeded(record, now);
+  }
+
+  private advanceRecordCyclesIfNeeded(record: RentDueRecord, now = new Date()): boolean {
     if (!Number.isFinite(record.monthlyRentKsh) || record.monthlyRentKsh <= 0) {
-      return false;
+      return this.applyLatePenaltyIfNeeded(record, now);
     }
 
-    let changed = false;
+    let changed = this.applyLatePenaltyIfNeeded(record, now);
     let nextDueDate = addMonthsPreservingUtcDay(record.dueDate, 1);
     let nextWindowStart = subtractUtcDays(nextDueDate, RENT_ROLLOVER_WINDOW_DAYS);
-    const now = new Date();
 
     while (Date.parse(nextWindowStart) <= now.getTime()) {
+      changed = this.applyLatePenaltyIfNeeded(record, now) || changed;
       const billingMonth = billingMonthFromDateTime(nextDueDate);
       const isHeld =
         this.billingHoldPredicate?.({
@@ -976,7 +1209,67 @@ export class RentLedgerService {
       nextWindowStart = subtractUtcDays(nextDueDate, RENT_ROLLOVER_WINDOW_DAYS);
     }
 
+    changed = this.applyLatePenaltyIfNeeded(record, now) || changed;
     return changed;
+  }
+
+  private applyLatePenaltyIfNeeded(record: RentDueRecord, now = new Date()): boolean {
+    const policy = normalizeLatePenaltyPolicy(
+      this.latePenaltyPolicyResolver?.(record.buildingId)
+    );
+    if (!policy.enabled || policy.amountKsh <= 0) {
+      return false;
+    }
+
+    if (Math.max(0, Number(record.balanceKsh ?? 0)) <= 0) {
+      return false;
+    }
+
+    const dueDate = new Date(record.dueDate);
+    if (Number.isNaN(dueDate.getTime())) {
+      return false;
+    }
+
+    const billingMonth = billingMonthFromDateTime(record.dueDate);
+    const alreadyApplied = (record.latePenaltyCharges ?? []).some(
+      (charge) => charge.billingMonth === billingMonth
+    );
+    if (alreadyApplied) {
+      return false;
+    }
+
+    const isHeld =
+      this.billingHoldPredicate?.({
+        buildingId: record.buildingId,
+        houseNumber: record.houseNumber,
+        billingMonth,
+        dueDate: record.dueDate
+      }) ?? false;
+    if (isHeld) {
+      return false;
+    }
+
+    const penaltyStartsAt = new Date(dueDate);
+    penaltyStartsAt.setUTCDate(penaltyStartsAt.getUTCDate() + policy.graceDays);
+    if (now.getTime() <= penaltyStartsAt.getTime()) {
+      return false;
+    }
+
+    const appliedAt = nowIso();
+    const charge: RentLatePenaltyCharge = {
+      id: randomUUID(),
+      billingMonth,
+      amountKsh: policy.amountKsh,
+      dueDate: record.dueDate,
+      appliedAt,
+      note: `Fixed late rent penalty after ${policy.graceDays} grace day${
+        policy.graceDays === 1 ? "" : "s"
+      }.`
+    };
+    record.latePenaltyCharges = [...(record.latePenaltyCharges ?? []), charge];
+    record.balanceKsh = Math.max(0, Math.round(Number(record.balanceKsh ?? 0))) + policy.amountKsh;
+    record.updatedAt = appliedAt;
+    return true;
   }
 
   private applyPendingPayments(buildingId: string, houseNumber: string) {
@@ -1035,6 +1328,51 @@ export class RentLedgerService {
     }
   }
 
+  private findPaymentById(
+    buildingId: string,
+    houseNumber: string,
+    paymentId: string
+  ): { event: RentPaymentEvent; applied: boolean } | null {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const normalizedHouse = normalizeHouseNumber(houseNumber);
+    const normalizedPaymentId = String(paymentId ?? "").trim();
+    if (!normalizedPaymentId) {
+      return null;
+    }
+
+    const scopedKeys = [
+      ledgerKey(normalizedBuildingId, normalizedHouse),
+      ...(normalizedBuildingId === RENT_LEGACY_BUILDING_ID
+        ? []
+        : [ledgerKey(RENT_LEGACY_BUILDING_ID, normalizedHouse)])
+    ];
+
+    for (const key of scopedKeys) {
+      const record = this.records.get(key);
+      const event = record?.payments.find((payment) => payment.id === normalizedPaymentId);
+      if (event) {
+        return {
+          event: { ...event },
+          applied: true
+        };
+      }
+    }
+
+    for (const key of scopedKeys) {
+      const event = this.pendingPayments
+        .get(key)
+        ?.find((payment) => payment.id === normalizedPaymentId);
+      if (event) {
+        return {
+          event: { ...event },
+          applied: false
+        };
+      }
+    }
+
+    return null;
+  }
+
   private emitStateChange(): void {
     if (!this.stateChangeHandler) {
       return;
@@ -1048,19 +1386,45 @@ export class RentLedgerService {
 
   private toSnapshot(record: RentDueRecord): RentDueSnapshot {
     const dueDate = toUtcDate(record.dueDate);
-    const daysToDue = dayDiff(new Date(), dueDate);
+    const safeDueDate = Number.isNaN(dueDate.getTime()) ? new Date() : dueDate;
+    const daysToDue = dayDiff(new Date(), safeDueDate);
+    const policy = normalizeLatePenaltyPolicy(
+      this.latePenaltyPolicyResolver?.(record.buildingId)
+    );
+    const overdueStartsAtDate = new Date(safeDueDate);
+    overdueStartsAtDate.setUTCDate(overdueStartsAtDate.getUTCDate() + policy.graceDays);
     const balanceKsh = Math.max(0, Number(record.balanceKsh ?? 0));
     const monthlyRentKsh = Math.max(0, Number(record.monthlyRentKsh ?? 0));
+    const currentBillingMonth = billingMonthFromDateTime(record.dueDate);
+    const currentMonthLatePenaltyKsh = (record.latePenaltyCharges ?? [])
+      .filter((charge) => charge.billingMonth === currentBillingMonth)
+      .reduce((sum, charge) => sum + Math.max(0, Number(charge.amountKsh ?? 0)), 0);
+    const totalLatePenaltyKsh = (record.latePenaltyCharges ?? []).reduce(
+      (sum, charge) => sum + Math.max(0, Number(charge.amountKsh ?? 0)),
+      0
+    );
+    const currentCycleChargeKsh = monthlyRentKsh + currentMonthLatePenaltyKsh;
     const currentMonthOutstandingKsh =
-      monthlyRentKsh > 0 ? Math.min(balanceKsh, monthlyRentKsh) : balanceKsh;
+      currentCycleChargeKsh > 0 ? Math.min(balanceKsh, currentCycleChargeKsh) : balanceKsh;
     const currentMonthPaidKsh =
-      monthlyRentKsh > 0
-        ? Math.max(0, monthlyRentKsh - currentMonthOutstandingKsh)
+      currentCycleChargeKsh > 0
+        ? Math.max(0, currentCycleChargeKsh - currentMonthOutstandingKsh)
         : 0;
     const totalPaidKsh = record.payments.reduce(
       (sum, payment) => sum + Math.max(0, Number(payment.amountKsh ?? 0)),
       0
     );
+
+    const paymentStatus: RentDueSnapshot["paymentStatus"] =
+      currentCycleChargeKsh <= 0
+        ? balanceKsh <= 0
+          ? "paid"
+          : "not_paid"
+        : currentMonthOutstandingKsh <= 0
+          ? "paid"
+          : currentMonthOutstandingKsh >= currentCycleChargeKsh
+            ? "not_paid"
+            : "partial";
 
     return {
       buildingId: record.buildingId,
@@ -1071,14 +1435,20 @@ export class RentLedgerService {
       note: record.note,
       updatedAt: record.updatedAt,
       payments: [...record.payments],
+      latePenaltyCharges: [...(record.latePenaltyCharges ?? [])],
       status: getStatus(record.balanceKsh, daysToDue),
-      paymentStatus: paymentStatusForRecord(record),
-      currentBillingMonth: billingMonthFromDateTime(record.dueDate),
+      paymentStatus,
+      currentBillingMonth,
       paidAmountKsh: currentMonthPaidKsh,
       currentMonthPaidKsh,
       currentMonthOutstandingKsh,
       arrearsKsh: Math.max(0, balanceKsh - currentMonthOutstandingKsh),
       totalPaidKsh,
+      currentMonthLatePenaltyKsh,
+      totalLatePenaltyKsh,
+      graceDays: policy.graceDays,
+      overdueStartsAt: overdueStartsAtDate.toISOString(),
+      daysToOverdue: dayDiff(new Date(), overdueStartsAtDate),
       daysToDue
     };
   }

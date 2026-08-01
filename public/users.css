@@ -95,6 +95,11 @@ body {
   cursor: pointer;
 }
 
+.user-link.has-alert {
+  border-color: rgba(184, 121, 47, 0.55);
+  box-shadow: 0 0 0 3px rgba(184, 121, 47, 0.16);
+}
+
 .user-panel {
   position: absolute;
   right: 0;
@@ -153,6 +158,17 @@ body {
   color: var(--teal-700);
   border-top: 1px solid rgba(16, 28, 40, 0.12);
   padding-top: 10px;
+}
+
+.user-panel-link.has-alert {
+  color: #8a571d;
+}
+
+.resident-id-action {
+  color: inherit;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .mode-switch {
@@ -1087,7 +1103,8 @@ button,
   .rent-keyvals,
   .utility-bill-meta,
   .payments-grid,
-  .payment-summary-grid {
+  .payment-summary-grid,
+  .payment-instructions-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -1177,6 +1194,58 @@ button,
 
 .payment-summary-note {
   margin: -2px 0 0;
+}
+
+.payment-instructions-card {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid rgba(16, 28, 40, 0.1);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.payment-instructions-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.payment-instructions-head h3 {
+  margin: 4px 0 0;
+  color: var(--ink-950);
+}
+
+.payment-instructions-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.payment-instructions-grid div {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(16, 28, 40, 0.08);
+  background: #f8fbf9;
+}
+
+.payment-instructions-grid dt {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-600);
+}
+
+.payment-instructions-grid dd {
+  margin: 6px 0 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ink-950);
+  overflow-wrap: anywhere;
 }
 
 .payments-grid {
@@ -1560,6 +1629,280 @@ body.app-loading #resident-password-change-panel {
   }
 
   .modal-actions button {
+    width: 100%;
+  }
+}
+
+/* Resident 2026 refresh: simpler daily-use surfaces. */
+.resident-home-card,
+.resident-pay-card {
+  border: 1px solid rgba(32, 73, 118, 0.12);
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 18px 42px rgba(25, 44, 63, 0.08);
+}
+
+.resident-home-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 18px;
+}
+
+.resident-home-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.resident-home-copy h3,
+.resident-pay-card-main h3,
+.resident-pay-sheet-head h3 {
+  margin: 0;
+  color: var(--ink-950);
+  letter-spacing: 0;
+}
+
+.resident-home-copy h3 {
+  font-size: clamp(1.7rem, 4vw, 2.55rem);
+}
+
+.resident-home-actions,
+.resident-home-secondary-actions,
+.resident-pay-sheet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.resident-home-actions button,
+.resident-pay-primary,
+.resident-pay-sheet-actions button:first-child {
+  min-height: 46px;
+  padding-inline: 20px;
+}
+
+.resident-home-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.resident-home-secondary-actions {
+  margin-top: 12px;
+}
+
+.resident-pay-card {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 18px;
+}
+
+.resident-pay-card-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+}
+
+.resident-pay-primary {
+  min-width: 128px;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.resident-pay-sheet {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(15, 118, 110, 0.22);
+  border-radius: 14px;
+  background: #f8fbfa;
+}
+
+.resident-pay-sheet.hidden {
+  display: none;
+}
+
+.resident-pay-sheet-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.resident-pay-mode-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.resident-pay-mode-row button {
+  background: #ffffff;
+  color: var(--ink-800);
+  border-color: rgba(32, 73, 118, 0.18);
+}
+
+.resident-pay-mode-row button.active {
+  background: #0f766e;
+  color: #ffffff;
+  border-color: #0f766e;
+}
+
+.resident-pay-fields {
+  grid-template-columns: minmax(150px, 0.8fr) minmax(150px, 1fr) minmax(180px, 1fr);
+}
+
+.resident-pay-note {
+  margin: 0;
+}
+
+.payment-summary-actions,
+.payment-summary-note,
+.payments-shell .payment-section {
+  display: none;
+}
+
+.payment-summary-card {
+  background: #ffffff;
+  border-radius: 16px;
+  border-color: rgba(32, 73, 118, 0.12);
+}
+
+.payment-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.payment-summary-grid div,
+.payment-instructions-grid div,
+.overview-card {
+  border-radius: 10px;
+}
+
+.payment-instructions-card,
+.payment-cluster,
+.payment-history-group {
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.payments-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.payments-column {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.payments-history-column {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.payment-cluster,
+.payment-history-group {
+  min-width: 0;
+}
+
+@media (max-width: 860px) {
+  .resident-home-card,
+  .resident-pay-card-main,
+  .resident-pay-sheet-head {
+    grid-template-columns: 1fr;
+  }
+
+  .resident-home-actions button,
+  .resident-pay-primary,
+  .resident-pay-sheet-actions button {
+    width: 100%;
+  }
+
+  .resident-home-grid,
+  .payment-summary-grid,
+  .payment-instructions-grid,
+  .payments-column,
+  .payments-history-column,
+  .resident-pay-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .resident-pay-mode-row {
+    grid-template-columns: 1fr;
+  }
+
+  .resident-home-card,
+  .resident-pay-card,
+  .resident-pay-sheet {
+    padding: 14px;
+  }
+}
+
+body.resident-signed-out .portal-header {
+  width: min(100%, 560px);
+  margin: 28px auto 0;
+  padding: 0;
+  border: 0;
+  background: transparent !important;
+  box-shadow: none;
+}
+
+body.resident-signed-out .portal-copy {
+  width: 100%;
+  text-align: left;
+}
+
+body.resident-signed-out .portal-copy h1 {
+  margin: 0 0 8px;
+  font-family: Inter, "Aptos", "Segoe UI", Arial, sans-serif;
+  font-size: clamp(1.5rem, 2vw, 1.9rem);
+  font-weight: 800;
+}
+
+body.resident-signed-out .portal-nav {
+  display: none;
+}
+
+body.resident-signed-out #resident-auth-panel {
+  width: min(100%, 560px);
+  margin: 12px auto 0;
+}
+
+body.resident-signed-out #resident-auth-panel .section-head {
+  gap: 4px;
+}
+
+body.resident-signed-out #resident-auth-panel .section-head h2 {
+  font-size: 1rem;
+}
+
+body.resident-signed-out #resident-auth-panel .section-head p {
+  max-width: none;
+}
+
+body.resident-signed-out #resident-auth-form .auth-primary-actions {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+body.resident-signed-out #resident-auth-form .auth-primary-actions #resident-forgot-btn {
+  width: auto;
+  min-width: 150px;
+}
+
+@media (max-width: 640px) {
+  body.resident-signed-out .portal-header,
+  body.resident-signed-out #resident-auth-panel {
+    width: 100%;
+  }
+
+  body.resident-signed-out #resident-auth-form .auth-primary-actions {
+    grid-template-columns: 1fr;
+  }
+
+  body.resident-signed-out #resident-auth-form .auth-primary-actions #resident-forgot-btn {
     width: 100%;
   }
 }

@@ -7,9 +7,13 @@ import type {
   UserRole
 } from "@prisma/client";
 import type {
+  AccountChangePasswordInput,
   AdminRevokeLandlordInput,
   CreateLandlordAccessRequestInput,
+  LandlordDirectTenantCreateInput,
   LandlordDecisionInput,
+  OwnerStaffCreateInput,
+  OwnerStaffDisableInput,
   ResidentAdminPasswordResetInput,
   ResidentChangePasswordInput,
   ResidentPasswordSetupInput,
@@ -26,6 +30,8 @@ type LoginRateRecord = {
   resetAt: number;
 };
 
+export const OWNER_STAFF_LIMIT = 3;
+
 export interface AuthenticatedUserSession {
   token: string;
   userId: string;
@@ -37,6 +43,12 @@ export interface AuthenticatedUserSession {
   mustChangePassword: boolean;
   residentTenancyId?: string;
 }
+
+type LandlordApplicationActor = {
+  role: UserRole | "caretaker";
+  userId?: string | null;
+  visibleBuildingIds?: Set<string> | null;
+};
 
 export interface ResidentPhoneSessionResult {
   session: AuthenticatedUserSession;
@@ -75,6 +87,20 @@ function normalizeHouseNumber(value: string): string {
 function normalizeOptionalText(value: string | null | undefined): string | undefined {
   const normalized = String(value ?? "").trim();
   return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return [
+    ...new Set(
+      value
+        .map((item) => String(item ?? "").trim())
+        .filter(Boolean)
+    )
+  ];
 }
 
 function isMissingTenantApplicationIdentityColumnsError(error: unknown): boolean {
@@ -134,12 +160,26 @@ function mapRoleValue(value: string): UserRole {
   switch (value) {
     case "tenant":
     case "landlord":
+    case "staff":
     case "admin":
     case "root_admin":
       return value;
     default:
       return "tenant";
   }
+}
+
+function isOwnerStaffUserRole(role: UserRole | string): boolean {
+  return role === "landlord" || role === "staff";
+}
+
+function isManagementApplicationRole(role: UserRole | "caretaker" | string): boolean {
+  return (
+    isOwnerStaffUserRole(role) ||
+    role === "admin" ||
+    role === "root_admin" ||
+    role === "caretaker"
+  );
 }
 
 type LandlordAccessRequestWithActors = Prisma.LandlordAccessRequestGetPayload<{
@@ -173,6 +213,7 @@ type TenantAgreementRecord = Prisma.TenantAgreementGetPayload<{
     residentUserId: true;
     identityType: true;
     identityNumber: true;
+    identityDocumentUrls: true;
     occupationStatus: true;
     occupationLabel: true;
     organizationName: true;
@@ -186,6 +227,7 @@ type TenantAgreementRecord = Prisma.TenantAgreementGetPayload<{
     leaseEndDate: true;
     monthlyRentKsh: true;
     depositKsh: true;
+    depositPaidKsh: true;
     paymentDueDay: true;
     specialTerms: true;
     createdAt: true;
@@ -228,6 +270,7 @@ function mapTenantAgreement(record: TenantAgreementRecord) {
     residentUserId: record.residentUserId,
     identityType: record.identityType ?? undefined,
     identityNumber: record.identityNumber ?? undefined,
+    identityDocumentUrls: normalizeStringList(record.identityDocumentUrls),
     occupationStatus: record.occupationStatus ?? undefined,
     occupationLabel: record.occupationLabel ?? undefined,
     organizationName: record.organizationName ?? undefined,
@@ -241,6 +284,7 @@ function mapTenantAgreement(record: TenantAgreementRecord) {
     leaseEndDate: toDateOnlyString(record.leaseEndDate),
     monthlyRentKsh: record.monthlyRentKsh ?? undefined,
     depositKsh: record.depositKsh ?? undefined,
+    depositPaidKsh: record.depositPaidKsh ?? undefined,
     paymentDueDay: record.paymentDueDay ?? undefined,
     specialTerms: record.specialTerms ?? undefined,
     createdAt: record.createdAt.toISOString(),
@@ -311,6 +355,280 @@ export class UserAccountService {
       phone: created.phone,
       role: created.role,
       createdAt: created.createdAt.toISOString()
+    };
+  }
+
+  async listOwnerStaffUsers() {
+    const rows = await this.prisma.housingUser.findMany({
+      where: {
+        role: "staff",
+        status: "active"
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        role: true,
+        status: true,
+        requirePasswordChange: true,
+        createdAt: true,
+        updatedAt: true
+      },
+      orderBy: { createdAt: "asc" }
+    });
+
+    return {
+      users: rows.map((row) => ({
+        id: row.id,
+        fullName: row.fullName,
+        email: row.email,
+        phone: row.phone,
+        role: row.role,
+        status: row.status,
+        mustChangePassword: Boolean(row.requirePasswordChange),
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString()
+      })),
+      limit: OWNER_STAFF_LIMIT,
+      remaining: Math.max(0, OWNER_STAFF_LIMIT - rows.length)
+    };
+  }
+
+  async listLandlordAndStaffUsers() {
+    const rows = await this.prisma.housingUser.findMany({
+      where: {
+        role: { in: ["landlord", "staff"] },
+        status: "active"
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        role: true,
+        status: true,
+        requirePasswordChange: true,
+        createdAt: true,
+        updatedAt: true
+      },
+      orderBy: { createdAt: "asc" }
+    });
+
+    return {
+      users: rows.map((row) => ({
+        id: row.id,
+        fullName: row.fullName,
+        email: row.email,
+        phone: row.phone,
+        role: row.role,
+        status: row.status,
+        mustChangePassword: Boolean(row.requirePasswordChange),
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString()
+      }))
+    };
+  }
+
+  async getPrimaryLandlordUser() {
+    const user = await this.prisma.housingUser.findFirst({
+      where: {
+        role: "landlord",
+        status: "active"
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        role: true,
+        requirePasswordChange: true
+      },
+      orderBy: { createdAt: "asc" }
+    });
+
+    if (!user) {
+      return null;
+    }
+
+    return user;
+  }
+
+  async createSessionForUserId(
+    userId: string,
+    options: { residentTenancyId?: string } = {}
+  ): Promise<AuthenticatedUserSession | null> {
+    await this.purgeExpiredSessions();
+
+    const user = await this.prisma.housingUser.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        role: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        requirePasswordChange: true,
+        status: true
+      }
+    });
+
+    if (!user || user.status !== "active") {
+      return null;
+    }
+
+    return this.issueSessionForUser(user, options);
+  }
+
+  async createOwnerStaffUser(input: OwnerStaffCreateInput) {
+    await this.purgeExpiredSessions();
+
+    const currentActiveCount = await this.prisma.housingUser.count({
+      where: {
+        role: "staff",
+        status: "active"
+      }
+    });
+    if (currentActiveCount >= OWNER_STAFF_LIMIT) {
+      throw new Error("OWNER_STAFF_LIMIT_REACHED");
+    }
+
+    const email = normalizeEmail(input.email);
+    const phone = normalizeKenyaPhone(input.phoneNumber);
+    const existing = await this.prisma.housingUser.findFirst({
+      where: {
+        OR: [{ email }, { phone }]
+      },
+      select: { id: true, email: true, phone: true }
+    });
+
+    if (existing) {
+      if (existing.email === email) {
+        throw new Error("EMAIL_ALREADY_EXISTS");
+      }
+      throw new Error("PHONE_ALREADY_EXISTS");
+    }
+
+    const created = await this.prisma.housingUser.create({
+      data: {
+        fullName: input.fullName.trim(),
+        email,
+        phone,
+        passwordHash: hashPassword(input.temporaryPassword),
+        requirePasswordChange: true,
+        role: "staff",
+        status: "active"
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        role: true,
+        status: true,
+        requirePasswordChange: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+
+    return {
+      id: created.id,
+      fullName: created.fullName,
+      email: created.email,
+      phone: created.phone,
+      role: created.role,
+      status: created.status,
+      mustChangePassword: Boolean(created.requirePasswordChange),
+      createdAt: created.createdAt.toISOString(),
+      updatedAt: created.updatedAt.toISOString()
+    };
+  }
+
+  async disableOwnerStaffUser(
+    targetUserId: string,
+    input: OwnerStaffDisableInput & { actorUserId?: string }
+  ) {
+    const userId = targetUserId.trim();
+    if (!userId) {
+      throw new Error("OWNER_STAFF_USER_NOT_FOUND");
+    }
+    if (input.confirmUserId && input.confirmUserId.trim() !== userId) {
+      throw new Error("OWNER_STAFF_CONFIRMATION_MISMATCH");
+    }
+    if (input.actorUserId && input.actorUserId === userId) {
+      throw new Error("OWNER_STAFF_SELF_DISABLE_DENIED");
+    }
+
+    const targetUser = await this.prisma.housingUser.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        role: true,
+        status: true,
+        updatedAt: true
+      }
+    });
+
+    if (!targetUser || targetUser.role !== "staff") {
+      throw new Error("OWNER_STAFF_USER_NOT_FOUND");
+    }
+
+    if (targetUser.status !== "active") {
+      return {
+        id: targetUser.id,
+        fullName: targetUser.fullName,
+        email: targetUser.email,
+        phone: targetUser.phone,
+        role: targetUser.role,
+        status: targetUser.status,
+        disabled: false,
+        updatedAt: targetUser.updatedAt.toISOString()
+      };
+    }
+
+    const disabled = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.housingUser.update({
+        where: { id: userId },
+        data: {
+          status: "disabled"
+        },
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          phone: true,
+          role: true,
+          status: true,
+          updatedAt: true
+        }
+      });
+
+      await tx.userSession.updateMany({
+        where: {
+          userId,
+          revokedAt: null
+        },
+        data: {
+          revokedAt: new Date()
+        }
+      });
+
+      return updated;
+    });
+
+    return {
+      id: disabled.id,
+      fullName: disabled.fullName,
+      email: disabled.email,
+      phone: disabled.phone,
+      role: disabled.role,
+      status: disabled.status,
+      disabled: true,
+      updatedAt: disabled.updatedAt.toISOString()
     };
   }
 
@@ -725,6 +1043,36 @@ export class UserAccountService {
     });
   }
 
+  async changeAccountPassword(
+    session: Pick<AuthenticatedUserSession, "userId" | "residentTenancyId">,
+    input: AccountChangePasswordInput
+  ): Promise<AuthenticatedUserSession> {
+    await this.purgeExpiredSessions();
+
+    const user = await this.prisma.housingUser.update({
+      where: { id: session.userId },
+      data: {
+        passwordHash: hashPassword(input.newPassword),
+        requirePasswordChange: false
+      }
+    });
+
+    if (user.status !== "active") {
+      throw new Error("ACCOUNT_DISABLED");
+    }
+
+    await this.prisma.userSession.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: new Date() }
+    });
+
+    this.loginRateByPhone.delete(normalizeKenyaPhone(user.phone));
+    this.loginRateByEmail.delete(normalizeEmail(user.email));
+    return this.issueSessionForUser(user, {
+      residentTenancyId: session.residentTenancyId
+    });
+  }
+
   private async issueSessionForUser(
     user: {
       id: string;
@@ -775,7 +1123,8 @@ export class UserAccountService {
         active: true,
         buildingId: input.buildingId,
         unit: {
-          houseNumber
+          houseNumber,
+          isActive: true
         },
         user: {
           phone: phoneNumber
@@ -792,10 +1141,13 @@ export class UserAccountService {
   }
 
   private async findLatestActiveTenancyByResidentUser(userId: string) {
-    return this.prisma.tenancy.findFirst({
+    const tenancies = await this.prisma.tenancy.findMany({
       where: {
         active: true,
-        userId
+        userId,
+        unit: {
+          isActive: true
+        }
       },
       include: {
         user: true,
@@ -803,8 +1155,15 @@ export class UserAccountService {
           select: { houseNumber: true }
         }
       },
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
+      take: 2
     });
+
+    if (tenancies.length > 1) {
+      throw new Error("RESIDENT_TENANCY_SELECTION_REQUIRED");
+    }
+
+    return tenancies[0] ?? null;
   }
 
   private async findPendingTenantApplicationForResidentUser(input: {
@@ -839,10 +1198,14 @@ export class UserAccountService {
     houseNumber: string;
     phoneNumber: string;
     password: string;
+    fullName?: string;
+    requirePasswordChange?: boolean;
   }) {
     const phoneNumber = normalizeKenyaPhone(input.phoneNumber);
     const houseNumber = normalizeHouseNumber(input.houseNumber);
     const passwordHash = hashPassword(input.password);
+    const fullName = normalizeOptionalText(input.fullName);
+    const requirePasswordChange = input.requirePasswordChange ?? false;
 
     return this.prisma.$transaction(async (tx) => {
       let unit = await tx.houseUnit.findUnique({
@@ -915,10 +1278,11 @@ export class UserAccountService {
         const email = await this.generateResidentPlaceholderEmail(tx, phoneNumber);
         user = await tx.housingUser.create({
           data: {
-            fullName: `Resident ${houseNumber}`,
+            fullName: fullName ?? `Resident ${houseNumber}`,
             email,
             phone: phoneNumber,
             passwordHash,
+            requirePasswordChange,
             role: "tenant",
             status: "active"
           }
@@ -959,7 +1323,8 @@ export class UserAccountService {
         where: { id: user.id },
         data: {
           passwordHash,
-          requirePasswordChange: false
+          requirePasswordChange,
+          ...(fullName ? { fullName } : {})
         }
       });
     });
@@ -1039,12 +1404,9 @@ export class UserAccountService {
       return null;
     }
 
-    if (session.role === "landlord") {
-      const rows = await this.prisma.building.findMany({
-        where: { landlordUserId: session.userId },
-        select: { id: true }
-      });
-      return new Set(rows.map((item) => item.id));
+    // Captyn Housing: landlord and staff accounts manage all buildings in this deployment.
+    if (isOwnerStaffUserRole(session.role)) {
+      return null;
     }
 
     const rows = await this.prisma.tenancy.findMany({
@@ -1060,9 +1422,10 @@ export class UserAccountService {
       return true;
     }
 
-    if (session.role === "landlord") {
-      const building = await this.prisma.building.findFirst({
-        where: { id: buildingId, landlordUserId: session.userId },
+    // Captyn Housing: landlord and staff accounts can manage any existing building.
+    if (isOwnerStaffUserRole(session.role)) {
+      const building = await this.prisma.building.findUnique({
+        where: { id: buildingId },
         select: { id: true }
       });
       return Boolean(building);
@@ -1076,10 +1439,19 @@ export class UserAccountService {
   }
 
   async removeResidentFromBuilding(
-    session: AuthenticatedUserSession,
-    input: { buildingId: string; userId: string; note?: string }
+    session: { role: UserRole; userId?: string },
+    input: {
+      buildingId: string;
+      userId: string;
+      note?: string;
+      actorRole?: UserRole | "caretaker";
+      visibleBuildingIds?: Set<string> | null;
+    }
   ) {
-    if (session.role !== "landlord" && session.role !== "admin" && session.role !== "root_admin") {
+    const actorRole = input.actorRole ?? session.role;
+    if (
+      !isManagementApplicationRole(actorRole)
+    ) {
       throw new Error("LANDLORD_OR_ADMIN_ROLE_REQUIRED");
     }
 
@@ -1094,8 +1466,13 @@ export class UserAccountService {
     if (!building) {
       throw new Error("BUILDING_NOT_FOUND");
     }
-
-    if (session.role === "landlord" && building.landlordUserId !== session.userId) {
+    if (
+      input.visibleBuildingIds instanceof Set &&
+      !input.visibleBuildingIds.has(building.id)
+    ) {
+      throw new Error("BUILDING_ACCESS_DENIED");
+    }
+    if (actorRole === "caretaker" && !(input.visibleBuildingIds instanceof Set)) {
       throw new Error("BUILDING_ACCESS_DENIED");
     }
 
@@ -1169,7 +1546,7 @@ export class UserAccountService {
             status: "rejected",
             note,
             reviewedAt: endedAt,
-            reviewedByUserId: session.userId
+            reviewedByUserId: session.userId ?? null
           }
         });
       }
@@ -1413,6 +1790,46 @@ export class UserAccountService {
       houseNumber,
       phoneNumber
     });
+    if (tenancy) {
+      const identityNumber = normalizeOptionalText(input.identityNumber);
+      const occupationLabel = normalizeOptionalText(input.occupationLabel);
+      const hasTenantDetailSeed =
+        Boolean(input.identityType && identityNumber) ||
+        Boolean(input.occupationStatus) ||
+        Boolean(occupationLabel);
+
+      if (hasTenantDetailSeed) {
+        await this.prisma.tenantAgreement.upsert({
+          where: { tenancyId: tenancy.id },
+          update: {
+            buildingId: input.buildingId,
+            houseNumber,
+            residentUserId: provisionedUser.id,
+            ...(input.identityType && identityNumber
+              ? {
+                  identityType: input.identityType,
+                  identityNumber
+                }
+              : {}),
+            ...(input.occupationStatus
+              ? { occupationStatus: input.occupationStatus }
+              : {}),
+            ...(occupationLabel ? { occupationLabel } : {})
+          },
+          create: {
+            tenancyId: tenancy.id,
+            buildingId: input.buildingId,
+            houseNumber,
+            residentUserId: provisionedUser.id,
+            identityType: input.identityType ?? null,
+            identityNumber: identityNumber ?? null,
+            occupationStatus: input.occupationStatus ?? null,
+            occupationLabel: occupationLabel ?? null
+          }
+        });
+      }
+    }
+
     const session = await this.issueSessionForUser(provisionedUser, {
       residentTenancyId: tenancy?.id
     });
@@ -1427,6 +1844,146 @@ export class UserAccountService {
       },
       session,
       ...application
+    };
+  }
+
+  async createDirectTenant(
+    input: LandlordDirectTenantCreateInput,
+    actor?: { userId?: string | null }
+  ) {
+    const phoneNumber = normalizeKenyaPhone(input.phoneNumber);
+    const houseNumber = normalizeHouseNumber(input.houseNumber);
+    const fullName = normalizeOptionalText(input.fullName) ?? `Resident ${houseNumber}`;
+    const identityNumber = normalizeOptionalText(input.identityNumber);
+    const identityType = input.identityType ?? "national_id";
+
+    if (!identityNumber) {
+      throw new Error("IDENTITY_NUMBER_REQUIRED");
+    }
+
+    const provisionedUser = await this.provisionResidentForSetup({
+      buildingId: input.buildingId,
+      houseNumber,
+      phoneNumber,
+      password: identityNumber,
+      fullName,
+      requirePasswordChange: true
+    });
+
+    const tenancy = await this.findActiveTenancyByHouseAndPhone({
+      buildingId: input.buildingId,
+      houseNumber,
+      phoneNumber
+    });
+    if (!tenancy) {
+      throw new Error("TENANCY_NOT_FOUND");
+    }
+
+    const note =
+      normalizeOptionalText(input.note) ?? "Tenant added directly by management.";
+    const reviewedByUserId = normalizeOptionalText(actor?.userId) ?? null;
+    const now = new Date();
+
+    const { application, building } = await this.prisma.$transaction(async (tx) => {
+      const building = await tx.building.findUnique({
+        where: { id: input.buildingId },
+        select: {
+          id: true,
+          name: true,
+          houseUnits: {
+            where: { houseNumber, isActive: true },
+            select: { id: true, houseNumber: true }
+          }
+        }
+      });
+
+      if (!building) {
+        throw new Error("BUILDING_NOT_FOUND");
+      }
+
+      const unit = building.houseUnits[0];
+      if (!unit) {
+        throw new Error("HOUSE_NUMBER_NOT_FOUND");
+      }
+
+      const application = await tx.tenantApplication.upsert({
+        where: {
+          userId_buildingId_houseNumber: {
+            userId: provisionedUser.id,
+            buildingId: building.id,
+            houseNumber
+          }
+        },
+        update: {
+          unitId: unit.id,
+          identityType,
+          identityNumber,
+          status: "approved",
+          note,
+          reviewedAt: now,
+          reviewedByUserId
+        },
+        create: {
+          userId: provisionedUser.id,
+          buildingId: building.id,
+          unitId: unit.id,
+          houseNumber,
+          identityType,
+          identityNumber,
+          status: "approved",
+          note,
+          reviewedAt: now,
+          reviewedByUserId
+        }
+      });
+
+      await tx.tenantAgreement.upsert({
+        where: { tenancyId: tenancy.id },
+        update: {
+          buildingId: building.id,
+          houseNumber,
+          residentUserId: provisionedUser.id,
+          identityType,
+          identityNumber
+        },
+        create: {
+          tenancyId: tenancy.id,
+          buildingId: building.id,
+          houseNumber,
+          residentUserId: provisionedUser.id,
+          identityType,
+          identityNumber
+        }
+      });
+
+      return {
+        application,
+        building: {
+          id: building.id,
+          name: building.name
+        }
+      };
+    });
+
+    return {
+      tenant: {
+        userId: provisionedUser.id,
+        fullName: provisionedUser.fullName,
+        phone: provisionedUser.phone,
+        mustChangePassword: provisionedUser.requirePasswordChange
+      },
+      building,
+      tenancyId: tenancy.id,
+      houseNumber,
+      application: {
+        id: application.id,
+        status: application.status,
+        reviewedAt: application.reviewedAt?.toISOString()
+      },
+      temporaryPassword: {
+        source: "identity_number",
+        label: "ID number entered"
+      }
     };
   }
 
@@ -1467,22 +2024,22 @@ export class UserAccountService {
   }
 
   async listLandlordApplications(
-    session: AuthenticatedUserSession,
+    session: LandlordApplicationActor,
     status?: TenantApplicationStatus
   ) {
-    if (session.role !== "landlord" && session.role !== "admin" && session.role !== "root_admin") {
+    if (
+      !isManagementApplicationRole(session.role)
+    ) {
       throw new Error("LANDLORD_OR_ADMIN_ROLE_REQUIRED");
     }
 
-    const where =
-      session.role === "landlord"
-        ? {
-            status,
-            building: {
-              landlordUserId: session.userId
-            }
-          }
-        : { status };
+    const where: Prisma.TenantApplicationWhereInput = {};
+    if (status) {
+      where.status = status;
+    }
+    if (session.visibleBuildingIds instanceof Set) {
+      where.buildingId = { in: [...session.visibleBuildingIds] };
+    }
 
     const rows = await this.prisma.tenantApplication.findMany({
       where,
@@ -1515,11 +2072,13 @@ export class UserAccountService {
   }
 
   async reviewTenantApplication(
-    session: AuthenticatedUserSession,
+    session: LandlordApplicationActor,
     applicationId: string,
     input: LandlordDecisionInput
   ) {
-    if (session.role !== "landlord" && session.role !== "admin" && session.role !== "root_admin") {
+    if (
+      !isManagementApplicationRole(session.role)
+    ) {
       throw new Error("LANDLORD_OR_ADMIN_ROLE_REQUIRED");
     }
 
@@ -1535,11 +2094,13 @@ export class UserAccountService {
     if (!application) {
       throw new Error("APPLICATION_NOT_FOUND");
     }
-
     if (
-      session.role === "landlord" &&
-      application.building.landlordUserId !== session.userId
+      session.visibleBuildingIds instanceof Set &&
+      !session.visibleBuildingIds.has(application.buildingId)
     ) {
+      throw new Error("BUILDING_ACCESS_DENIED");
+    }
+    if (session.role === "caretaker" && !(session.visibleBuildingIds instanceof Set)) {
       throw new Error("BUILDING_ACCESS_DENIED");
     }
 
@@ -1574,7 +2135,7 @@ export class UserAccountService {
           data: {
             status: "rejected",
             reviewedAt: rejectedAt,
-            reviewedByUserId: session.userId,
+            reviewedByUserId: session.userId ?? null,
             note: input.note ?? application.note
           }
         });
@@ -1587,6 +2148,7 @@ export class UserAccountService {
           id: application.building.id,
           name: application.building.name
         },
+        tenant: application.user,
         houseNumber: rejected.houseNumber,
         reviewedAt: rejected.reviewedAt?.toISOString()
       };
@@ -1665,7 +2227,7 @@ export class UserAccountService {
         data: {
           status: "approved",
           reviewedAt: new Date(),
-          reviewedByUserId: session.userId,
+          reviewedByUserId: session.userId ?? null,
           note: input.note ?? application.note
         }
       });
@@ -1733,6 +2295,7 @@ export class UserAccountService {
         residentUserId: true,
         identityType: true,
         identityNumber: true,
+        identityDocumentUrls: true,
         occupationStatus: true,
         occupationLabel: true,
         organizationName: true,
@@ -1746,6 +2309,7 @@ export class UserAccountService {
         leaseEndDate: true,
         monthlyRentKsh: true,
         depositKsh: true,
+        depositPaidKsh: true,
         paymentDueDay: true,
         specialTerms: true,
         createdAt: true,
@@ -1795,6 +2359,9 @@ export class UserAccountService {
     const normalizedPayload = {
       identityType: input.payload.identityType ?? null,
       identityNumber: normalizeOptionalText(input.payload.identityNumber) ?? null,
+      identityDocumentUrls: normalizeStringList(
+        input.payload.identityDocumentUrls
+      ),
       occupationStatus: input.payload.occupationStatus ?? null,
       occupationLabel: normalizeOptionalText(input.payload.occupationLabel) ?? null,
       organizationName: normalizeOptionalText(input.payload.organizationName) ?? null,
@@ -1816,11 +2383,14 @@ export class UserAccountService {
         : null,
       monthlyRentKsh: input.payload.monthlyRentKsh ?? null,
       depositKsh: input.payload.depositKsh ?? null,
+      depositPaidKsh: input.payload.depositPaidKsh ?? null,
       paymentDueDay: input.payload.paymentDueDay ?? null,
       specialTerms: normalizeOptionalText(input.payload.specialTerms) ?? null
     };
 
-    const hasValue = Object.values(normalizedPayload).some((value) => value != null);
+    const hasValue = Object.values(normalizedPayload).some((value) =>
+      Array.isArray(value) ? value.length > 0 : value != null
+    );
     if (!hasValue) {
       await this.prisma.tenantAgreement.deleteMany({
         where: { tenancyId: tenancy.id }
@@ -1857,6 +2427,7 @@ export class UserAccountService {
         residentUserId: true,
         identityType: true,
         identityNumber: true,
+        identityDocumentUrls: true,
         occupationStatus: true,
         occupationLabel: true,
         organizationName: true,
@@ -1870,6 +2441,7 @@ export class UserAccountService {
         leaseEndDate: true,
         monthlyRentKsh: true,
         depositKsh: true,
+        depositPaidKsh: true,
         paymentDueDay: true,
         specialTerms: true,
         createdAt: true,

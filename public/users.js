@@ -9,12 +9,12 @@ import {
   applyDocumentBranding,
   getResidentPortalTitle,
   getResidentShellBrand
-} from "./portal-branding.js";
+} from "./portal-branding.js?v=20260521b";
 
-const RESIDENT_TOKEN_KEY = "captyn_resident_session_token";
-const RESIDENT_SESSION_TOKEN_KEY = "captyn_resident_session_token_session";
-const RESIDENT_REMEMBER_DEVICE_KEY = "captyn_resident_remember_device";
-const RESIDENT_SW_URL = "/resident-sw.js?v=20260516a";
+const RESIDENT_TOKEN_KEY = "estatedesk_resident_session_token";
+const RESIDENT_SESSION_TOKEN_KEY = "estatedesk_resident_session_token_session";
+const RESIDENT_REMEMBER_DEVICE_KEY = "estatedesk_resident_remember_device";
+const RESIDENT_SW_URL = "/resident-sw.js?v=20260717d";
 
 let deferredInstallPrompt = null;
 let residentSwRegistrationPromise = null;
@@ -22,8 +22,10 @@ let residentSwRegistrationPromise = null;
 const apiStatusEl = document.getElementById("api-status");
 const authStateEl = document.getElementById("auth-state");
 const feedbackBoxEl = document.getElementById("feedback-box");
+const residentIdNoticeEl = document.getElementById("resident-id-notice");
 const userMenuToggleEl = document.getElementById("user-menu-toggle");
 const userMenuPanelEl = document.getElementById("user-menu-panel");
+const residentProfileLinkEl = document.getElementById("resident-profile-link");
 const residentBrandEl = document.getElementById("resident-brand");
 const residentHeroTitleEl = document.getElementById("resident-hero-title");
 
@@ -48,6 +50,10 @@ const residentViewPanels = [...document.querySelectorAll("[data-resident-view-pa
 const overviewBuildingEl = document.getElementById("overview-building");
 const overviewHouseNumberEl = document.getElementById("overview-house-number");
 const overviewSessionExpiryEl = document.getElementById("overview-session-expiry");
+const residentHomeBalanceEl = document.getElementById("resident-home-balance");
+const residentHomeSummaryEl = document.getElementById("resident-home-summary");
+const overviewRentBalanceEl = document.getElementById("overview-rent-balance");
+const overviewUtilityBalanceEl = document.getElementById("overview-utility-balance");
 const openSupportViewBtnEl = document.getElementById("open-support-view-btn");
 const openPaymentsViewBtnEl = document.getElementById("open-payments-view-btn");
 const openNoticesViewBtnEl = document.getElementById("open-notices-view-btn");
@@ -105,7 +111,26 @@ const paymentsTotalOutstandingEl = document.getElementById("payments-total-outst
 const paymentsRentOutstandingEl = document.getElementById("payments-rent-outstanding");
 const paymentsUtilityOutstandingEl = document.getElementById("payments-utility-outstanding");
 const paymentsMonthPaidEl = document.getElementById("payments-month-paid");
+const residentPayHeadlineEl = document.getElementById("resident-pay-headline");
+const residentPaySheetEl = document.getElementById("resident-pay-sheet");
+const residentPaySheetTitleEl = document.getElementById("resident-pay-sheet-title");
+const residentPayOpenButtons = [...document.querySelectorAll("[data-resident-pay-open]")];
+const residentPayModeButtons = [...document.querySelectorAll("[data-resident-pay-mode]")];
+const residentPayUtilityFieldEl = document.getElementById("resident-pay-utility-field");
+const residentPayUtilityTypeEl = document.getElementById("resident-pay-utility-type");
+const residentPayAmountEl = document.getElementById("resident-pay-amount");
+const residentPayPhoneFieldEl = document.getElementById("resident-pay-phone-field");
+const residentPayPhoneEl = document.getElementById("resident-pay-phone");
+const residentPayNoteEl = document.getElementById("resident-pay-note");
+const residentPaySubmitEl = document.getElementById("resident-pay-submit");
+const residentPayInstructionsEl = document.getElementById("resident-pay-instructions");
+const residentPayCancelEl = document.getElementById("resident-pay-cancel");
 const paymentShortcutButtons = [...document.querySelectorAll("[data-payment-shortcut]")];
+const paymentInstructionsCardEl = document.getElementById("payment-instructions-card");
+const paymentInstructionsTitleEl = document.getElementById("payment-instructions-title");
+const paymentInstructionsMethodEl = document.getElementById("payment-instructions-method");
+const paymentInstructionsListEl = document.getElementById("payment-instructions-list");
+const paymentInstructionsNoteEl = document.getElementById("payment-instructions-note");
 const utilityBillsSummaryEl = document.getElementById("utility-bills-summary");
 const utilityBillsListEl = document.getElementById("utility-bills-list");
 const rentPaymentClusterEl = document.querySelector(".payment-cluster-rent");
@@ -206,6 +231,8 @@ const state = {
   rentPayments: [],
   utilityPayments: [],
   paymentAccess: { ...DEFAULT_PAYMENT_ACCESS },
+  paymentInstructions: null,
+  identityRequirement: null,
   residentToken: INITIAL_RESIDENT_STORAGE.token,
   rememberResidentDevice:
     INITIAL_RESIDENT_STORAGE.token !== ""
@@ -221,6 +248,7 @@ const state = {
   utilityCheckoutRequestId: null,
   utilityCheckoutType: null,
   utilityPaymentBaseline: null,
+  activeResidentPaymentMode: "utility",
   activeMpesaFlow: null,
   mpesaStatusModalDismissed: false,
   activeReceipt: null,
@@ -238,13 +266,16 @@ const PAYMENT_SYNC_INTERVAL_MS = 2500;
 const PAYMENT_SYNC_MAX_ATTEMPTS = 6;
 const BUILDINGS_FETCH_MAX_ATTEMPTS = 3;
 const BUILDINGS_FETCH_RETRY_DELAYS_MS = [250, 750];
+const RESIDENT_ONLINE_RENT_PAYMENT_ENABLED = false;
 
 const REQUIRED_DOM_BINDINGS = Object.freeze([
   ["api-status", apiStatusEl],
   ["auth-state", authStateEl],
   ["feedback-box", feedbackBoxEl],
+  ["resident-id-notice", residentIdNoticeEl],
   ["user-menu-toggle", userMenuToggleEl],
   ["user-menu-panel", userMenuPanelEl],
+  ["resident-profile-link", residentProfileLinkEl],
   ["resident-auth-panel", residentAuthPanelEl],
   ["resident-session-panel", residentSessionPanelEl],
   ["resident-session-summary", residentSessionSummaryEl],
@@ -258,6 +289,10 @@ const REQUIRED_DOM_BINDINGS = Object.freeze([
   ["overview-building", overviewBuildingEl],
   ["overview-house-number", overviewHouseNumberEl],
   ["overview-session-expiry", overviewSessionExpiryEl],
+  ["resident-home-balance", residentHomeBalanceEl],
+  ["resident-home-summary", residentHomeSummaryEl],
+  ["overview-rent-balance", overviewRentBalanceEl],
+  ["overview-utility-balance", overviewUtilityBalanceEl],
   ["resident-auth-form", residentAuthFormEl],
   ["auth-building-id", authBuildingIdEl],
   ["auth-house-number", authHouseNumberEl],
@@ -305,6 +340,23 @@ const REQUIRED_DOM_BINDINGS = Object.freeze([
   ["payments-rent-outstanding", paymentsRentOutstandingEl],
   ["payments-utility-outstanding", paymentsUtilityOutstandingEl],
   ["payments-month-paid", paymentsMonthPaidEl],
+  ["resident-pay-headline", residentPayHeadlineEl],
+  ["resident-pay-sheet", residentPaySheetEl],
+  ["resident-pay-sheet-title", residentPaySheetTitleEl],
+  ["resident-pay-utility-field", residentPayUtilityFieldEl],
+  ["resident-pay-utility-type", residentPayUtilityTypeEl],
+  ["resident-pay-amount", residentPayAmountEl],
+  ["resident-pay-phone-field", residentPayPhoneFieldEl],
+  ["resident-pay-phone", residentPayPhoneEl],
+  ["resident-pay-note", residentPayNoteEl],
+  ["resident-pay-submit", residentPaySubmitEl],
+  ["resident-pay-instructions", residentPayInstructionsEl],
+  ["resident-pay-cancel", residentPayCancelEl],
+  ["payment-instructions-card", paymentInstructionsCardEl],
+  ["payment-instructions-title", paymentInstructionsTitleEl],
+  ["payment-instructions-method", paymentInstructionsMethodEl],
+  ["payment-instructions-list", paymentInstructionsListEl],
+  ["payment-instructions-note", paymentInstructionsNoteEl],
   ["utility-bills-summary", utilityBillsSummaryEl],
   ["utility-bills-list", utilityBillsListEl],
   ["rent-payment-section", rentPaymentSectionEl],
@@ -394,6 +446,69 @@ function formatDateTime(value) {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(date);
+}
+
+function getResidentIdentityRequirement() {
+  return state.identityRequirement ?? state.residentSession?.identityRequirement ?? null;
+}
+
+function formatIdentityDeadline(requirement) {
+  if (!requirement?.dueAt) {
+    return "";
+  }
+
+  return `Deadline: ${formatDateTime(requirement.dueAt)}.`;
+}
+
+function renderResidentIdentityNotice() {
+  const requirement = getResidentIdentityRequirement();
+  const needsIdentity =
+    Boolean(state.residentSession) &&
+    !isPasswordChangeRequired() &&
+    Boolean(requirement) &&
+    !requirement.complete;
+
+  if (userMenuToggleEl instanceof HTMLElement) {
+    userMenuToggleEl.classList.toggle("has-alert", needsIdentity);
+  }
+  if (residentProfileLinkEl instanceof HTMLElement) {
+    residentProfileLinkEl.classList.toggle("has-alert", needsIdentity);
+  }
+  if (!(residentIdNoticeEl instanceof HTMLElement)) {
+    return;
+  }
+
+  if (!needsIdentity) {
+    residentIdNoticeEl.replaceChildren();
+    residentIdNoticeEl.className = "feedback hidden";
+    return;
+  }
+
+  const overdue = requirement.status === "overdue";
+  const hoursRemaining = Number(requirement.hoursRemaining ?? 0);
+  const remainingCopy = overdue
+    ? "Your 48-hour grace period has ended."
+    : `${hoursRemaining} hour${hoursRemaining === 1 ? "" : "s"} remaining.`;
+
+  const lead = document.createElement("strong");
+  lead.textContent = overdue ? "ID required now. " : "ID required. ";
+
+  const action = document.createElement("a");
+  action.className = "resident-id-action";
+  action.href = "/user";
+  action.textContent = "Add it in Profile & ID";
+
+  residentIdNoticeEl.replaceChildren(
+    lead,
+    document.createTextNode(
+      `Add your ID type and ID number. ${remainingCopy} ${formatIdentityDeadline(
+        requirement
+      )} `
+    ),
+    action,
+    document.createTextNode(".")
+  );
+  residentIdNoticeEl.className = `feedback ${overdue ? "error" : "info"}`;
 }
 
 function formatCurrency(value) {
@@ -1029,7 +1144,9 @@ function syncPaymentShortcutButtons() {
     if (shortcut === "rent-full") {
       button.disabled = !billingEnabled || rentOutstanding <= 0;
       button.textContent =
-        rentOutstanding > 0 ? `Use rent ${formatCurrency(rentOutstanding)}` : "Rent cleared";
+        rentOutstanding > 0
+          ? `View rent ${formatCurrency(rentOutstanding)}`
+          : "Rent cleared";
       return;
     }
 
@@ -1054,6 +1171,7 @@ function updatePaymentsSummaryCard() {
     paymentsUtilityOutstandingEl.textContent = formatCurrency(0);
     paymentsMonthPaidEl.textContent = formatCurrency(0);
     paymentsSummaryActionEl.textContent = getPendingReviewBillingMessage();
+    syncResidentPaySummary();
     syncPaymentShortcutButtons();
     return;
   }
@@ -1067,10 +1185,11 @@ function updatePaymentsSummaryCard() {
   paymentsRentOutstandingEl.textContent = formatCurrency(rentOutstanding);
   paymentsUtilityOutstandingEl.textContent = formatCurrency(utilityOutstanding);
   paymentsMonthPaidEl.textContent = formatCurrency(paidThisMonth);
+  syncResidentPaySummary();
 
   if (totalOutstanding <= 0) {
     paymentsSummaryActionEl.textContent =
-      "All balances are clear right now. If a new bill is posted, you can still pay it in small steps.";
+      "All balances are clear right now. If a new bill is posted, use the payment details on this page.";
     syncPaymentShortcutButtons();
     return;
   }
@@ -1078,15 +1197,15 @@ function updatePaymentsSummaryCard() {
   const suggestedStarter = computeSuggestedStarterAmount(totalOutstanding);
   if (suggestedStarter >= totalOutstanding) {
     paymentsSummaryActionEl.textContent =
-      "Your current balance is manageable. You can clear it now or still enter a smaller custom amount.";
+      "Your current balance is manageable. Use the instructions below and management will confirm the receipt.";
     return;
   }
 
   paymentsSummaryActionEl.textContent = `You do not need to pay ${formatCurrency(
     totalOutstanding
-  )} at once. A good start today is ${formatCurrency(
+  )} at once. A good start is ${formatCurrency(
     suggestedStarter
-  )}, and the remainder stays on your account.`;
+  )}; pay using the instructions below and the remainder stays on your account.`;
   syncPaymentShortcutButtons();
 }
 
@@ -1263,6 +1382,15 @@ function applyResidentPaymentShortcut(shortcut) {
       return;
     }
 
+    if (!RESIDENT_ONLINE_RENT_PAYMENT_ENABLED) {
+      showFeedback(
+        `Rent balance is ${formatCurrency(rentOutstanding)}. Use the payment instructions and include your house reference.`,
+        "info"
+      );
+      focusResidentPaymentSection(paymentInstructionsCardEl, null);
+      return;
+    }
+
     rentPaymentAmountEl.value = formatAmountValue(rentOutstanding);
     updateRentPaymentGuidance();
     focusResidentPaymentSection(rentPaymentSectionEl, rentPaymentAmountEl);
@@ -1290,10 +1418,240 @@ function applyResidentPaymentShortcut(shortcut) {
   }
 
   if (rentOutstanding > 0) {
+    if (!RESIDENT_ONLINE_RENT_PAYMENT_ENABLED) {
+      showFeedback(
+        `Suggested rent starter: ${formatCurrency(
+          computeSuggestedStarterAmount(rentOutstanding)
+        )}. Use the payment instructions and include your house reference.`,
+        "info"
+      );
+      focusResidentPaymentSection(paymentInstructionsCardEl, null);
+      return;
+    }
+
     rentPaymentAmountEl.value = formatAmountValue(computeSuggestedStarterAmount(rentOutstanding));
     updateRentPaymentGuidance();
     focusResidentPaymentSection(rentPaymentSectionEl, rentPaymentAmountEl);
   }
+}
+
+function syncResidentPayUtilityOptions() {
+  if (!(residentPayUtilityTypeEl instanceof HTMLSelectElement)) {
+    return;
+  }
+
+  const waterEnabled = isUtilityPaymentEnabled("water");
+  const electricityEnabled = isUtilityPaymentEnabled("electricity");
+  [...residentPayUtilityTypeEl.options].forEach((option) => {
+    option.disabled =
+      (option.value === "water" && !waterEnabled) ||
+      (option.value === "electricity" && !electricityEnabled);
+  });
+
+  if (!isUtilityPaymentEnabled(residentPayUtilityTypeEl.value)) {
+    residentPayUtilityTypeEl.value = waterEnabled ? "water" : electricityEnabled ? "electricity" : "water";
+  }
+}
+
+function getDefaultResidentPayMode() {
+  if (state.residentSession && !canResidentAccessBilling()) {
+    return "utility";
+  }
+
+  const utilityOutstanding = getTotalUtilityOutstandingBalance();
+  const rentOutstanding = getRentOutstandingBalance();
+  if (utilityOutstanding > 0) {
+    return "utility";
+  }
+  if (rentOutstanding > 0) {
+    return "rent";
+  }
+  return isUtilityPaymentEnabled("water") || isUtilityPaymentEnabled("electricity") ? "utility" : "rent";
+}
+
+function getResidentPayModeBalance(mode) {
+  if (mode === "rent") {
+    return getRentOutstandingBalance();
+  }
+  const utilityType = residentPayUtilityTypeEl instanceof HTMLSelectElement
+    ? residentPayUtilityTypeEl.value
+    : resolveShortcutUtilityType();
+  return getUtilityOutstandingBalance(utilityType);
+}
+
+function syncResidentPaySummary() {
+  const pendingReview = Boolean(state.residentSession && !canResidentAccessBilling());
+  const rentOutstanding = pendingReview ? 0 : getRentOutstandingBalance();
+  const utilityOutstanding = pendingReview ? 0 : getTotalUtilityOutstandingBalance();
+  const totalOutstanding = pendingReview ? 0 : getTotalOutstandingBalance();
+
+  if (residentPayHeadlineEl instanceof HTMLElement) {
+    residentPayHeadlineEl.textContent = totalOutstanding > 0 ? `${formatCurrency(totalOutstanding)} due` : "Nothing due";
+  }
+  if (residentHomeBalanceEl instanceof HTMLElement) {
+    residentHomeBalanceEl.textContent = totalOutstanding > 0 ? `${formatCurrency(totalOutstanding)} due` : "Nothing due";
+  }
+  if (overviewRentBalanceEl instanceof HTMLElement) {
+    overviewRentBalanceEl.textContent = formatCurrency(rentOutstanding);
+  }
+  if (overviewUtilityBalanceEl instanceof HTMLElement) {
+    overviewUtilityBalanceEl.textContent = formatCurrency(utilityOutstanding);
+  }
+  if (residentHomeSummaryEl instanceof HTMLElement) {
+    residentHomeSummaryEl.textContent = pendingReview
+      ? getPendingReviewBillingMessage()
+      : totalOutstanding > 0
+        ? `Rent ${formatCurrency(rentOutstanding)} • Utilities ${formatCurrency(utilityOutstanding)}`
+        : "Your rent and utility balances are clear right now.";
+  }
+
+  residentPayOpenButtons.forEach((button) => {
+    if (button instanceof HTMLButtonElement) {
+      button.disabled = pendingReview;
+      if (button.dataset.residentPayOpen === "auto") {
+        button.textContent = totalOutstanding > 0 ? "Pay" : "Payment details";
+      }
+    }
+  });
+
+  if (!(residentPaySheetEl instanceof HTMLElement) || residentPaySheetEl.classList.contains("hidden")) {
+    return;
+  }
+  setResidentPayMode(state.activeResidentPaymentMode || getDefaultResidentPayMode(), { preserveAmount: true });
+}
+
+function setResidentPayMode(mode, options = {}) {
+  const requestedMode = mode === "rent" ? "rent" : "utility";
+  state.activeResidentPaymentMode = requestedMode;
+  syncResidentPayUtilityOptions();
+
+  residentPayModeButtons.forEach((button) => {
+    if (button instanceof HTMLButtonElement) {
+      const active = button.dataset.residentPayMode === requestedMode;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    }
+  });
+
+  const isRent = requestedMode === "rent";
+  residentPayUtilityFieldEl?.classList.toggle("hidden", isRent);
+  residentPayPhoneFieldEl?.classList.toggle("hidden", isRent && !RESIDENT_ONLINE_RENT_PAYMENT_ENABLED);
+
+  const balance = getResidentPayModeBalance(requestedMode);
+  const canPayUtility = !isRent && balance > 0 && isUtilityPaymentEnabled(residentPayUtilityTypeEl?.value || "water");
+  const canPayRentOnline = isRent && RESIDENT_ONLINE_RENT_PAYMENT_ENABLED && balance > 0;
+
+  if (!options.preserveAmount && residentPayAmountEl instanceof HTMLInputElement) {
+    residentPayAmountEl.value = balance > 0 ? formatAmountValue(balance) : "";
+  }
+  if (residentPayPhoneEl instanceof HTMLInputElement) {
+    residentPayPhoneEl.value = residentPayPhoneEl.value || utilityPaymentPhoneEl?.value || rentPaymentPhoneEl?.value || "";
+  }
+
+  if (residentPaySheetTitleEl instanceof HTMLElement) {
+    residentPaySheetTitleEl.textContent = isRent ? "Rent payment" : "Utility payment";
+  }
+  if (residentPayNoteEl instanceof HTMLElement) {
+    if (state.residentSession && !canResidentAccessBilling()) {
+      residentPayNoteEl.textContent = getPendingReviewBillingMessage();
+    } else if (isRent && !RESIDENT_ONLINE_RENT_PAYMENT_ENABLED) {
+      residentPayNoteEl.textContent = balance > 0
+        ? `Rent balance is ${formatCurrency(balance)}. Use the payment instructions and include your house number.`
+        : "Rent is clear right now. Payment instructions are available if needed.";
+    } else if (isRent) {
+      residentPayNoteEl.textContent = `Send an M-PESA prompt for ${formatCurrency(balance)} rent.`;
+    } else {
+      const utilityType = residentPayUtilityTypeEl?.value || resolveShortcutUtilityType();
+      residentPayNoteEl.textContent = canPayUtility
+        ? `${utilityLabel(utilityType)} balance: ${formatCurrency(balance)}. The oldest unpaid bill is selected automatically.`
+        : `No ${utilityLabel(utilityType).toLowerCase()} balance is open right now.`;
+    }
+  }
+  if (residentPaySubmitEl instanceof HTMLButtonElement) {
+    residentPaySubmitEl.textContent = isRent && !RESIDENT_ONLINE_RENT_PAYMENT_ENABLED ? "View instructions" : "Send M-PESA Prompt";
+    residentPaySubmitEl.disabled = Boolean(
+      state.residentSession && !canResidentAccessBilling()
+    ) || (!canPayUtility && !canPayRentOnline && !(isRent && !RESIDENT_ONLINE_RENT_PAYMENT_ENABLED));
+  }
+}
+
+function openResidentPaySheet(mode = "auto") {
+  if (state.residentSession && !canResidentAccessBilling()) {
+    showFeedback(getPendingReviewBillingMessage());
+    return;
+  }
+  setActiveResidentView("payments", { scroll: true });
+  residentPaySheetEl?.classList.remove("hidden");
+  const nextMode = mode === "rent" || mode === "utility" ? mode : getDefaultResidentPayMode();
+  setResidentPayMode(nextMode);
+  window.requestAnimationFrame(() => {
+    residentPaySheetEl?.scrollIntoView({ behavior: "smooth", block: "center" });
+    residentPayAmountEl?.focus({ preventScroll: true });
+    residentPayAmountEl?.select();
+  });
+}
+
+function closeResidentPaySheet() {
+  residentPaySheetEl?.classList.add("hidden");
+}
+
+function showResidentPaymentInstructions() {
+  setActiveResidentView("payments", { scroll: true });
+  closeResidentPaySheet();
+  window.requestAnimationFrame(() => {
+    paymentInstructionsCardEl?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+}
+
+function submitResidentPaySheet() {
+  if (state.residentSession && !canResidentAccessBilling()) {
+    showFeedback(getPendingReviewBillingMessage());
+    return;
+  }
+
+  const mode = state.activeResidentPaymentMode || getDefaultResidentPayMode();
+  const amountKsh = Number(residentPayAmountEl?.value);
+  if (!Number.isFinite(amountKsh) || amountKsh <= 0) {
+    showFeedback("Enter the amount you want to pay.");
+    residentPayAmountEl?.focus();
+    return;
+  }
+
+  if (mode === "rent" && !RESIDENT_ONLINE_RENT_PAYMENT_ENABLED) {
+    rentPaymentAmountEl.value = formatAmountValue(amountKsh);
+    updateRentPaymentGuidance();
+    showFeedback("Use the payment instructions and include your house number as the reference.", "info");
+    showResidentPaymentInstructions();
+    return;
+  }
+
+  if (mode === "rent") {
+    rentPaymentAmountEl.value = formatAmountValue(amountKsh);
+    rentPaymentPhoneEl.value = residentPayPhoneEl?.value.trim() || rentPaymentPhoneEl.value;
+    updateRentPaymentGuidance();
+    rentPaymentFormEl.requestSubmit();
+    return;
+  }
+
+  const utilityType = residentPayUtilityTypeEl?.value || resolveShortcutUtilityType();
+  if (!isUtilityPaymentEnabled(utilityType)) {
+    showFeedback(`${utilityLabel(utilityType)} payments are disabled by your landlord.`);
+    return;
+  }
+  const utilityBalance = getUtilityOutstandingBalance(utilityType);
+  if (utilityBalance <= 0) {
+    showFeedback(`No ${utilityLabel(utilityType).toLowerCase()} balance is open right now.`, "info");
+    return;
+  }
+
+  utilityPaymentTypeEl.value = utilityType;
+  setSelectedUtilityBillMonth(utilityType, null);
+  syncUtilityPaymentFormFromBalances();
+  utilityPaymentAmountEl.value = formatAmountValue(amountKsh);
+  utilityPaymentPhoneEl.value = residentPayPhoneEl?.value.trim() || utilityPaymentPhoneEl.value;
+  updateUtilityPaymentGuidance();
+  closeResidentPaySheet();
+  utilityPaymentFormEl.requestSubmit();
 }
 
 function escapeHtml(value) {
@@ -1303,6 +1661,121 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function appendPaymentInstructionDetail(label, value) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized || !(paymentInstructionsListEl instanceof HTMLElement)) {
+    return false;
+  }
+
+  const item = document.createElement("div");
+  const term = document.createElement("dt");
+  const description = document.createElement("dd");
+  term.textContent = label;
+  description.textContent = normalized;
+  item.append(term, description);
+  paymentInstructionsListEl.append(item);
+  return true;
+}
+
+function renderPaymentInstructions() {
+  if (
+    !(paymentInstructionsCardEl instanceof HTMLElement) ||
+    !(paymentInstructionsListEl instanceof HTMLElement)
+  ) {
+    return;
+  }
+
+  const instructions = state.paymentInstructions;
+  paymentInstructionsListEl.replaceChildren();
+
+  if (!instructions) {
+    paymentInstructionsTitleEl.textContent = "Payment instructions";
+    paymentInstructionsMethodEl.textContent = "-";
+    paymentInstructionsNoteEl.textContent =
+      "Payment instructions will appear after your building details load.";
+    return;
+  }
+
+  const method = String(instructions.primaryMethod || "mpesa");
+  const effective = instructions.effective || {};
+  paymentInstructionsTitleEl.textContent = instructions.buildingName
+    ? `${instructions.buildingName} payment details`
+    : "Payment instructions";
+  paymentInstructionsMethodEl.textContent = instructions.methodLabel || method.toUpperCase();
+
+  let hasDetail = false;
+  hasDetail =
+    appendPaymentInstructionDetail("House Number", state.residentSession?.houseNumber) ||
+    hasDetail;
+  if (method === "bank") {
+    hasDetail =
+      appendPaymentInstructionDetail("Bank Name", effective.bankName || instructions.bankName) ||
+      hasDetail;
+    hasDetail =
+      appendPaymentInstructionDetail(
+        "Bank Account Name",
+        effective.bankAccountName || instructions.bankAccountName
+      ) || hasDetail;
+    hasDetail =
+      appendPaymentInstructionDetail(
+        "Bank Account Number",
+        effective.bankAccountNumber || instructions.bankAccountNumber
+      ) || hasDetail;
+    hasDetail =
+      appendPaymentInstructionDetail(
+        "Bank Branch",
+        effective.bankBranch || instructions.bankBranch
+      ) ||
+      hasDetail;
+    hasDetail =
+      appendPaymentInstructionDetail(
+        "SWIFT / Bank Code",
+        effective.bankSwiftCode || instructions.bankSwiftCode
+      ) || hasDetail;
+  } else if (method === "cash") {
+    hasDetail =
+      appendPaymentInstructionDetail(
+        "Cash Payment Point",
+        effective.cashLocation || instructions.cashLocation
+      ) || hasDetail;
+  } else if (method === "manual") {
+    hasDetail =
+      appendPaymentInstructionDetail(
+        "Payment Instructions",
+        effective.instructions || instructions.instructions
+      ) || hasDetail;
+  } else {
+    hasDetail =
+      appendPaymentInstructionDetail(
+        "Buy Goods Till Number",
+        effective.mpesaBusinessNumber || instructions.mpesaBusinessNumber
+      ) || hasDetail;
+    hasDetail =
+      appendPaymentInstructionDetail(
+        "M-PESA Account Name",
+        effective.mpesaAccountName || instructions.mpesaAccountName
+      ) || hasDetail;
+    hasDetail =
+      appendPaymentInstructionDetail(
+        "House / Account Reference",
+        effective.mpesaAccountReference || instructions.mpesaAccountReference
+      ) || hasDetail;
+  }
+
+  const notes = [
+    method !== "manual" ? effective.instructions || instructions.instructions : "",
+    effective.proofInstructions || instructions.proofInstructions
+  ].filter(Boolean);
+  paymentInstructionsNoteEl.textContent = notes.join(" ");
+
+  if (!hasDetail) {
+    appendPaymentInstructionDetail(
+      "Status",
+      "Payment details are not set yet. Contact management before sending rent."
+    );
+  }
 }
 
 function getPublicBuildingLabel(building, fallback = "Assigned building") {
@@ -1672,7 +2145,7 @@ function downloadActiveReceipt() {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `captyn-housing-${state.activeReceipt.kind}-receipt-${fileSafeReference || "payment"}.html`;
+  anchor.download = `jk-flats-${state.activeReceipt.kind}-receipt-${fileSafeReference || "payment"}.html`;
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
@@ -1897,12 +2370,17 @@ function applyPaymentAccessUi() {
   }
 
   const rentEnabled = isRentPaymentEnabled();
+  const onlineRentPaymentEnabled = RESIDENT_ONLINE_RENT_PAYMENT_ENABLED;
   if (rentPaymentClusterEl instanceof HTMLElement) {
     rentPaymentClusterEl.classList.toggle("hidden", !rentEnabled);
   }
   setSectionInteractive(rentPaymentSectionEl, rentEnabled);
+  if (rentPaymentFormEl instanceof HTMLElement) {
+    rentPaymentFormEl.classList.toggle("hidden", !onlineRentPaymentEnabled);
+    setSectionInteractive(rentPaymentFormEl, false);
+  }
   rentPaymentStateEl.textContent = rentEnabled
-    ? "Rent payment is active for your building."
+    ? "Use the payment instructions above. Management will record or confirm your rent payment after it is received."
     : state.paymentAccess?.rentConfigured === false
       ? "Rent payment will appear once rent is configured for your room."
       : "Rent payment is currently disabled by your landlord.";
@@ -2129,6 +2607,7 @@ function renderOverviewSession() {
     overviewBuildingEl.textContent = "-";
     overviewHouseNumberEl.textContent = "-";
     overviewSessionExpiryEl.textContent = "";
+    syncResidentPaySummary();
     return;
   }
 
@@ -2138,6 +2617,7 @@ function renderOverviewSession() {
   overviewSessionExpiryEl.textContent = `${formatResidentVerificationLabel(
     session.verificationStatus
   )} account • Expires ${formatDateTime(session.expiresAt)}.`;
+  syncResidentPaySummary();
 }
 
 function hasRequiredDomBindings() {
@@ -2754,7 +3234,14 @@ async function detectExistingPortalSession() {
   return null;
 }
 
+function setResidentShellMode(mode) {
+  const isSignedIn = mode === "signed-in";
+  document.body.classList.toggle("resident-signed-in", isSignedIn);
+  document.body.classList.toggle("resident-signed-out", !isSignedIn);
+}
+
 function showNonResidentSessionState(sessionInfo) {
+  setResidentShellMode("signed-out");
   const role = String(sessionInfo?.role || "account");
   authStateEl.textContent = `Signed in (${role})`;
   residentAuthPanelEl.classList.remove("hidden");
@@ -2951,6 +3438,33 @@ function renderNotifications(notifications) {
   });
 }
 
+function formatRentSetupSourceLabel(source) {
+  const normalized = String(source ?? "").trim();
+  if (normalized === "room_default") {
+    return "Room Default";
+  }
+  if (normalized === "building_default") {
+    return "Building Default";
+  }
+  if (normalized === "agreement_legacy") {
+    return "Tenant Record";
+  }
+  if (normalized === "room_disabled") {
+    return "No Charge";
+  }
+  if (normalized === "ledger") {
+    return "Rent Ledger";
+  }
+  return "Not Set";
+}
+
+function formatRentDueDay(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 1
+    ? `Day ${Math.round(numeric)}`
+    : "-";
+}
+
 function renderRentDue(rentDue, fallbackMessage) {
   state.rentDue = rentDue ?? null;
   rentDueEl.replaceChildren();
@@ -2979,6 +3493,8 @@ function renderRentDue(rentDue, fallbackMessage) {
 
   const keyvals = document.createElement("dl");
   keyvals.className = "rent-keyvals";
+  const rentSetup = rentDue.rentSetup ?? {};
+  const paymentDueDay = rentDue.paymentDueDay ?? rentSetup.paymentDueDay;
   keyvals.innerHTML = `
     <div>
       <dt>Monthly Rent</dt>
@@ -2993,6 +3509,10 @@ function renderRentDue(rentDue, fallbackMessage) {
       <dd>${formatCurrency(rentDue.currentMonthPaidKsh ?? rentDue.paidAmountKsh ?? 0)}</dd>
     </div>
     <div>
+      <dt>Late Fee</dt>
+      <dd>${formatCurrency(rentDue.currentMonthLatePenaltyKsh ?? 0)}</dd>
+    </div>
+    <div>
       <dt>Charge Overdue</dt>
       <dd>${formatCurrency(rentDue.expenseBalanceKsh ?? rentDue.expenseArrearsKsh ?? 0)}</dd>
     </div>
@@ -3001,12 +3521,20 @@ function renderRentDue(rentDue, fallbackMessage) {
       <dd>${formatDateTime(rentDue.dueDate)}</dd>
     </div>
     <div>
+      <dt>Due Day</dt>
+      <dd>${escapeHtml(formatRentDueDay(paymentDueDay))}</dd>
+    </div>
+    <div>
       <dt>Overdue Starts</dt>
       <dd>${formatDateTime(rentDue.overdueStartsAt ?? rentDue.dueDate)}</dd>
     </div>
     <div>
       <dt>Grace Days</dt>
       <dd>${Number(rentDue.graceDays ?? 0)}</dd>
+    </div>
+    <div>
+      <dt>Rent Setup</dt>
+      <dd>${escapeHtml(formatRentSetupSourceLabel(rentDue.rentSetupSource ?? rentSetup.source))}</dd>
     </div>
     <div>
       <dt>Days To Due</dt>
@@ -3444,6 +3972,7 @@ function renderRentPayments(payments, fallbackMessage) {
 }
 
 function showSignedOutState() {
+  setResidentShellMode("signed-out");
   closeMpesaStatusModal({ clearFlow: true });
   closePaymentReceiptModal();
   stopRentPaymentPolling();
@@ -3477,10 +4006,12 @@ function showSignedOutState() {
   state.rentDue = null;
   state.rentPayments = [];
   state.utilityPayments = [];
+  state.paymentInstructions = null;
   state.rentPaymentBaseline = null;
   state.rentSelectedBillingMonth = null;
   state.utilityPaymentBaseline = null;
   state.activeReceipt = null;
+  state.identityRequirement = null;
   updateResidentNavDots();
   state.utilityBills = [];
   state.utilityMeters = [];
@@ -3490,6 +4021,7 @@ function showSignedOutState() {
     electricity: null
   };
   state.paymentAccess = { ...DEFAULT_PAYMENT_ACCESS };
+  renderPaymentInstructions();
   renderUtilityBills([], [], undefined, []);
   renderUtilityPayments([]);
   renderOverviewSession();
@@ -3499,6 +4031,7 @@ function showSignedOutState() {
   applyPaymentAccessUi();
   renderPwaControls();
   renderSmsControls();
+  renderResidentIdentityNotice();
   syncRememberDeviceToggle();
   updateResidentBranding();
 }
@@ -3510,6 +4043,7 @@ function showSignedInState() {
     return;
   }
 
+  state.identityRequirement = state.identityRequirement ?? session.identityRequirement ?? null;
   const mustChangePassword = isPasswordChangeRequired();
   clearResidentAuthFeedback();
   authStateEl.textContent = mustChangePassword
@@ -3517,6 +4051,7 @@ function showSignedInState() {
     : isResidentPendingReview()
       ? "Pending review"
       : "Signed in";
+  setResidentShellMode(mustChangePassword ? "signed-out" : "signed-in");
   residentAuthPanelEl.classList.add("hidden");
   residentSessionPanelEl.classList.remove("hidden");
   residentPasswordChangePanelEl.classList.toggle("hidden", !mustChangePassword);
@@ -3530,6 +4065,7 @@ function showSignedInState() {
     session.verificationStatus
   )} • Expires ${formatDateTime(session.expiresAt)}`;
   renderOverviewSession();
+  renderResidentIdentityNotice();
   if (mustChangePassword) {
     setActiveResidentView("payments");
   } else if (isResidentPendingReview()) {
@@ -3547,26 +4083,25 @@ async function loadResidentSession() {
   try {
     const payload = await requestJson("/api/auth/resident/session", {}, { auth: true });
     state.residentSession = payload.data;
+    state.identityRequirement = payload.data?.identityRequirement ?? null;
     showSignedInState();
-    await loadResidentPushConfig();
-    await loadResidentSmsConfig();
-    await syncResidentPushState({ subscribeIfAllowed: true });
+    void refreshResidentBackgroundServices();
     return true;
   } catch (_error) {
     saveResidentToken("");
     state.residentSession = null;
+    state.identityRequirement = null;
     showSignedOutState();
     return false;
   }
 }
 
-async function refreshRentDueCard(fallbackMessage) {
+async function refreshResidentBackgroundServices() {
   try {
-    const payload = await requestJson("/api/user/rent-due", {}, { auth: true });
-    state.rentDue = payload.data ?? null;
-    renderRentDue(state.rentDue, payload.message ?? fallbackMessage);
+    await Promise.all([loadResidentPushConfig(), loadResidentSmsConfig()]);
+    await syncResidentPushState({ subscribeIfAllowed: true });
   } catch (_error) {
-    renderRentDue(state.rentDue, fallbackMessage);
+    // Push and SMS preferences should not block the resident dashboard paint.
   }
 }
 
@@ -3590,11 +4125,15 @@ async function loadTenantData() {
 
     state.reports = data.reports ?? [];
     state.notifications = data.notifications ?? [];
+    state.paymentInstructions = data.paymentInstructions ?? null;
     state.rentDue = data.rentDue ?? null;
+    state.identityRequirement =
+      data.identityRequirement ?? state.residentSession?.identityRequirement ?? null;
 
     renderReports(state.reports);
     renderNotifications(state.notifications);
-    await refreshRentDueCard(messages.rentDue);
+    renderPaymentInstructions();
+    renderRentDue(state.rentDue, messages.rentDue);
     state.rentPayments = data.rentPayments ?? [];
     renderRentPayments(state.rentPayments, messages.rentPayments);
     state.utilityBills = data.utilityBills ?? [];
@@ -3611,10 +4150,12 @@ async function loadTenantData() {
     renderUtilityPayments(state.utilityPayments, messages.utilityPayments);
     syncPaymentMessaging();
     updateResidentNavDots();
+    renderResidentIdentityNotice();
   } catch (error) {
     if (error.status === 401) {
       saveResidentToken("");
       state.residentSession = null;
+      state.identityRequirement = null;
       showSignedOutState();
       showFeedback("Session expired. Sign in again.");
       return;
@@ -3740,7 +4281,7 @@ async function loginResident(event) {
     } else {
       showFeedback(
         isResidentPendingReview()
-          ? "Signed in. Landlord verification is still pending. Payments and balances unlock after approval."
+          ? "Signed in. Management verification is still pending. Payments and balances unlock after approval."
           : "Signed in successfully.",
         "success"
       );
@@ -3808,6 +4349,7 @@ async function signupResident() {
       rememberDevice: getRememberDeviceSelection()
     });
     authPasswordEl.value = "";
+    signupIdentityTypeEl.value = "";
     signupIdentityNumberEl.value = "";
     signupOccupationStatusEl.value = "";
     signupOccupationLabelEl.value = "";
@@ -4051,6 +4593,12 @@ function syncUtilityPaymentProviderUi() {
 }
 
 function syncRentPaymentButtonUi() {
+  if (!RESIDENT_ONLINE_RENT_PAYMENT_ENABLED) {
+    rentPaymentBtnEl.textContent = "Online Rent Payment Disabled";
+    rentPaymentBtnEl.disabled = true;
+    return;
+  }
+
   rentPaymentBtnEl.textContent = state.rentCheckoutRequestId
     ? "Resume M-PESA Check"
     : "Pay with M-PESA";
@@ -4550,6 +5098,15 @@ async function submitRentPayment(event) {
   event.preventDefault();
   clearFeedback();
 
+  if (!RESIDENT_ONLINE_RENT_PAYMENT_ENABLED) {
+    showFeedback(
+      "Online rent payment is not enabled yet. Use the payment instructions and wait for management to confirm your rent receipt.",
+      "info"
+    );
+    focusResidentPaymentSection(paymentInstructionsCardEl, null);
+    return;
+  }
+
   if (!isRentPaymentEnabled()) {
     showFeedback("Rent payments are disabled by your landlord for this building.");
     return;
@@ -4672,29 +5229,27 @@ async function boot() {
   apiStatusEl.textContent = "Checking...";
   renderAuthBuildingLoading();
 
-  const [healthResult, buildingsResult] = await Promise.allSettled([
-    requestJson("/health", { cache: "no-store" }),
-    loadBuildingsWithRetry()
-  ]);
-
-  if (healthResult.status === "fulfilled") {
-    apiStatusEl.textContent = healthResult.value.status ?? "ok";
-  } else {
-    apiStatusEl.textContent = "degraded";
-  }
-
-  if (buildingsResult.status === "fulfilled") {
-    state.buildings = buildingsResult.value;
-    renderAuthBuildingOptions(state.buildings);
-  } else {
-    state.buildings = [];
-    renderAuthBuildingOptions([]);
-    const message =
-      buildingsResult.reason instanceof Error
-        ? buildingsResult.reason.message
-        : "Failed to load buildings.";
-    showFeedback(message);
-  }
+  const healthPromise = requestJson("/health", { cache: "no-store" })
+    .then((payload) => {
+      apiStatusEl.textContent = payload.status ?? "ok";
+    })
+    .catch(() => {
+      apiStatusEl.textContent = "degraded";
+    });
+  const buildingsPromise = loadBuildingsWithRetry()
+    .then((buildings) => {
+      state.buildings = buildings;
+      renderAuthBuildingOptions(state.buildings);
+      return true;
+    })
+    .catch((error) => {
+      state.buildings = [];
+      renderAuthBuildingOptions([]);
+      const message =
+        error instanceof Error ? error.message : "Failed to load buildings.";
+      showFeedback(message);
+      return false;
+    });
 
   try {
     const loaded = await loadResidentSession();
@@ -4708,6 +5263,7 @@ async function boot() {
         await loadTenantData();
       }
     } else {
+      await buildingsPromise;
       showSignedOutState();
       await syncAuthConflictState();
     }
@@ -4717,6 +5273,7 @@ async function boot() {
       error instanceof Error ? error.message : "Failed to initialize session.";
     showFeedback(message);
   } finally {
+    await healthPromise;
     document.body.classList.remove("app-loading");
     if (!Array.isArray(state.buildings) || state.buildings.length === 0) {
       residentLoginBtnEl.disabled = false;
@@ -4751,6 +5308,42 @@ function startResidentPortal() {
       setActiveResidentView("notices", { scroll: true });
     });
   }
+
+  residentPayOpenButtons.forEach((button) => {
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    button.addEventListener("click", () => {
+      openResidentPaySheet(String(button.dataset.residentPayOpen || "auto"));
+    });
+  });
+
+  residentPayModeButtons.forEach((button) => {
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    button.addEventListener("click", () => {
+      setResidentPayMode(String(button.dataset.residentPayMode || "utility"));
+    });
+  });
+
+  residentPayUtilityTypeEl?.addEventListener("change", () => {
+    setResidentPayMode("utility");
+  });
+
+  residentPaySubmitEl?.addEventListener("click", () => {
+    submitResidentPaySheet();
+  });
+
+  residentPayCancelEl?.addEventListener("click", () => {
+    closeResidentPaySheet();
+  });
+
+  residentPayInstructionsEl?.addEventListener("click", () => {
+    showResidentPaymentInstructions();
+  });
 
   paymentShortcutButtons.forEach((button) => {
     if (!(button instanceof HTMLButtonElement)) {

@@ -26,8 +26,12 @@ export type BuildingConfigurationRecord = {
   defaultWaterFixedChargeKsh: number | null;
   defaultElectricityFixedChargeKsh: number | null;
   defaultCombinedUtilityChargeKsh: number | null;
+  defaultMonthlyRentKsh: number | null;
+  defaultRentDueDay: number | null;
   utilityBalanceVisibleDays: number;
   rentGraceDays: number;
+  lateRentPenaltyEnabled: boolean;
+  lateRentPenaltyAmountKsh: number;
   allowManualRentPosting: boolean;
   allowManualUtilityPosting: boolean;
   wifiAccessMode: WifiAccessMode;
@@ -59,11 +63,16 @@ export interface UpdateBuildingConfigurationInput {
   defaultWaterFixedChargeKsh?: number | null;
   defaultElectricityFixedChargeKsh?: number | null;
   defaultCombinedUtilityChargeKsh?: number | null;
+  defaultMonthlyRentKsh?: number | null;
+  defaultRentDueDay?: number | null;
   utilityBalanceVisibleDays?: number;
   rentGraceDays?: number;
+  lateRentPenaltyEnabled?: boolean;
+  lateRentPenaltyAmountKsh?: number;
   allowManualRentPosting?: boolean;
   allowManualUtilityPosting?: boolean;
   wifiAccessMode?: WifiAccessMode;
+  metadata?: Prisma.InputJsonValue;
   note?: string;
 }
 
@@ -89,8 +98,12 @@ const DEFAULT_CONFIG = {
   defaultWaterFixedChargeKsh: null as number | null,
   defaultElectricityFixedChargeKsh: null as number | null,
   defaultCombinedUtilityChargeKsh: null as number | null,
+  defaultMonthlyRentKsh: null as number | null,
+  defaultRentDueDay: null as number | null,
   utilityBalanceVisibleDays: 7,
   rentGraceDays: 0,
+  lateRentPenaltyEnabled: false,
+  lateRentPenaltyAmountKsh: 0,
   allowManualRentPosting: true,
   allowManualUtilityPosting: true,
   wifiAccessMode: "disabled" as WifiAccessMode
@@ -115,8 +128,12 @@ function mapConfig(value: BuildingConfiguration): BuildingConfigurationRecord {
     defaultWaterFixedChargeKsh: value.defaultWaterFixedChargeKsh,
     defaultElectricityFixedChargeKsh: value.defaultElectricityFixedChargeKsh,
     defaultCombinedUtilityChargeKsh: value.defaultCombinedUtilityChargeKsh,
+    defaultMonthlyRentKsh: value.defaultMonthlyRentKsh,
+    defaultRentDueDay: value.defaultRentDueDay,
     utilityBalanceVisibleDays: value.utilityBalanceVisibleDays,
     rentGraceDays: value.rentGraceDays,
+    lateRentPenaltyEnabled: value.lateRentPenaltyEnabled,
+    lateRentPenaltyAmountKsh: value.lateRentPenaltyAmountKsh,
     allowManualRentPosting: value.allowManualRentPosting,
     allowManualUtilityPosting: value.allowManualUtilityPosting,
     wifiAccessMode: value.wifiAccessMode,
@@ -163,7 +180,7 @@ export function toPaymentAccessRecord(
 export class BuildingConfigurationService {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async ensureDefaultsForBuildings(buildings: Building[]): Promise<void> {
+  async ensureDefaultsForBuildings(buildings: Array<Pick<Building, "id">>): Promise<void> {
     if (buildings.length === 0) {
       return;
     }
@@ -272,6 +289,18 @@ export class BuildingConfigurationService {
       input.defaultCombinedUtilityChargeKsh == null
         ? input.defaultCombinedUtilityChargeKsh
         : Math.max(0, Math.round(Number(input.defaultCombinedUtilityChargeKsh) || 0));
+    const normalizedDefaultMonthlyRentKsh =
+      input.defaultMonthlyRentKsh == null
+        ? input.defaultMonthlyRentKsh
+        : Math.max(0, Math.round(Number(input.defaultMonthlyRentKsh) || 0));
+    const normalizedDefaultRentDueDay =
+      input.defaultRentDueDay == null
+        ? input.defaultRentDueDay
+        : Math.min(31, Math.max(1, Math.round(Number(input.defaultRentDueDay) || 1)));
+    const normalizedLateRentPenaltyAmountKsh =
+      input.lateRentPenaltyAmountKsh == null
+        ? input.lateRentPenaltyAmountKsh
+        : Math.max(0, Math.round(Number(input.lateRentPenaltyAmountKsh) || 0));
 
     const row = await this.prisma.buildingConfiguration.upsert({
       where: { buildingId },
@@ -282,6 +311,9 @@ export class BuildingConfigurationService {
         defaultWaterFixedChargeKsh: normalizedDefaultWaterFixedChargeKsh,
         defaultElectricityFixedChargeKsh: normalizedDefaultElectricityFixedChargeKsh,
         defaultCombinedUtilityChargeKsh: normalizedDefaultCombinedUtilityChargeKsh,
+        defaultMonthlyRentKsh: normalizedDefaultMonthlyRentKsh,
+        defaultRentDueDay: normalizedDefaultRentDueDay,
+        lateRentPenaltyAmountKsh: normalizedLateRentPenaltyAmountKsh,
         updatedByRole: actor?.role ?? null,
         updatedByUserId: actor?.userId ?? null,
         note: input.note?.trim() || null
@@ -295,6 +327,9 @@ export class BuildingConfigurationService {
         defaultWaterFixedChargeKsh: normalizedDefaultWaterFixedChargeKsh,
         defaultElectricityFixedChargeKsh: normalizedDefaultElectricityFixedChargeKsh,
         defaultCombinedUtilityChargeKsh: normalizedDefaultCombinedUtilityChargeKsh,
+        defaultMonthlyRentKsh: normalizedDefaultMonthlyRentKsh,
+        defaultRentDueDay: normalizedDefaultRentDueDay,
+        lateRentPenaltyAmountKsh: normalizedLateRentPenaltyAmountKsh,
         updatedByRole: actor?.role,
         updatedByUserId: actor?.userId,
         note: input.note?.trim() || undefined

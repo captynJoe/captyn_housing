@@ -49,7 +49,7 @@ async function checkSession() {
   try {
     const payload = await requestJson("/api/auth/admin/session");
     if (payload.data?.role) {
-      window.location.href = "/admin";
+      window.location.href = "/landlord";
       return true;
     }
   } catch (_error) {
@@ -89,7 +89,7 @@ async function signIn(event) {
     });
 
     setStatus(`Signed in as ${payload.data?.role ?? "admin"}. Redirecting...`);
-    window.location.href = "/admin";
+    window.location.href = "/landlord";
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to sign in.";

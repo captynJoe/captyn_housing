@@ -16,16 +16,17 @@ import type {
   ResolveIncidentInput
 } from "../validation/schemas.js";
 
+const activeHouseUnitsInclude = {
+  where: { isActive: true },
+  orderBy: { houseNumber: "asc" as const }
+} satisfies Prisma.HouseUnitFindManyArgs;
+
 type BuildingWithRelations = Prisma.BuildingGetPayload<{
   include: {
     incidents: true;
     maintenanceRecords: true;
     vacancySnapshots: true;
-    houseUnits: {
-      orderBy: {
-        houseNumber: "asc";
-      };
-    };
+    houseUnits: typeof activeHouseUnitsInclude;
   };
 }>;
 
@@ -107,7 +108,7 @@ export class PrismaBuildingRepository implements BuildingRepository {
         incidents: { orderBy: { createdAt: "desc" } },
         maintenanceRecords: { orderBy: { createdAt: "desc" } },
         vacancySnapshots: { orderBy: { movedOutAt: "desc" } },
-        houseUnits: { orderBy: { houseNumber: "asc" } }
+        houseUnits: activeHouseUnitsInclude
       },
       orderBy: { createdAt: "desc" }
     });
@@ -122,7 +123,7 @@ export class PrismaBuildingRepository implements BuildingRepository {
         incidents: { orderBy: { createdAt: "desc" } },
         maintenanceRecords: { orderBy: { createdAt: "desc" } },
         vacancySnapshots: { orderBy: { movedOutAt: "desc" } },
-        houseUnits: { orderBy: { houseNumber: "asc" } }
+        houseUnits: activeHouseUnitsInclude
       }
     });
 
@@ -175,7 +176,7 @@ export class PrismaBuildingRepository implements BuildingRepository {
         incidents: true,
         maintenanceRecords: true,
         vacancySnapshots: true,
-        houseUnits: { orderBy: { houseNumber: "asc" } }
+        houseUnits: activeHouseUnitsInclude
       }
     });
 
@@ -195,7 +196,7 @@ export class PrismaBuildingRepository implements BuildingRepository {
         incidents: { orderBy: { createdAt: "desc" } },
         maintenanceRecords: { orderBy: { createdAt: "desc" } },
         vacancySnapshots: { orderBy: { movedOutAt: "desc" } },
-        houseUnits: { orderBy: { houseNumber: "asc" } }
+        houseUnits: activeHouseUnitsInclude
       }
     }).catch((error: unknown) => {
       if (
@@ -234,7 +235,7 @@ export class PrismaBuildingRepository implements BuildingRepository {
         incidents: { orderBy: { createdAt: "desc" } },
         maintenanceRecords: { orderBy: { createdAt: "desc" } },
         vacancySnapshots: { orderBy: { movedOutAt: "desc" } },
-        houseUnits: { orderBy: { houseNumber: "asc" } }
+        houseUnits: activeHouseUnitsInclude
       }
     });
 
@@ -242,24 +243,50 @@ export class PrismaBuildingRepository implements BuildingRepository {
       return undefined;
     }
 
-    const existingSet = new Set(existing.houseUnits.map((item) => item.houseNumber));
-    const addedHouseNumbers = normalizedHouseNumbers.filter(
-      (houseNumber) => !existingSet.has(houseNumber)
+    const allUnits = await this.prisma.houseUnit.findMany({
+      where: { buildingId },
+      select: { houseNumber: true, isActive: true }
+    });
+    const unitByHouseNumber = new Map(
+      allUnits.map((item) => [item.houseNumber, item])
     );
+    const reactivatedHouseNumbers = normalizedHouseNumbers.filter((houseNumber) => {
+      const unit = unitByHouseNumber.get(houseNumber);
+      return unit && !unit.isActive;
+    });
+    const newHouseNumbers = normalizedHouseNumbers.filter(
+      (houseNumber) => !unitByHouseNumber.has(houseNumber)
+    );
+    const addedHouseNumbers = [
+      ...reactivatedHouseNumbers,
+      ...newHouseNumbers
+    ];
 
     if (addedHouseNumbers.length > 0) {
       await this.prisma.$transaction(async (tx) => {
-        await tx.houseUnit.createMany({
-          data: addedHouseNumbers.map((houseNumber) => ({
-            buildingId,
-            houseNumber,
-            isActive: true
-          })),
-          skipDuplicates: true
-        });
+        if (reactivatedHouseNumbers.length > 0) {
+          await tx.houseUnit.updateMany({
+            where: {
+              buildingId,
+              houseNumber: { in: reactivatedHouseNumbers }
+            },
+            data: { isActive: true }
+          });
+        }
+
+        if (newHouseNumbers.length > 0) {
+          await tx.houseUnit.createMany({
+            data: newHouseNumbers.map((houseNumber) => ({
+              buildingId,
+              houseNumber,
+              isActive: true
+            })),
+            skipDuplicates: true
+          });
+        }
 
         const totalUnits = await tx.houseUnit.count({
-          where: { buildingId }
+          where: { buildingId, isActive: true }
         });
 
         await tx.building.update({
@@ -277,7 +304,7 @@ export class PrismaBuildingRepository implements BuildingRepository {
         incidents: { orderBy: { createdAt: "desc" } },
         maintenanceRecords: { orderBy: { createdAt: "desc" } },
         vacancySnapshots: { orderBy: { movedOutAt: "desc" } },
-        houseUnits: { orderBy: { houseNumber: "asc" } }
+        houseUnits: activeHouseUnitsInclude
       }
     });
 
@@ -330,7 +357,7 @@ export class PrismaBuildingRepository implements BuildingRepository {
       });
 
       const totalUnits = await tx.houseUnit.count({
-        where: { buildingId }
+        where: { buildingId, isActive: true }
       });
 
       await tx.building.update({
@@ -347,7 +374,7 @@ export class PrismaBuildingRepository implements BuildingRepository {
         incidents: { orderBy: { createdAt: "desc" } },
         maintenanceRecords: { orderBy: { createdAt: "desc" } },
         vacancySnapshots: { orderBy: { movedOutAt: "desc" } },
-        houseUnits: { orderBy: { houseNumber: "asc" } }
+        houseUnits: activeHouseUnitsInclude
       }
     });
 
@@ -368,7 +395,7 @@ export class PrismaBuildingRepository implements BuildingRepository {
         incidents: { orderBy: { createdAt: "desc" } },
         maintenanceRecords: { orderBy: { createdAt: "desc" } },
         vacancySnapshots: { orderBy: { movedOutAt: "desc" } },
-        houseUnits: { orderBy: { houseNumber: "asc" } }
+        houseUnits: activeHouseUnitsInclude
       }
     });
 

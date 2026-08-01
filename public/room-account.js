@@ -2,8 +2,14 @@ import {
   applyDocumentBranding,
   getLandlordPortalTitle,
   getLandlordShellBrand
-} from "./portal-branding.js";
+} from "./portal-branding.js?v=20260521b";
 import { notifyError, notifyStatus } from "./notifications.js";
+import {
+  createUploadedImageGallery,
+  renderSelectedImagePreviews,
+  uploadImageFiles,
+  validateImageFiles
+} from "./media-upload.js";
 
 const roomAccountTagEl = document.getElementById("room-account-tag");
 const roomAccountTitleEl = document.getElementById("room-account-title");
@@ -46,13 +52,42 @@ const roomBillingHoldEndEl = document.getElementById("room-billing-hold-end");
 const roomBillingHoldReasonEl = document.getElementById("room-billing-hold-reason");
 const roomBillingHoldSubmitEl = document.getElementById("room-billing-hold-submit");
 const roomBillingHoldsEl = document.getElementById("room-billing-holds");
+const roomManagementStatusEl = document.getElementById("room-management-status");
+const roomAgreementFormEl = document.getElementById("room-agreement-form");
+const roomAgreementStateEl = document.getElementById("room-agreement-state");
+const roomAgreementSubmitEl = document.getElementById("room-agreement-submit");
+const roomRentSetupFormEl = document.getElementById("room-rent-setup-form");
+const roomRentSetupStateEl = document.getElementById("room-rent-setup-state");
+const roomRentSetupSubmitEl = document.getElementById("room-rent-setup-submit");
+const roomRentDueDayDefaultActionEl = document.getElementById(
+  "room-rent-due-day-default-action"
+);
+const roomIdentityDocumentEl = document.getElementById("room-identity-document");
+const roomIdentityDocumentPreviewEl = document.getElementById("room-identity-document-preview");
+const roomBalanceConfirmBackdropEl = document.getElementById(
+  "room-balance-confirm-backdrop"
+);
+const roomBalanceConfirmModalEl = document.getElementById("room-balance-confirm-modal");
+const roomBalanceConfirmMessageEl = document.getElementById(
+  "room-balance-confirm-message"
+);
+const roomBalanceConfirmValuesEl = document.getElementById(
+  "room-balance-confirm-values"
+);
+const roomBalanceConfirmCancelEl = document.getElementById(
+  "room-balance-confirm-cancel"
+);
+const roomBalanceConfirmApplyEl = document.getElementById("room-balance-confirm-apply");
 
 const state = {
   buildingId: "",
   houseNumber: "",
   role: "-",
   loading: false,
-  data: null
+  formSaving: false,
+  data: null,
+  balanceConfirmResolve: null,
+  balanceConfirmPreviousFocus: null
 };
 
 function escapeHtml(value) {
@@ -140,6 +175,260 @@ function formatDateOnly(value) {
   }).format(date);
 }
 
+function toDateInputValue(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    date.getUTCDate()
+  ).padStart(2, "0")}`;
+}
+
+function dateInputToIso(value) {
+  const normalized = toDateInputValue(value);
+  return normalized ? `${normalized}T00:00:00.000Z` : "";
+}
+
+function numberToInputString(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? String(Math.max(0, Math.round(number))) : "";
+}
+
+function optionalNumberToInputString(value) {
+  if (value == null || value === "") {
+    return "";
+  }
+
+  return numberToInputString(value);
+}
+
+function toOptionalNumber(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return undefined;
+  }
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : undefined;
+}
+
+function setFormFieldPlaceholder(form, name, value) {
+  const field = form?.elements?.namedItem(name);
+  if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+    field.placeholder = String(value ?? "");
+  }
+}
+
+function closeBalanceConfirmModal(result) {
+  roomBalanceConfirmBackdropEl?.classList.add("hidden");
+  roomBalanceConfirmModalEl?.classList.add("hidden");
+  document.body.classList.remove("room-confirm-open");
+
+  const resolver = state.balanceConfirmResolve;
+  state.balanceConfirmResolve = null;
+  if (typeof resolver === "function") {
+    resolver(Boolean(result));
+  }
+
+  const previousFocus = state.balanceConfirmPreviousFocus;
+  state.balanceConfirmPreviousFocus = null;
+  if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
+    previousFocus.focus({ preventScroll: true });
+  }
+}
+
+function mountBalanceConfirmModal() {
+  if (!document.body) {
+    return;
+  }
+
+  if (roomBalanceConfirmBackdropEl instanceof HTMLElement) {
+    document.body.append(roomBalanceConfirmBackdropEl);
+  }
+
+  if (roomBalanceConfirmModalEl instanceof HTMLElement) {
+    roomBalanceConfirmModalEl.setAttribute("tabindex", "-1");
+    document.body.append(roomBalanceConfirmModalEl);
+  }
+}
+
+function confirmBalanceAdjustment({ currentBalanceKsh, nextBalanceKsh, targetLabel }) {
+  const fallbackMessage = `Update current balance for ${targetLabel} from ${formatCurrency(
+    currentBalanceKsh
+  )} to ${formatCurrency(nextBalanceKsh)}? This will immediately update the rent ledger.`;
+
+  if (
+    !(roomBalanceConfirmModalEl instanceof HTMLElement) ||
+    !(roomBalanceConfirmBackdropEl instanceof HTMLElement) ||
+    !(roomBalanceConfirmApplyEl instanceof HTMLButtonElement)
+  ) {
+    return Promise.resolve(window.confirm(fallbackMessage));
+  }
+
+  if (state.balanceConfirmResolve) {
+    closeBalanceConfirmModal(false);
+  }
+
+  return new Promise((resolve) => {
+    mountBalanceConfirmModal();
+    state.balanceConfirmResolve = resolve;
+    state.balanceConfirmPreviousFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (roomBalanceConfirmMessageEl instanceof HTMLElement) {
+      roomBalanceConfirmMessageEl.textContent =
+        `You are about to modify the current tenant balance for ${targetLabel}. ` +
+        "This updates the rent ledger immediately and changes the balance visible to the resident.";
+    }
+    if (roomBalanceConfirmValuesEl instanceof HTMLElement) {
+      roomBalanceConfirmValuesEl.replaceChildren();
+
+      [
+        ["Current balance", formatCurrency(currentBalanceKsh)],
+        ["New balance", formatCurrency(nextBalanceKsh)]
+      ].forEach(([label, value]) => {
+        const item = document.createElement("div");
+        const labelEl = document.createElement("span");
+        const valueEl = document.createElement("strong");
+        labelEl.textContent = label;
+        valueEl.textContent = value;
+        item.append(labelEl, valueEl);
+        roomBalanceConfirmValuesEl.append(item);
+      });
+    }
+
+    document.body.classList.add("room-confirm-open");
+    roomBalanceConfirmBackdropEl.classList.remove("hidden");
+    roomBalanceConfirmModalEl.classList.remove("hidden");
+    requestAnimationFrame(() => {
+      roomBalanceConfirmApplyEl.focus({ preventScroll: true });
+    });
+  });
+}
+
+function formatDueDayLabel(value) {
+  const day = toOptionalNumber(value);
+  return day == null ? "" : `Day ${day}`;
+}
+
+function formatGraceDaysLabel(value) {
+  const days = toOptionalNumber(value);
+  if (days == null) {
+    return "";
+  }
+
+  return `${days} day${days === 1 ? "" : "s"}`;
+}
+
+function formatRoomDefaultPlaceholder(value, formatter) {
+  if (value == null || value === "") {
+    return "Set";
+  }
+
+  return `Default: ${formatter(value)}`;
+}
+
+function getBuildingRentSetupUrl() {
+  const params = new URLSearchParams({
+    rentSetup: "1",
+    buildingId: state.buildingId
+  });
+  return `/landlord?${params.toString()}`;
+}
+
+function syncRentDueDayDefaultAction(room) {
+  if (!(roomRentDueDayDefaultActionEl instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  const buildingDefaultDay = toOptionalNumber(room?.buildingDefaultRentDueDay);
+  const roomDefaultDay = toOptionalNumber(
+    room?.roomDefaultRentDueDay ?? room?.roomDefaultDueDay
+  );
+  const hasDefaultLink = Boolean(state.buildingId);
+  const canOpenDefault = hasDefaultLink && canEditRentSetup();
+  roomRentDueDayDefaultActionEl.classList.toggle("hidden", !hasDefaultLink);
+  roomRentDueDayDefaultActionEl.disabled = !canOpenDefault || state.formSaving;
+
+  if (buildingDefaultDay != null) {
+    roomRentDueDayDefaultActionEl.textContent = `Building default: ${formatDueDayLabel(
+      buildingDefaultDay
+    )}`;
+    roomRentDueDayDefaultActionEl.title =
+      roomDefaultDay == null
+        ? "This room is using the building default. Click to edit the building rent setup."
+        : "Click to edit the building rent setup.";
+    return;
+  }
+
+  roomRentDueDayDefaultActionEl.textContent = "Set building default";
+  roomRentDueDayDefaultActionEl.title =
+    "Open the rent setup sheet to set the default due day for this building.";
+}
+
+function setManagementStatus(message) {
+  if (roomManagementStatusEl instanceof HTMLElement) {
+    roomManagementStatusEl.textContent = message;
+  }
+}
+
+function setPillText(element, message) {
+  if (element instanceof HTMLElement) {
+    element.textContent = message;
+  }
+}
+
+function setFormControlsEnabled(form, enabled) {
+  if (!(form instanceof HTMLFormElement)) {
+    return;
+  }
+
+  form
+    .querySelectorAll("input, select, textarea, button")
+    .forEach((element) => {
+      if (
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLSelectElement ||
+        element instanceof HTMLTextAreaElement ||
+        element instanceof HTMLButtonElement
+      ) {
+        element.disabled = !enabled;
+      }
+    });
+}
+
+function setFormFieldValue(form, name, value) {
+  const field = form?.elements?.namedItem(name);
+  if (
+    field instanceof HTMLInputElement ||
+    field instanceof HTMLSelectElement ||
+    field instanceof HTMLTextAreaElement
+  ) {
+    field.value = String(value ?? "");
+  }
+}
+
+function getFormFieldValue(form, name) {
+  const field = form?.elements?.namedItem(name);
+  if (
+    field instanceof HTMLInputElement ||
+    field instanceof HTMLSelectElement ||
+    field instanceof HTMLTextAreaElement
+  ) {
+    return String(field.value ?? "").trim();
+  }
+  return "";
+}
+
 function toBillingMonth(value) {
   const raw = String(value ?? "").trim();
   if (/^\d{4}-\d{2}$/.test(raw)) {
@@ -190,6 +479,9 @@ function formatPaymentProvider(value) {
   if (normalized === "mpesa") {
     return "M-PESA";
   }
+  if (normalized === "deposit_credit") {
+    return "Deposit credit";
+  }
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
@@ -197,16 +489,26 @@ function formatAuditActionLabel(value) {
   switch (String(value ?? "").trim()) {
     case "rent.payment.recorded":
       return "Rent payment recorded";
+    case "rent.payment.edited":
+      return "Rent payment edited";
     case "rent.payment.unrecorded":
       return "Rent payment unrecorded";
     case "utility.payment.recorded":
       return "Utility payment recorded";
+    case "utility.payment.edited":
+      return "Utility payment edited";
     case "utility.payment.unrecorded":
       return "Utility payment unrecorded";
     case "resident.removed":
       return "Resident removed";
     case "resident.balance.writeoff":
       return "Balance written off";
+    case "deposit.settlement.recorded":
+      return "Deposit settlement recorded";
+    case "deposit.refund.recorded":
+      return "Deposit refund recorded";
+    case "rent.current_month_paid.updated":
+      return "Paid this month updated";
     case "resident.debt.transferred":
       return "Debt transferred";
     case "room.removed":
@@ -305,11 +607,25 @@ function canUnrecordPayments() {
   return String(state.role ?? "").trim() !== "caretaker";
 }
 
-function renderUnrecordPaymentButton(action, payment, extraAttributes = {}) {
+function canEditPayment(payment) {
+  if (!canUnrecordPayments()) {
+    return false;
+  }
+
   const paymentId = String(payment?.id ?? "").trim();
   const provider = String(payment?.provider ?? "").trim().toLowerCase();
   const source = String(payment?.source ?? "").trim().toLowerCase();
-  if (!canUnrecordPayments() || !paymentId || (provider !== "cash" && source !== "manual")) {
+  return Boolean(paymentId && source === "manual" && provider && provider !== "mpesa");
+}
+
+function renderPaymentActionButtons(actionPrefix, payment, extraAttributes = {}) {
+  const paymentId = String(payment?.id ?? "").trim();
+  const provider = String(payment?.provider ?? "").trim().toLowerCase();
+  const source = String(payment?.source ?? "").trim().toLowerCase();
+  const editable = canEditPayment(payment);
+  const deletable =
+    canUnrecordPayments() && paymentId && (provider === "cash" || source === "manual");
+  if (!editable && !deletable) {
     return "-";
   }
 
@@ -317,18 +633,159 @@ function renderUnrecordPaymentButton(action, payment, extraAttributes = {}) {
     .map(([key, value]) => `data-${key}="${escapeHtml(value)}"`)
     .join(" ");
 
-  return `
-    <button
-      type="button"
-      class="btn-danger payment-unrecord-btn"
-      data-action="${escapeHtml(action)}"
-      data-payment-id="${escapeHtml(paymentId)}"
-      data-amount="${escapeHtml(formatCurrency(payment?.amountKsh ?? 0))}"
-      ${extra}
-    >
-      Unrecord
-    </button>
-  `;
+  const buttons = [];
+  if (editable) {
+    buttons.push(`
+      <button
+        type="button"
+        class="payment-edit-btn"
+        data-action="edit-${escapeHtml(actionPrefix)}-payment"
+        data-payment-id="${escapeHtml(paymentId)}"
+        data-amount-ksh="${escapeHtml(String(Number(payment?.amountKsh ?? 0)))}"
+        data-provider="${escapeHtml(String(payment?.provider ?? ""))}"
+        data-provider-reference="${escapeHtml(String(payment?.providerReference ?? ""))}"
+        data-billing-month="${escapeHtml(String(payment?.billingMonth ?? ""))}"
+        data-paid-at="${escapeHtml(String(payment?.paidAt ?? payment?.createdAt ?? ""))}"
+        data-note="${escapeHtml(String(payment?.note ?? ""))}"
+        ${extra}
+      >
+        Edit
+      </button>
+    `);
+  }
+  if (deletable) {
+    buttons.push(`
+      <button
+        type="button"
+        class="btn-danger payment-unrecord-btn"
+        data-action="unrecord-${escapeHtml(actionPrefix)}-payment"
+        data-payment-id="${escapeHtml(paymentId)}"
+        data-amount="${escapeHtml(formatCurrency(payment?.amountKsh ?? 0))}"
+        ${extra}
+      >
+        Delete
+      </button>
+    `);
+  }
+
+  return `<div class="resident-row-actions payment-row-actions">${buttons.join("")}</div>`;
+}
+
+function formatPromptDateTime(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return raw;
+  }
+
+  return new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60_000)
+    .toISOString()
+    .slice(0, 16);
+}
+
+function parsePromptDateTime(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  const normalized = raw.includes(" ") && !raw.includes("T") ? raw.replace(" ", "T") : raw;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toISOString();
+}
+
+function promptForPaymentEdit(button) {
+  const action = String(button?.dataset?.action ?? "").trim();
+  const currentAmount = Number(button?.dataset?.amountKsh ?? 0);
+  const currentProvider = String(button?.dataset?.provider ?? "cash").trim().toLowerCase();
+  const currentReference = String(button?.dataset?.providerReference ?? "").trim();
+  const currentBillingMonth = String(button?.dataset?.billingMonth ?? "").trim();
+  const currentPaidAt = String(button?.dataset?.paidAt ?? "").trim();
+  const currentNote = String(button?.dataset?.note ?? "").trim();
+
+  const amountRaw = window.prompt("Amount in KSh", String(currentAmount || ""));
+  if (amountRaw === null) {
+    return null;
+  }
+  const amountKsh = Math.round(Number(amountRaw.trim()));
+  if (!Number.isFinite(amountKsh) || amountKsh <= 0) {
+    throw new Error("Provide a valid payment amount greater than zero.");
+  }
+
+  const providerRaw = window.prompt(
+    "Provider (cash, bank, or card)",
+    currentProvider || "cash"
+  );
+  if (providerRaw === null) {
+    return null;
+  }
+  const provider = providerRaw.trim().toLowerCase();
+  if (!["cash", "bank", "card"].includes(provider)) {
+    throw new Error("Provider must be cash, bank, or card.");
+  }
+
+  const referenceRaw = window.prompt(
+    "Reference (optional for cash, required for bank/card)",
+    currentReference
+  );
+  if (referenceRaw === null) {
+    return null;
+  }
+  const providerReference = referenceRaw.trim();
+  if ((provider === "bank" || provider === "card") && !providerReference) {
+    throw new Error("Reference is required for bank or card payments.");
+  }
+
+  const paidAtRaw = window.prompt(
+    "Paid at (YYYY-MM-DDTHH:MM or full ISO time)",
+    formatPromptDateTime(currentPaidAt)
+  );
+  if (paidAtRaw === null) {
+    return null;
+  }
+  const paidAt = parsePromptDateTime(paidAtRaw);
+  if (paidAtRaw.trim() && !paidAt) {
+    throw new Error("Paid at must be a valid date and time.");
+  }
+
+  const billingMonthRaw = window.prompt(
+    "Billing month (YYYY-MM). Leave blank to keep current coverage month.",
+    currentBillingMonth
+  );
+  if (billingMonthRaw === null) {
+    return null;
+  }
+  const billingMonth = billingMonthRaw.trim();
+  if (billingMonth && !/^\d{4}-\d{2}$/.test(billingMonth)) {
+    throw new Error("Billing month must use YYYY-MM format.");
+  }
+
+  const payload = {
+    buildingId: state.buildingId,
+    amountKsh,
+    provider,
+    providerReference: providerReference || undefined,
+    billingMonth: billingMonth || undefined,
+    paidAt: paidAt || undefined
+  };
+
+  if (action === "edit-utility-payment") {
+    const noteRaw = window.prompt("Note (optional)", currentNote);
+    if (noteRaw === null) {
+      return null;
+    }
+    payload.note = noteRaw.trim() || undefined;
+  }
+
+  return payload;
 }
 
 function setStatus(message) {
@@ -390,13 +847,13 @@ function describeChargeSource(source, utilityBillingMode) {
       };
     case "room_custom_combined":
       return {
-        label: "Room custom amount",
-        detail: "This room overrides the building-level combined utility charge."
+        label: "Room default",
+        detail: "This room has its own normal combined utility charge."
       };
     case "monthly_override_combined":
       return {
-        label: "Month override",
-        detail: "This room is following the selected month override because no room custom amount is set."
+        label: "Monthly adjustment",
+        detail: "This room is following this month's building adjustment because no room default is set."
       };
     case "building_default_combined":
       return {
@@ -414,7 +871,7 @@ function describeChargeSource(source, utilityBillingMode) {
           String(utilityBillingMode ?? "").trim() === "combined_charge"
             ? "Needs combined-charge setup"
             : "Needs charge setup",
-        detail: "Add meters, fixed charges, or a custom combined amount before relying on recurring billing."
+        detail: "Add meters, fixed charges, or a room default amount before relying on recurring billing."
       };
   }
 }
@@ -695,6 +1152,187 @@ function renderProfile(payload) {
     .join("");
 }
 
+function getAgreementState(payload = state.data) {
+  return payload?.agreementState && typeof payload.agreementState === "object"
+    ? payload.agreementState
+    : {};
+}
+
+function getAgreement(payload = state.data) {
+  return getAgreementState(payload).agreement ?? null;
+}
+
+function getExistingIdentityDocumentUrls(payload = state.data) {
+  const urls = getAgreement(payload)?.identityDocumentUrls;
+  return Array.isArray(urls)
+    ? urls.map((item) => String(item ?? "").trim()).filter(Boolean).slice(0, 4)
+    : [];
+}
+
+function canEditTenantDetails(payload = state.data) {
+  return (
+    String(state.role ?? "").trim() !== "caretaker" &&
+    Boolean(getAgreementState(payload).hasActiveResident || payload?.room?.hasActiveResident)
+  );
+}
+
+function canEditRentSetup() {
+  return String(state.role ?? "").trim() !== "caretaker";
+}
+
+function renderIdentityDocumentPreview() {
+  if (!(roomIdentityDocumentPreviewEl instanceof HTMLElement)) {
+    return;
+  }
+
+  roomIdentityDocumentPreviewEl.replaceChildren();
+  const existingUrls = getExistingIdentityDocumentUrls();
+  const existingGallery = createUploadedImageGallery(existingUrls, {
+    linkLabel: "Open ID photo"
+  });
+  if (existingGallery) {
+    roomIdentityDocumentPreviewEl.append(existingGallery);
+  }
+
+  const selectedPreview = document.createElement("div");
+  roomIdentityDocumentPreviewEl.append(selectedPreview);
+  renderSelectedImagePreviews(selectedPreview, roomIdentityDocumentEl?.files, {
+    emptyText:
+      existingUrls.length > 0
+        ? "No new ID photos selected."
+        : "No ID photo saved yet."
+  });
+}
+
+function renderManagementForms(payload) {
+  const room = payload?.room ?? {};
+  const agreementState = getAgreementState(payload);
+  const agreement = agreementState.agreement ?? {};
+  const buildingConfiguration = payload?.buildingConfiguration ?? {};
+  const hasActiveResident = Boolean(agreementState.hasActiveResident || room.hasActiveResident);
+  const canEditAgreement = canEditTenantDetails(payload);
+  const canEditRent = canEditRentSetup();
+
+  setManagementStatus(
+    hasActiveResident
+      ? "Edit the resident profile and rent setup from this room account."
+      : "This room has no active resident. Rent setup can be prepared, but tenant details unlock after assignment."
+  );
+  setPillText(
+    roomAgreementStateEl,
+    hasActiveResident ? (canEditAgreement ? "Editable" : "Read only") : "Vacant"
+  );
+  setPillText(roomRentSetupStateEl, canEditRent ? "Editable" : "Read only");
+
+  if (roomAgreementFormEl instanceof HTMLFormElement) {
+    setFormFieldValue(roomAgreementFormEl, "identityType", agreement.identityType ?? "");
+    setFormFieldValue(roomAgreementFormEl, "identityNumber", agreement.identityNumber ?? "");
+    setFormFieldValue(roomAgreementFormEl, "occupationStatus", agreement.occupationStatus ?? "");
+    setFormFieldValue(roomAgreementFormEl, "occupationLabel", agreement.occupationLabel ?? "");
+    setFormFieldValue(roomAgreementFormEl, "organizationName", agreement.organizationName ?? "");
+    setFormFieldValue(
+      roomAgreementFormEl,
+      "organizationLocation",
+      agreement.organizationLocation ?? ""
+    );
+    setFormFieldValue(
+      roomAgreementFormEl,
+      "studentRegistrationNumber",
+      agreement.studentRegistrationNumber ?? ""
+    );
+    setFormFieldValue(roomAgreementFormEl, "sponsorName", agreement.sponsorName ?? "");
+    setFormFieldValue(roomAgreementFormEl, "sponsorPhone", agreement.sponsorPhone ?? "");
+    setFormFieldValue(
+      roomAgreementFormEl,
+      "emergencyContactName",
+      agreement.emergencyContactName ?? ""
+    );
+    setFormFieldValue(
+      roomAgreementFormEl,
+      "emergencyContactPhone",
+      agreement.emergencyContactPhone ?? ""
+    );
+    setFormFieldValue(
+      roomAgreementFormEl,
+      "leaseStartDate",
+      toDateInputValue(agreement.leaseStartDate)
+    );
+    setFormFieldValue(
+      roomAgreementFormEl,
+      "leaseEndDate",
+      toDateInputValue(agreement.leaseEndDate)
+    );
+    setFormFieldValue(roomAgreementFormEl, "specialTerms", agreement.specialTerms ?? "");
+    if (roomIdentityDocumentEl instanceof HTMLInputElement) {
+      roomIdentityDocumentEl.value = "";
+    }
+    setFormControlsEnabled(roomAgreementFormEl, canEditAgreement);
+    if (roomAgreementSubmitEl instanceof HTMLButtonElement) {
+      roomAgreementSubmitEl.disabled = !canEditAgreement || state.formSaving;
+    }
+  }
+
+  if (roomRentSetupFormEl instanceof HTMLFormElement) {
+    setFormFieldValue(
+      roomRentSetupFormEl,
+      "monthlyRentKsh",
+      optionalNumberToInputString(room.roomDefaultMonthlyRentKsh)
+    );
+    setFormFieldPlaceholder(
+      roomRentSetupFormEl,
+      "monthlyRentKsh",
+      formatRoomDefaultPlaceholder(room.buildingDefaultMonthlyRentKsh, formatCurrency)
+    );
+    setFormFieldValue(
+      roomRentSetupFormEl,
+      "balanceKsh",
+      numberToInputString(room.rentBalanceKsh)
+    );
+    setFormFieldValue(roomRentSetupFormEl, "dueDate", toDateInputValue(room.rentDueDate));
+    setFormFieldValue(
+      roomRentSetupFormEl,
+      "paymentDueDay",
+      optionalNumberToInputString(room.roomDefaultRentDueDay ?? room.roomDefaultDueDay)
+    );
+    setFormFieldPlaceholder(
+      roomRentSetupFormEl,
+      "paymentDueDay",
+      formatRoomDefaultPlaceholder(room.buildingDefaultRentDueDay, formatDueDayLabel)
+    );
+    setFormFieldValue(
+      roomRentSetupFormEl,
+      "rentGraceDays",
+      optionalNumberToInputString(room.roomDefaultGraceDays)
+    );
+    setFormFieldPlaceholder(
+      roomRentSetupFormEl,
+      "rentGraceDays",
+      formatRoomDefaultPlaceholder(
+        room.buildingDefaultRentGraceDays ?? buildingConfiguration.rentGraceDays,
+        formatGraceDaysLabel
+      )
+    );
+    setFormFieldValue(
+      roomRentSetupFormEl,
+      "depositKsh",
+      numberToInputString(agreement.depositKsh ?? room.depositKsh)
+    );
+    setFormFieldValue(
+      roomRentSetupFormEl,
+      "depositPaidKsh",
+      numberToInputString(agreement.depositPaidKsh)
+    );
+    setFormFieldValue(roomRentSetupFormEl, "note", "");
+    setFormControlsEnabled(roomRentSetupFormEl, canEditRent);
+    if (roomRentSetupSubmitEl instanceof HTMLButtonElement) {
+      roomRentSetupSubmitEl.disabled = !canEditRent || state.formSaving;
+    }
+    syncRentDueDayDefaultAction(room);
+  }
+
+  renderIdentityDocumentPreview();
+}
+
 function renderAnomalies(payload) {
   if (!(roomAnomaliesEl instanceof HTMLElement)) {
     return;
@@ -752,7 +1390,7 @@ function renderAnomalies(payload) {
 
   if (String(chargeSetup?.source ?? "").trim() === "unconfigured") {
     anomalies.push(
-      "This room still needs a reliable utility charge rule. Add meters, a room custom amount, or a building default before future months post."
+      "This room still needs a reliable utility charge rule. Add meters, a room default amount, or a building default before future months post."
     );
   }
 
@@ -783,7 +1421,7 @@ function renderUtilityBills(payload) {
 
   if (rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="7">No utility bills recorded for this room.</td>';
+    row.innerHTML = '<td colspan="8">No utility bills recorded for this room.</td>';
     roomBillsBodyEl.append(row);
     return;
   }
@@ -804,6 +1442,7 @@ function renderUtilityBills(payload) {
     row.innerHTML = `
       <td>${escapeHtml(utilityTypeLabel(item?.utilityType))}</td>
       <td>${escapeHtml(formatBillingMonth(item?.billingMonth))}</td>
+      <td>${escapeHtml(formatDateTime(item?.createdAt))}</td>
       <td>${escapeHtml(formatCurrency(item?.amountKsh ?? 0))}</td>
       <td>${escapeHtml(formatCurrency(item?.balanceKsh ?? 0))}</td>
       <td>${escapeHtml(formatDateTime(item?.dueDate))}</td>
@@ -824,7 +1463,7 @@ function renderRentPayments(payload) {
 
   if (rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="6">No rent payments recorded for this room.</td>';
+    row.innerHTML = '<td colspan="7">No rent payments recorded for this room.</td>';
     roomRentPaymentsBodyEl.append(row);
     return;
   }
@@ -833,11 +1472,12 @@ function renderRentPayments(payload) {
     const row = document.createElement("tr");
     row.innerHTML = `
       <td>${escapeHtml(formatBillingMonth(item?.billingMonth))}</td>
+      <td>${escapeHtml(formatDateTime(item?.createdAt || item?.paidAt))}</td>
       <td>${escapeHtml(formatPaymentProvider(item?.provider))}</td>
       <td>${escapeHtml(item?.providerReference || "-")}</td>
       <td>${escapeHtml(formatCurrency(item?.amountKsh ?? 0))}</td>
       <td>${escapeHtml(formatDateTime(item?.paidAt || item?.createdAt))}</td>
-      <td>${renderUnrecordPaymentButton("unrecord-rent-payment", item)}</td>
+      <td>${renderPaymentActionButtons("rent", item)}</td>
     `;
     roomRentPaymentsBodyEl.append(row);
   });
@@ -853,7 +1493,7 @@ function renderUtilityPayments(payload) {
 
   if (rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="7">No utility payments recorded for this room.</td>';
+    row.innerHTML = '<td colspan="8">No utility payments recorded for this room.</td>';
     roomPaymentsBodyEl.append(row);
     return;
   }
@@ -863,11 +1503,12 @@ function renderUtilityPayments(payload) {
     row.innerHTML = `
       <td>${escapeHtml(utilityTypeLabel(item?.utilityType))}</td>
       <td>${escapeHtml(formatUtilityPaymentCoverage(item))}</td>
+      <td>${escapeHtml(formatDateTime(item?.createdAt || item?.paidAt))}</td>
       <td>${escapeHtml(formatPaymentProvider(item?.provider))}</td>
       <td>${escapeHtml(item?.providerReference || item?.note || "-")}</td>
       <td>${escapeHtml(formatCurrency(item?.amountKsh ?? 0))}</td>
       <td>${escapeHtml(formatDateTime(item?.paidAt || item?.createdAt))}</td>
-      <td>${renderUnrecordPaymentButton("unrecord-utility-payment", item, {
+      <td>${renderPaymentActionButtons("utility", item, {
         "utility-type": String(item?.utilityType ?? "")
       })}</td>
     `;
@@ -990,6 +1631,7 @@ function renderRoomAccount(payload) {
   }
 
   renderMetrics(payload);
+  renderManagementForms(payload);
   renderChargeSetup(payload);
   renderProfile(payload);
   renderBillingHolds(payload);
@@ -1147,10 +1789,317 @@ async function cancelBillingHold(button) {
   }
 }
 
-async function ensureSession() {
-  const payload = await requestJson("/api/auth/landlord/session");
-  state.role = payload?.data?.role || "landlord";
-  setStatus(`Signed in as ${formatRoleLabel(state.role)}. Loading room account...`);
+function normalizeOptionalString(value) {
+  const normalized = String(value ?? "").trim();
+  return normalized || undefined;
+}
+
+function buildAgreementPayloadFromRecord(overrides = {}) {
+  const agreement = getAgreement() ?? {};
+  return {
+    identityType: agreement.identityType || undefined,
+    identityNumber: agreement.identityNumber || undefined,
+    identityDocumentUrls: getExistingIdentityDocumentUrls(),
+    occupationStatus: agreement.occupationStatus || undefined,
+    occupationLabel: agreement.occupationLabel || undefined,
+    organizationName: agreement.organizationName || undefined,
+    organizationLocation: agreement.organizationLocation || undefined,
+    studentRegistrationNumber: agreement.studentRegistrationNumber || undefined,
+    sponsorName: agreement.sponsorName || undefined,
+    sponsorPhone: agreement.sponsorPhone || undefined,
+    emergencyContactName: agreement.emergencyContactName || undefined,
+    emergencyContactPhone: agreement.emergencyContactPhone || undefined,
+    leaseStartDate: toDateInputValue(agreement.leaseStartDate) || undefined,
+    leaseEndDate: toDateInputValue(agreement.leaseEndDate) || undefined,
+    monthlyRentKsh: toOptionalNumber(agreement.monthlyRentKsh),
+    depositKsh: toOptionalNumber(agreement.depositKsh),
+    depositPaidKsh: toOptionalNumber(agreement.depositPaidKsh),
+    paymentDueDay: toOptionalNumber(agreement.paymentDueDay),
+    specialTerms: agreement.specialTerms || undefined,
+    ...overrides
+  };
+}
+
+function createLandlordIdentityUploadRequest() {
+  return {
+    url: "/api/media/upload",
+    method: "POST",
+    fields: {
+      category: "resident_identity",
+      buildingId: state.buildingId,
+      houseNumber: state.houseNumber
+    }
+  };
+}
+
+function validateRoomIdentityFiles() {
+  if (!(roomIdentityDocumentEl instanceof HTMLInputElement)) {
+    return [];
+  }
+
+  return validateImageFiles(roomIdentityDocumentEl.files, {
+    maxFiles: 4,
+    maxSizeMb: 10
+  });
+}
+
+async function buildAgreementPayloadFromForm(form) {
+  const identityType = normalizeOptionalString(getFormFieldValue(form, "identityType"));
+  const identityNumber = normalizeOptionalString(getFormFieldValue(form, "identityNumber"));
+  const existingDocumentUrls = getExistingIdentityDocumentUrls();
+  const selectedFiles = validateRoomIdentityFiles();
+  const willHaveIdentityPhotos = existingDocumentUrls.length + selectedFiles.length > 0;
+
+  if ((identityType || identityNumber || willHaveIdentityPhotos) && (!identityType || !identityNumber)) {
+    throw new Error("Add both the ID type and ID number before saving ID photos.");
+  }
+
+  const uploadedDocumentUrls = await uploadImageFiles(selectedFiles, {
+    createUploadRequest: createLandlordIdentityUploadRequest
+  });
+  const identityDocumentUrls = [
+    ...existingDocumentUrls,
+    ...uploadedDocumentUrls
+  ].slice(0, 4);
+
+  return buildAgreementPayloadFromRecord({
+    identityType,
+    identityNumber,
+    identityDocumentUrls,
+    occupationStatus: normalizeOptionalString(getFormFieldValue(form, "occupationStatus")),
+    occupationLabel: normalizeOptionalString(getFormFieldValue(form, "occupationLabel")),
+    organizationName: normalizeOptionalString(getFormFieldValue(form, "organizationName")),
+    organizationLocation: normalizeOptionalString(getFormFieldValue(form, "organizationLocation")),
+    studentRegistrationNumber: normalizeOptionalString(
+      getFormFieldValue(form, "studentRegistrationNumber")
+    ),
+    sponsorName: normalizeOptionalString(getFormFieldValue(form, "sponsorName")),
+    sponsorPhone: normalizeOptionalString(getFormFieldValue(form, "sponsorPhone")),
+    emergencyContactName: normalizeOptionalString(getFormFieldValue(form, "emergencyContactName")),
+    emergencyContactPhone: normalizeOptionalString(getFormFieldValue(form, "emergencyContactPhone")),
+    leaseStartDate: normalizeOptionalString(getFormFieldValue(form, "leaseStartDate")),
+    leaseEndDate: normalizeOptionalString(getFormFieldValue(form, "leaseEndDate")),
+    specialTerms: normalizeOptionalString(getFormFieldValue(form, "specialTerms"))
+  });
+}
+
+function setRoomFormsSaving(saving) {
+  state.formSaving = saving;
+  const tenantEnabled = !saving && canEditTenantDetails();
+  const rentEnabled = !saving && canEditRentSetup();
+  setFormControlsEnabled(roomAgreementFormEl, tenantEnabled);
+  setFormControlsEnabled(roomRentSetupFormEl, rentEnabled);
+  if (roomAgreementSubmitEl instanceof HTMLButtonElement) {
+    roomAgreementSubmitEl.disabled = !tenantEnabled;
+  }
+  if (roomRentSetupSubmitEl instanceof HTMLButtonElement) {
+    roomRentSetupSubmitEl.disabled = !rentEnabled;
+  }
+}
+
+async function saveRoomAgreement(event) {
+  event.preventDefault();
+  if (state.loading || state.formSaving || !canEditTenantDetails()) {
+    return;
+  }
+
+  const form = event.currentTarget;
+  if (!(form instanceof HTMLFormElement)) {
+    return;
+  }
+
+  setRoomFormsSaving(true);
+  showError("");
+  setManagementStatus("Saving tenant details...");
+
+  try {
+    const payload = await buildAgreementPayloadFromForm(form);
+    await requestJson(
+      `/api/landlord/buildings/${encodeURIComponent(state.buildingId)}/houses/${encodeURIComponent(
+        state.houseNumber
+      )}/agreement`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      }
+    );
+    await loadRoomAccount();
+    setManagementStatus("Tenant details saved.");
+    notifyStatus("Tenant details saved.");
+  } catch (error) {
+    if (error?.status === 401) {
+      redirectToLogin();
+      return;
+    }
+
+    const message = error instanceof Error ? error.message : "Unable to save tenant details.";
+    showError(message);
+    setManagementStatus("Tenant details save failed.");
+  } finally {
+    setRoomFormsSaving(false);
+  }
+}
+
+async function saveRoomRentSetup(event) {
+  event.preventDefault();
+  if (state.loading || state.formSaving || !canEditRentSetup()) {
+    return;
+  }
+
+  const form = event.currentTarget;
+  if (!(form instanceof HTMLFormElement)) {
+    return;
+  }
+
+  const room = getRoom();
+  const roomDefaultMonthlyRentKsh = toOptionalNumber(
+    getFormFieldValue(form, "monthlyRentKsh")
+  );
+  const fallbackMonthlyRentKsh =
+    roomDefaultMonthlyRentKsh ??
+    toOptionalNumber(room.configuredMonthlyRentKsh ?? room.monthlyRentKsh) ??
+    0;
+  const requestedBalanceKsh = toOptionalNumber(getFormFieldValue(form, "balanceKsh"));
+  const currentBalanceKsh = toOptionalNumber(room.rentBalanceKsh) ?? 0;
+  const dueDate = dateInputToIso(getFormFieldValue(form, "dueDate"));
+  const roomDefaultPaymentDueDay = toOptionalNumber(
+    getFormFieldValue(form, "paymentDueDay")
+  );
+  const paymentDueDay =
+    roomDefaultPaymentDueDay ??
+    toOptionalNumber(room.configuredPaymentDueDay ?? room.paymentDueDay);
+  const roomDefaultGraceDays = toOptionalNumber(getFormFieldValue(form, "rentGraceDays"));
+  const depositKsh = toOptionalNumber(getFormFieldValue(form, "depositKsh"));
+  const depositPaidKsh = toOptionalNumber(getFormFieldValue(form, "depositPaidKsh"));
+  const note = normalizeOptionalString(getFormFieldValue(form, "note"));
+
+  if (!dueDate) {
+    showError("Choose the rent due date.");
+    return;
+  }
+
+  if (depositPaidKsh != null && depositKsh == null) {
+    showError("Set the agreed deposit before recording how much has been paid.");
+    return;
+  }
+
+  if (depositPaidKsh != null && depositKsh != null && depositPaidKsh > depositKsh) {
+    showError("Deposit paid cannot be more than the agreed deposit amount.");
+    return;
+  }
+
+  if (requestedBalanceKsh != null && requestedBalanceKsh !== currentBalanceKsh) {
+    const targetLabel =
+      String(room.residentName ?? "").trim() ||
+      `room ${normalizeHouse(room.houseNumber || state.houseNumber)}`;
+    const confirmed = await confirmBalanceAdjustment({
+      currentBalanceKsh,
+      nextBalanceKsh: requestedBalanceKsh,
+      targetLabel
+    });
+    if (!confirmed) {
+      setManagementStatus("Balance adjustment cancelled.");
+      return;
+    }
+  }
+
+  setRoomFormsSaving(true);
+  showError("");
+  setManagementStatus("Saving rent setup...");
+
+  try {
+    const rentSetupResponse = await requestJson(
+      `/api/landlord/buildings/${encodeURIComponent(state.buildingId)}/rent-setup-sheet`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          note,
+          rows: [
+            {
+              houseNumber: state.houseNumber,
+              monthlyRentKsh:
+                roomDefaultMonthlyRentKsh == null
+                  ? null
+                  : Math.round(roomDefaultMonthlyRentKsh),
+              paymentDueDay:
+                roomDefaultPaymentDueDay == null ? null : Math.round(roomDefaultPaymentDueDay),
+              graceDays:
+                roomDefaultGraceDays == null ? null : Math.round(roomDefaultGraceDays),
+              active: true,
+              note
+            }
+          ]
+        })
+      }
+    );
+    const savedSetupRow = Array.isArray(rentSetupResponse?.data?.rows)
+      ? rentSetupResponse.data.rows.find(
+          (item) => normalizeHouse(item.houseNumber) === normalizeHouse(state.houseNumber)
+        )
+      : null;
+    const monthlyRentKsh =
+      toOptionalNumber(savedSetupRow?.resolvedMonthlyRentKsh) ?? fallbackMonthlyRentKsh;
+    const resolvedPaymentDueDay =
+      toOptionalNumber(savedSetupRow?.resolvedDueDay) ?? paymentDueDay;
+    const balanceKsh = requestedBalanceKsh ?? currentBalanceKsh ?? monthlyRentKsh;
+
+    await requestJson(`/api/landlord/rent-due/${encodeURIComponent(state.houseNumber)}`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        buildingId: state.buildingId,
+        monthlyRentKsh,
+        balanceKsh,
+        dueDate,
+        note: note || "Room rent setup updated from room account."
+      })
+    });
+
+    if (getAgreementState().hasActiveResident) {
+      await requestJson(
+        `/api/landlord/buildings/${encodeURIComponent(state.buildingId)}/houses/${encodeURIComponent(
+          state.houseNumber
+        )}/agreement`,
+        {
+          method: "PUT",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify(
+            buildAgreementPayloadFromRecord({
+              monthlyRentKsh,
+              depositKsh,
+              depositPaidKsh,
+              paymentDueDay: resolvedPaymentDueDay
+            })
+          )
+        }
+      );
+    }
+
+    await loadRoomAccount();
+    setManagementStatus("Rent setup saved.");
+    notifyStatus("Rent setup saved.");
+  } catch (error) {
+    if (error?.status === 401) {
+      redirectToLogin();
+      return;
+    }
+
+    const message = error instanceof Error ? error.message : "Unable to save rent setup.";
+    showError(message);
+    setManagementStatus("Rent setup save failed.");
+  } finally {
+    setRoomFormsSaving(false);
+  }
 }
 
 async function loadRoomAccount() {
@@ -1267,6 +2216,70 @@ async function unrecordPayment(button) {
   }
 }
 
+async function editPayment(button) {
+  const action = String(button?.dataset?.action ?? "").trim();
+  const paymentId = String(button?.dataset?.paymentId ?? "").trim();
+  if (!paymentId || (action !== "edit-rent-payment" && action !== "edit-utility-payment")) {
+    return;
+  }
+
+  let payload;
+  try {
+    payload = promptForPaymentEdit(button);
+  } catch (error) {
+    showError(error instanceof Error ? error.message : "Unable to open payment editor.");
+    return;
+  }
+  if (!payload) {
+    return;
+  }
+
+  const utilityType = String(button?.dataset?.utilityType ?? "").trim();
+  if (action === "edit-utility-payment" && !utilityType) {
+    showError("Utility type is missing for this payment.");
+    return;
+  }
+
+  const roomPath = encodeURIComponent(state.houseNumber);
+  const paymentPath = encodeURIComponent(paymentId);
+  const url =
+    action === "edit-rent-payment"
+      ? `/api/landlord/rent/${roomPath}/payments/${paymentPath}`
+      : `/api/landlord/utilities/${encodeURIComponent(
+          utilityType
+        )}/${roomPath}/payments/${paymentPath}`;
+
+  setLoading(true);
+  showError("");
+  button.disabled = true;
+  setStatus("Saving payment changes...");
+
+  try {
+    await requestJson(url, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+    await loadRoomAccount();
+    setStatus("Payment changes saved.");
+  } catch (error) {
+    if (error?.status === 401) {
+      redirectToLogin();
+      return;
+    }
+
+    const message =
+      error instanceof Error ? error.message : "Unable to edit this payment.";
+    showError(message);
+    setStatus("Payment edit failed.");
+  } finally {
+    button.disabled = false;
+    setLoading(false);
+  }
+}
+
 function handlePaymentActionClick(event) {
   if (state.loading || !(event.target instanceof Element)) {
     return;
@@ -1277,7 +2290,14 @@ function handlePaymentActionClick(event) {
     return;
   }
 
-  void unrecordPayment(button);
+  if (button.dataset.action?.startsWith("edit-")) {
+    void editPayment(button);
+    return;
+  }
+
+  if (button.dataset.action?.startsWith("unrecord-")) {
+    void unrecordPayment(button);
+  }
 }
 
 function handleBillingHoldClick(event) {
@@ -1310,7 +2330,7 @@ async function init() {
     const route = parseRoomRoute();
     state.buildingId = route.buildingId;
     state.houseNumber = route.houseNumber;
-    await ensureSession();
+    setStatus("Loading room account...");
     await loadRoomAccount();
   } catch (error) {
     if (error?.status === 401) {
@@ -1344,6 +2364,81 @@ roomPaymentsBodyEl?.addEventListener("click", handlePaymentActionClick);
 roomBillingHoldScopeEl?.addEventListener("change", syncBillingHoldUtilityVisibility);
 roomBillingHoldFormEl?.addEventListener("submit", createBillingHold);
 roomBillingHoldsEl?.addEventListener("click", handleBillingHoldClick);
+roomAgreementFormEl?.addEventListener("submit", saveRoomAgreement);
+roomRentSetupFormEl?.addEventListener("submit", saveRoomRentSetup);
+roomRentDueDayDefaultActionEl?.addEventListener("click", (event) => {
+  event.preventDefault();
+  if (!state.buildingId) {
+    return;
+  }
+  window.location.href = getBuildingRentSetupUrl();
+});
+roomBalanceConfirmCancelEl?.addEventListener("click", () => {
+  closeBalanceConfirmModal(false);
+});
+roomBalanceConfirmBackdropEl?.addEventListener("click", () => {
+  closeBalanceConfirmModal(false);
+});
+roomBalanceConfirmApplyEl?.addEventListener("click", () => {
+  closeBalanceConfirmModal(true);
+});
+document.addEventListener(
+  "click",
+  (event) => {
+    if (
+      !(roomBalanceConfirmModalEl instanceof HTMLElement) ||
+      roomBalanceConfirmModalEl.classList.contains("hidden")
+    ) {
+      return;
+    }
+
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) {
+      return;
+    }
+
+    if (
+      target.closest("#room-balance-confirm-apply") instanceof HTMLElement
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeBalanceConfirmModal(true);
+      return;
+    }
+
+    if (
+      target.closest("#room-balance-confirm-cancel") instanceof HTMLElement ||
+      target.id === "room-balance-confirm-backdrop"
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeBalanceConfirmModal(false);
+    }
+  },
+  true
+);
+document.addEventListener("keydown", (event) => {
+  if (
+    event.key === "Escape" &&
+    roomBalanceConfirmModalEl instanceof HTMLElement &&
+    !roomBalanceConfirmModalEl.classList.contains("hidden")
+  ) {
+    event.preventDefault();
+    closeBalanceConfirmModal(false);
+  }
+});
+roomIdentityDocumentEl?.addEventListener("change", () => {
+  try {
+    validateRoomIdentityFiles();
+    renderIdentityDocumentPreview();
+  } catch (error) {
+    if (roomIdentityDocumentEl instanceof HTMLInputElement) {
+      roomIdentityDocumentEl.value = "";
+    }
+    renderIdentityDocumentPreview();
+    showError(error instanceof Error ? error.message : "Invalid ID photo.");
+  }
+});
 
 setDefaultBillingHoldMonths();
 syncBillingHoldUtilityVisibility();

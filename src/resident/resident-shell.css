@@ -540,19 +540,29 @@ html[data-captyn-ui-runtime="typescript"] body {
 
 .resident-auth-mode .hero.portal-header {
   grid-area: hero;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto auto;
   align-content: space-between;
   align-items: stretch;
-  min-height: 624px;
+  gap: 28px;
+  min-height: 560px;
   padding: 30px;
+  overflow: hidden;
   background: #102426 !important;
   color: #ffffff;
 }
 
+.resident-auth-mode .portal-copy {
+  min-width: 0;
+}
+
 .resident-auth-mode .portal-copy h1 {
-  max-width: 11ch;
+  max-width: 12ch;
   color: #ffffff;
-  font-size: clamp(2.5rem, 5vw, 4.9rem) !important;
-  line-height: 0.98;
+  font-size: clamp(2.25rem, 4vw, 3.65rem) !important;
+  line-height: 1;
+  word-break: normal;
 }
 
 .resident-auth-mode .portal-copy h1::after {
@@ -562,7 +572,7 @@ html[data-captyn-ui-runtime="typescript"] body {
 }
 
 .resident-auth-mode .resident-auth-subtitle {
-  max-width: 38ch;
+  max-width: 34ch;
   margin: 18px 0 0;
   color: #c7dfdc;
   font-size: 1rem;
@@ -577,11 +587,13 @@ html[data-captyn-ui-runtime="typescript"] body {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  margin-top: 32px;
+  width: 100%;
+  margin-top: 0;
 }
 
 .resident-auth-signal-grid article {
-  min-height: 92px;
+  min-width: 0;
+  min-height: 88px;
   padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
@@ -603,7 +615,7 @@ html[data-captyn-ui-runtime="typescript"] body {
 .resident-auth-signal-grid strong {
   margin-top: 8px;
   color: #ffffff;
-  font-size: 1rem;
+  font-size: 0.96rem;
   line-height: 1.25;
 }
 
@@ -750,6 +762,10 @@ html[data-captyn-ui-runtime="typescript"] body {
   .resident-auth-mode .portal-copy h1 {
     max-width: 100%;
     font-size: clamp(2rem, 12vw, 3rem) !important;
+  }
+
+  .resident-auth-mode .hero.portal-header {
+    gap: 22px;
   }
 
   .resident-auth-signal-grid,

@@ -1,0 +1,479 @@
+:root {
+  --captyn-ink: #17212b;
+  --captyn-muted: #5e6c7a;
+  --captyn-panel: rgba(255, 255, 255, 0.94);
+  --captyn-panel-strong: #ffffff;
+  --captyn-canvas: #f4f7f4;
+  --captyn-line: rgba(23, 33, 43, 0.13);
+  --captyn-blue: #0f7b76;
+  --captyn-blue-dark: #0a5f5a;
+  --captyn-teal: #168a7f;
+  --captyn-green: #23835a;
+  --captyn-amber: #b56d17;
+  --captyn-red: #c2413a;
+  --captyn-lilac: #6f5bd7;
+  --captyn-shadow: 0 16px 34px rgba(27, 44, 66, 0.11);
+
+  --ink-950: var(--captyn-ink);
+  --ink-900: var(--captyn-ink);
+  --ink-800: #263441;
+  --ink-700: var(--captyn-muted);
+  --ink-600: #647586;
+  --mist-100: #eef5f2;
+  --sand-100: #f7f1e7;
+  --teal-500: var(--captyn-teal);
+  --teal-600: var(--captyn-blue);
+  --teal-700: var(--captyn-blue-dark);
+  --danger-500: var(--captyn-red);
+  --danger-bg: #fff0ef;
+  --ok-600: var(--captyn-green);
+  --ok-bg: #e9f7f0;
+  --warn-700: var(--captyn-amber);
+  --warn-bg: #fff5e5;
+  --line: var(--captyn-line);
+  --radius-xl: 8px;
+  --radius-lg: 8px;
+  --radius-md: 8px;
+  --shadow: var(--captyn-shadow);
+}
+
+html {
+  background: var(--captyn-canvas);
+}
+
+body {
+  color: var(--captyn-ink);
+  font-family: Inter, "Aptos", "Segoe UI", Arial, sans-serif;
+  letter-spacing: 0;
+  background:
+    linear-gradient(rgba(15, 123, 118, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 140, 127, 0.042) 1px, transparent 1px),
+    linear-gradient(180deg, #fbfcf8 0%, #eef5f2 52%, #f8f4ec 100%) !important;
+  background-size: 32px 32px, 32px 32px, auto !important;
+}
+
+.backdrop,
+.ambient {
+  opacity: 0.34;
+  background-image:
+    linear-gradient(rgba(15, 123, 118, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 140, 127, 0.05) 1px, transparent 1px) !important;
+  background-size: 32px 32px !important;
+  mask-image: none;
+}
+
+.shell {
+  max-width: 1360px;
+}
+
+.hero,
+.panel,
+.panel-card,
+.feedback,
+.package-card,
+.metric-card,
+.status-chip,
+.card,
+.cctv-card,
+.feature-card,
+.steps,
+.user-panel,
+.room-billing-hold-card,
+.upload-preview-item,
+.empty-state {
+  border-radius: 8px !important;
+  border-color: var(--captyn-line) !important;
+  background: var(--captyn-panel) !important;
+  box-shadow: 0 12px 30px rgba(27, 44, 66, 0.08);
+}
+
+.hero h1,
+.panel-head h2,
+.section-head h2,
+.section-head h3,
+.section-head h4,
+.package-card h2,
+.package-card h3,
+.feature-card h3,
+.steps h2,
+.hero-panel h2,
+.landlord-navbar-title {
+  color: var(--captyn-ink);
+  font-family: Inter, "Aptos", "Segoe UI", Arial, sans-serif !important;
+  letter-spacing: 0;
+}
+
+.hero h1,
+.landlord-navbar-title {
+  font-size: clamp(1.55rem, 2vw, 2.2rem) !important;
+  line-height: 1.08;
+}
+
+.tag,
+.eyebrow,
+.brand,
+.feature-tag,
+.sidebar-label,
+.user-panel-title,
+.metric-card p,
+thead th,
+label {
+  color: var(--captyn-blue-dark) !important;
+  letter-spacing: 0.035em;
+}
+
+.subtitle,
+.status-text,
+.panel-note,
+.section-head p,
+.item-details,
+.ticket-details,
+.hero-panel ul,
+.feature-card p,
+tbody td {
+  color: var(--captyn-muted);
+}
+
+.utility-auto-month {
+  align-self: end;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  border: 1px solid rgba(32, 73, 118, 0.16);
+  border-radius: 8px;
+  background: rgba(15, 118, 110, 0.08);
+  padding: 0 12px;
+  font-weight: 700;
+  color: var(--captyn-blue-dark);
+}
+
+a,
+.home-link,
+.user-panel-link,
+.mode-pill,
+.module-tab {
+  color: var(--captyn-blue-dark);
+}
+
+button,
+.btn,
+.home-link,
+.mode-pill,
+.module-tab,
+.landlord-primary-cta,
+input,
+select,
+textarea {
+  border-radius: 8px !important;
+  letter-spacing: 0;
+}
+
+button,
+.btn-primary,
+.landlord-primary-cta,
+.home-link {
+  background: var(--captyn-blue) !important;
+  border-color: var(--captyn-blue) !important;
+  color: #fff !important;
+  box-shadow: 0 8px 18px rgba(15, 123, 118, 0.18);
+}
+
+button:hover,
+.btn-primary:hover,
+.landlord-primary-cta:hover,
+.home-link:hover {
+  background: var(--captyn-blue-dark) !important;
+  border-color: var(--captyn-blue-dark) !important;
+}
+
+button.ghost-btn,
+.ghost-btn,
+button[data-action="open-room-ledger"],
+button[data-action="open-resident-drawer"],
+button[data-action="view-ticket"] {
+  background: #fff !important;
+  color: var(--captyn-blue-dark) !important;
+  border-color: rgba(15, 123, 118, 0.24) !important;
+  box-shadow: none;
+}
+
+.btn-danger,
+button.btn-danger,
+button[data-action*="delete"],
+button[data-action*="remove"],
+button[data-action*="disable"] {
+  background: #fff !important;
+  color: var(--captyn-red) !important;
+  border-color: rgba(194, 65, 58, 0.32) !important;
+  box-shadow: none;
+}
+
+input,
+select,
+textarea {
+  background: #fff !important;
+  border-color: rgba(23, 33, 43, 0.18) !important;
+  color: var(--captyn-ink) !important;
+  box-shadow: inset 0 1px 0 rgba(23, 33, 43, 0.03);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: rgba(15, 123, 118, 0.62) !important;
+  box-shadow: 0 0 0 3px rgba(15, 123, 118, 0.13) !important;
+  outline: none;
+}
+
+.landlord-navbar-panel {
+  background: #ffffff !important;
+  border: 1px solid rgba(23, 33, 43, 0.12) !important;
+  position: sticky;
+  top: 12px;
+  z-index: 30;
+}
+
+.landlord-navbar-head {
+  align-items: center;
+}
+
+.landlord-navbar-tag {
+  color: var(--captyn-teal) !important;
+}
+
+.landlord-navbar-actions {
+  gap: 8px;
+}
+
+.landlord-global-search {
+  background: #f7fbf8 !important;
+  border: 1px solid rgba(15, 123, 118, 0.13) !important;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.landlord-workspace {
+  align-items: start;
+  gap: 14px;
+}
+
+.landlord-side-panel {
+  background: #10231f !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 18px 36px rgba(16, 35, 31, 0.18);
+  position: sticky;
+  top: 112px;
+}
+
+.landlord-side-panel,
+.landlord-side-panel * {
+  color: #edf7f2 !important;
+}
+
+.landlord-nav-btn {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: #dceee6 !important;
+  box-shadow: none;
+  min-height: 42px;
+  text-align: left;
+}
+
+.landlord-nav-btn:hover,
+.landlord-nav-btn.is-active {
+  background: rgba(255, 255, 255, 0.11) !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  color: #fff !important;
+}
+
+.landlord-nav-btn.is-active {
+  box-shadow: inset 3px 0 0 var(--captyn-teal);
+}
+
+.landlord-side-panel .landlord-panel-building-card,
+.landlord-side-panel .manager-focus-card,
+.landlord-side-panel .landlord-side-summary,
+.landlord-side-panel .landlord-focus-card {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+
+.metrics-grid,
+.landlord-dashboard-metrics,
+.daily-dashboard-metrics {
+  gap: 10px;
+}
+
+.metric-card,
+.landlord-daily-card,
+.resident-overview-card {
+  background: #fff !important;
+  border-color: rgba(23, 33, 43, 0.12) !important;
+  min-height: 108px;
+}
+
+.metric-card strong,
+.landlord-daily-card strong,
+.resident-overview-card strong,
+.landlord-summary-value {
+  color: var(--captyn-ink) !important;
+}
+
+.landlord-daily-card:nth-child(3n + 1),
+.metric-card:nth-child(3n + 1) {
+  border-top: 3px solid var(--captyn-blue) !important;
+}
+
+.landlord-daily-card:nth-child(3n + 2),
+.metric-card:nth-child(3n + 2) {
+  border-top: 3px solid var(--captyn-teal) !important;
+}
+
+.landlord-daily-card:nth-child(3n),
+.metric-card:nth-child(3n) {
+  border-top: 3px solid var(--captyn-amber) !important;
+}
+
+.table-wrap {
+  border: 1px solid rgba(23, 33, 43, 0.12);
+  border-radius: 8px;
+  background: #fff;
+}
+
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+thead th {
+  background: #f2f6f1 !important;
+  border-bottom: 1px solid rgba(23, 33, 43, 0.12) !important;
+  color: #344254 !important;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+tbody tr:nth-child(even) td {
+  background: rgba(244, 247, 241, 0.72);
+}
+
+tbody tr:hover td {
+  background: rgba(15, 123, 118, 0.06) !important;
+}
+
+.status-chip,
+.badge,
+.landlord-nav-badge,
+.room-status-chip {
+  border-radius: 999px !important;
+  background: #edf7f2 !important;
+  color: var(--captyn-blue-dark) !important;
+  border-color: rgba(15, 123, 118, 0.18) !important;
+}
+
+.landlord-sheet-modal,
+.landlord-drawer,
+.resident-drawer,
+.utility-setup-modal {
+  border-radius: 8px !important;
+  border: 1px solid rgba(23, 33, 43, 0.14) !important;
+  background: #fbfcf8 !important;
+  box-shadow: 0 26px 60px rgba(23, 33, 43, 0.24) !important;
+}
+
+.utility-setup-panel,
+.secondary-ledger-panel,
+details {
+  background: #fff !important;
+  border-color: rgba(23, 33, 43, 0.12) !important;
+}
+
+.landlord-ticket-response textarea,
+.ticket-response textarea {
+  min-height: 82px;
+}
+
+.error-box {
+  background: #fff0ef !important;
+  border-color: rgba(194, 65, 58, 0.32) !important;
+  color: #9f2f29 !important;
+}
+
+@media (max-width: 980px) {
+  .shell {
+    padding-inline: 10px;
+  }
+
+  .landlord-navbar-panel {
+    position: static;
+  }
+
+  .landlord-workspace {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .landlord-side-panel {
+    position: static;
+    padding: 10px;
+  }
+
+  .landlord-nav {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(120px, 1fr);
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 2px;
+  }
+
+  .landlord-nav-btn {
+    justify-content: center;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .landlord-global-search,
+  .landlord-navbar-actions,
+  .action-row,
+  .inline-fields,
+  .compact-fields,
+  .utility-setup-controls {
+    grid-template-columns: 1fr !important;
+  }
+
+  .landlord-navbar-actions > *,
+  .action-row > *,
+  .utility-setup-controls > * {
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  body {
+    background-size: 24px 24px, 24px 24px, auto !important;
+  }
+
+  .panel,
+  .package-card,
+  .metric-card,
+  .landlord-daily-card,
+  .resident-overview-card {
+    padding: 12px !important;
+  }
+
+  .landlord-navbar-title,
+  .hero h1 {
+    font-size: 1.45rem !important;
+  }
+
+  .table-wrap {
+    border-radius: 8px;
+  }
+
+  thead th,
+  tbody td {
+    font-size: 0.82rem;
+  }
+}

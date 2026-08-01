@@ -16,7 +16,7 @@ function markTypeScriptRuntime() {
   document.documentElement.dataset.captynUiRuntime = "typescript";
   document.body.classList.add("resident-ts-shell");
   window.__CAPTYN_RESIDENT_TS_RUNTIME__ = {
-    version: "resident-shell-2",
+    version: "resident-shell-3",
     legacyScript: LEGACY_RESIDENT_SCRIPT,
     loadedAt: new Date().toISOString()
   };

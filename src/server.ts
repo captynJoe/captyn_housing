@@ -44,6 +44,9 @@ import {
   type UserSupportPersistedState
 } from "./services/userSupportService.js";
 import {
+  createCaptynWifiIntegrationServiceFromEnv
+} from "./services/captynWifiIntegrationService.js";
+import {
   WifiAccessService,
   type WifiAccessPersistedState,
   type WifiPackage
@@ -2643,6 +2646,13 @@ async function bootstrap() {
       hotspotProfile: process.env.MIKROTIK_HOTSPOT_PROFILE
     }
   });
+
+  const captynWifiIntegrationService = createCaptynWifiIntegrationServiceFromEnv();
+  if (!captynWifiIntegrationService.enabled) {
+    console.warn(
+      "CAPTYN_WIFI_API_URL or CAPTYN_WIFI_INTEGRATION_TOKEN is not set. Housing Wi-Fi confirmations will not be forwarded to CAPTYN Wi-Fi."
+    );
+  }
 
   const adminAuthService = new AdminAuthService({
     landlordToken,
@@ -11081,7 +11091,20 @@ async function bootstrap() {
         return res.status(404).json({ error: "Payment not found" });
       }
 
-      return res.json({ data: payment });
+      const captynWifi =
+        parsed.status === "success"
+          ? await captynWifiIntegrationService.forwardConfirmedHousingWifiPayment(payment)
+          : { status: "disabled" as const, reason: "Payment was not successful." };
+
+      if (captynWifi.status === "failed") {
+        console.error("Failed to forward Housing Wi-Fi payment to CAPTYN Wi-Fi:", {
+          checkoutReference: payment.checkoutReference,
+          responseStatus: captynWifi.responseStatus,
+          error: captynWifi.error
+        });
+      }
+
+      return res.json({ data: payment, captynWifi });
     } catch (error) {
       return next(error);
     }

@@ -1,0 +1,718 @@
+// @ts-nocheck
+import { initPasswordVisibilityToggles } from "./password-visibility.js";
+
+const loginFormEl = document.getElementById("landlord-login-form");
+const identifierEl = document.getElementById("landlord-email");
+const ownerIdentifierLabelEl = document.getElementById("owner-identifier-label");
+const passwordEl = document.getElementById("landlord-password");
+const loginBtnEl = document.getElementById("landlord-login-btn");
+const loginStatusEl = document.getElementById("login-status");
+const loginErrorEl = document.getElementById("login-error");
+const landlordSecondaryErrorEl = document.getElementById("landlord-secondary-error");
+const ownerLoginFieldsEl = document.getElementById("owner-login-fields");
+const caretakerLoginFieldsEl = document.getElementById("caretaker-login-fields");
+const managerModeButtons = document.querySelectorAll("[data-manager-mode]");
+const caretakerPhoneEl = document.getElementById("caretaker-phone");
+const caretakerBuildingEl = document.getElementById("caretaker-building");
+const caretakerHouseNumberEl = document.getElementById("caretaker-house-number");
+const caretakerPasswordEl = document.getElementById("caretaker-password");
+const caretakerNewPasswordEl = document.getElementById("caretaker-new-password");
+const caretakerConfirmPasswordEl = document.getElementById("caretaker-confirm-password");
+const landlordPasswordChangeFormEl = document.getElementById(
+  "landlord-password-change-form"
+);
+const landlordNewPasswordEl = document.getElementById("landlord-new-password");
+const landlordConfirmPasswordEl = document.getElementById(
+  "landlord-confirm-password"
+);
+const landlordPasswordChangeBtnEl = document.getElementById(
+  "landlord-password-change-btn"
+);
+const landlordPasswordChangeErrorEl = document.getElementById(
+  "landlord-password-change-error"
+);
+
+const landlordForgotFormEl = document.getElementById("landlord-forgot-form");
+const landlordForgotIdentifierEl = document.getElementById(
+  "landlord-forgot-identifier"
+);
+const landlordForgotBtnEl = document.getElementById("landlord-forgot-btn");
+
+let managerMode = "";
+
+function setStatus(message) {
+  loginStatusEl.textContent = String(message ?? "");
+}
+
+function focusInlineFeedback(element) {
+  if (!(element instanceof HTMLElement)) {
+    return;
+  }
+
+  element.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  element.focus({ preventScroll: true });
+}
+
+function showPanelError(element, message, { reveal = false } = {}) {
+  element.textContent = String(message ?? "");
+  element.classList.remove("hidden");
+  if (reveal) {
+    focusInlineFeedback(element);
+  }
+}
+
+function clearPanelError(element) {
+  element.textContent = "";
+  element.classList.add("hidden");
+}
+
+function clearAllErrors() {
+  clearPanelError(loginErrorEl);
+  clearPanelError(landlordSecondaryErrorEl);
+  clearPanelError(landlordPasswordChangeErrorEl);
+}
+
+function normalizeHouseNumber(value) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function setManagerMode(nextMode) {
+  managerMode = ["landlord", "staff", "caretaker"].includes(nextMode)
+    ? nextMode
+    : "";
+  const usesOwnerFields = managerMode === "landlord" || managerMode === "staff";
+
+  ownerLoginFieldsEl?.classList.toggle("hidden", !usesOwnerFields);
+  caretakerLoginFieldsEl?.classList.toggle("hidden", managerMode !== "caretaker");
+
+  managerModeButtons.forEach((button) => {
+    const active = button instanceof HTMLElement && button.dataset.managerMode === managerMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+
+  if (ownerIdentifierLabelEl instanceof HTMLElement) {
+    ownerIdentifierLabelEl.textContent =
+      managerMode === "staff"
+        ? "Staff Email or Phone"
+        : "Email, Phone, or Recovery Username";
+  }
+
+  if (identifierEl instanceof HTMLInputElement) {
+    identifierEl.placeholder =
+      managerMode === "staff"
+        ? "staff@example.com or 07XXXXXXXX"
+        : "manager@example.com, 07XXXXXXXX, or username";
+  }
+
+  const buttonLabels = {
+    landlord: "Sign In as Landlord",
+    staff: "Sign In as Staff",
+    caretaker: "Sign In as House Manager"
+  };
+  loginBtnEl.textContent = buttonLabels[managerMode] ?? "Choose Login Type";
+
+  const statusMessages = {
+    landlord:
+      "Landlord sign-in accepts email, phone, or the recovery username for legacy manager access.",
+    staff: "Staff sign-in uses the email or phone number issued by the landlord.",
+    caretaker:
+      "House manager sign-in uses phone number and the approved verification house."
+  };
+  setStatus(statusMessages[managerMode] ?? "Choose Landlord, Staff, or House Manager to continue.");
+  clearAllErrors();
+}
+
+function normalizeLandlordSignInError(error) {
+  if (!(error instanceof Error)) {
+    return "Check your email, phone, or username and password.";
+  }
+
+  const message = error.message || "";
+
+  if (/invalid email/i.test(message)) {
+    return "Manager sign-in accepts email, phone, or username. Check the identifier and password.";
+  }
+
+  if (/incorrect password/i.test(message)) {
+    return "Incorrect password for this manager account. Try again or request reset.";
+  }
+
+  if (/no account found/i.test(message)) {
+    return "No manager account found for that email, phone, or username.";
+  }
+
+  if (error.status === 401) {
+    return "Check your email, phone, username, or password.";
+  }
+
+  return message;
+}
+
+function normalizeStaffSignInError(error) {
+  if (!(error instanceof Error)) {
+    return "Check the staff email or phone and password.";
+  }
+
+  const message = error.message || "";
+
+  if (/invalid email/i.test(message)) {
+    return "Staff sign-in accepts email or phone number. Choose Landlord for recovery username access.";
+  }
+
+  if (/incorrect password/i.test(message)) {
+    return "Incorrect password for this staff account. Try again or request reset.";
+  }
+
+  if (/no account found/i.test(message)) {
+    return "No staff account found for that email or phone number.";
+  }
+
+  if (error.status === 401) {
+    return "Check the staff email, phone, or password.";
+  }
+
+  return message;
+}
+
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(date);
+}
+
+function identifierLoginPayload(identifier, password) {
+  const normalized = String(identifier ?? "").trim();
+  const looksLikePhone = /^(\+254|254|0)\d{9}$/.test(
+    normalized.replace(/[\s-]/g, "")
+  );
+
+  return looksLikePhone
+    ? { phoneNumber: normalized, password }
+    : { email: normalized, password };
+}
+
+function looksLikeEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value ?? "").trim());
+}
+
+function looksLikeKenyaPhone(value) {
+  return /^(\+254|254|0)\d{9}$/.test(String(value ?? "").trim().replace(/[\s-]/g, ""));
+}
+
+function isManagementPortalRole(role) {
+  return isOwnerStaffPortalRole(role) || role === "caretaker";
+}
+
+function isOwnerStaffPortalRole(role) {
+  return (
+    role === "landlord" ||
+    role === "staff" ||
+    role === "admin" ||
+    role === "root_admin"
+  );
+}
+
+function buildCaretakerPayload(extra = {}) {
+  const payload = {
+    phoneNumber: String(caretakerPhoneEl?.value || "").trim(),
+    houseNumber: normalizeHouseNumber(caretakerHouseNumberEl?.value),
+    ...extra
+  };
+
+  const buildingId = String(caretakerBuildingEl?.value || "").trim();
+  if (buildingId) {
+    payload.buildingId = buildingId;
+  }
+
+  return payload;
+}
+
+async function requestJson(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    credentials: "same-origin"
+  });
+
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const issueMessage = payload.issues?.[0]?.message;
+    const err = new Error(
+      issueMessage ?? payload.error ?? `Request failed (${response.status})`
+    );
+    err.status = response.status;
+    throw err;
+  }
+
+  return payload;
+}
+
+async function loadCaretakerBuildings() {
+  if (!(caretakerBuildingEl instanceof HTMLSelectElement)) {
+    return;
+  }
+
+  try {
+    const payload = await requestJson("/api/buildings", { cache: "no-store" });
+    const buildings = Array.isArray(payload.data) ? payload.data : [];
+    const current = caretakerBuildingEl.value;
+
+    caretakerBuildingEl.replaceChildren();
+    const blank = document.createElement("option");
+    blank.value = "";
+    blank.textContent = "Auto-detect building";
+    caretakerBuildingEl.append(blank);
+
+    buildings.forEach((building) => {
+      const id = String(building?.id || "").trim();
+      if (!id) {
+        return;
+      }
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = building?.name ? `${building.name} (${id})` : id;
+      caretakerBuildingEl.append(option);
+    });
+
+    caretakerBuildingEl.value = current;
+  } catch (_error) {
+    // Optional helper only. Backend can still auto-detect when the phone + house is unique.
+  }
+}
+
+async function handleSignedInRole(role, identity = {}) {
+  if (isManagementPortalRole(role)) {
+    if (identity?.mustChangePassword) {
+      showPermanentPasswordForm(role, identity);
+      return true;
+    }
+
+    setStatus(`Signed in as ${role}. Redirecting...`);
+    window.location.href = "/landlord";
+    return true;
+  }
+
+  if (role === "tenant") {
+    const email = typeof identity.email === "string" ? identity.email : "";
+    const phoneMask =
+      typeof identity.phoneMask === "string" ? identity.phoneMask : "";
+    if (email || phoneMask) {
+      setStatus(
+        `Signed in as resident (${email || "no email"}${phoneMask ? ` • ${phoneMask}` : ""}). Use the resident portal for this account.`
+      );
+    } else {
+      setStatus("Signed in as resident. Use the resident portal for this account.");
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function showPermanentPasswordForm(role, identity = {}) {
+  loginFormEl?.classList.add("hidden");
+  landlordForgotFormEl?.classList.add("hidden");
+  landlordPasswordChangeFormEl?.classList.remove("hidden");
+
+  const label =
+    identity.fullName ||
+    identity.email ||
+    (role === "caretaker" ? "house manager account" : "manager account");
+  setStatus(
+    `Temporary password accepted for ${label}. Set a permanent password to continue.`
+  );
+
+  if (landlordNewPasswordEl instanceof HTMLInputElement) {
+    landlordNewPasswordEl.focus();
+  }
+}
+
+async function checkSession() {
+  try {
+    const payload = await requestJson("/api/auth/landlord/session", { cache: "no-store" });
+    const role = payload.data?.role;
+    return handleSignedInRole(role, payload.data ?? {});
+  } catch (_landlordSessionError) {
+    try {
+      const payload = await requestJson("/api/auth/session", { cache: "no-store" });
+      const role = payload.data?.role;
+      return handleSignedInRole(role, payload.data ?? {});
+    } catch (_userSessionError) {
+      // no active manager/user session
+    }
+    return false;
+  }
+}
+
+async function signIn(event) {
+  event.preventDefault();
+  clearAllErrors();
+
+  if (managerMode === "landlord") {
+    await signInLandlord();
+    return;
+  }
+
+  if (managerMode === "staff") {
+    await signInStaff();
+    return;
+  }
+
+  if (managerMode === "caretaker") {
+    await signInCaretaker();
+    return;
+  }
+
+  showPanelError(loginErrorEl, "Choose who is logging in before you continue.", {
+    reveal: true
+  });
+  setStatus("Choose Landlord, Staff, or House Manager to continue.");
+}
+
+async function signInLandlord() {
+  const identifier = identifierEl.value.trim();
+  const password = passwordEl.value.trim();
+
+  if (!identifier) {
+    showPanelError(loginErrorEl, "Provide email, phone number, or username.", {
+      reveal: true
+    });
+    return;
+  }
+
+  if (!password) {
+    showPanelError(loginErrorEl, "Provide password.", { reveal: true });
+    return;
+  }
+
+  loginBtnEl.disabled = true;
+  setStatus("Signing in as landlord...");
+
+  try {
+    const managerUsernameLogin = !looksLikeKenyaPhone(identifier) && !looksLikeEmail(identifier);
+    const attempts = managerUsernameLogin
+      ? [
+          {
+            url: "/api/auth/landlord/login",
+            body: { username: identifier, password }
+          }
+        ]
+      : [
+          {
+            url: "/api/auth/login",
+            body: identifierLoginPayload(identifier, password)
+          },
+          {
+            url: "/api/auth/landlord/login",
+            body: { username: identifier, password }
+          }
+        ];
+    let lastError = null;
+
+    for (const attempt of attempts) {
+      try {
+        const payload = await requestJson(attempt.url, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify(attempt.body)
+        });
+
+        const role = payload.data?.role;
+        if (!isOwnerStaffPortalRole(role)) {
+          throw new Error("This account is not eligible for landlord portal access.");
+        }
+
+        const handled = await handleSignedInRole(role, payload.data ?? {});
+        if (!handled) {
+          throw new Error("This account is not eligible for landlord portal access.");
+        }
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError ?? new Error("Check your email, phone, or username and password.");
+  } catch (error) {
+    const message = normalizeLandlordSignInError(error);
+    showPanelError(loginErrorEl, message, { reveal: true });
+    setStatus("Check the message above and try again.");
+  } finally {
+    loginBtnEl.disabled = false;
+  }
+}
+
+async function signInStaff() {
+  const identifier = identifierEl.value.trim();
+  const password = passwordEl.value.trim();
+
+  if (!identifier) {
+    showPanelError(loginErrorEl, "Provide staff email or phone number.", {
+      reveal: true
+    });
+    return;
+  }
+
+  if (!looksLikeEmail(identifier) && !looksLikeKenyaPhone(identifier)) {
+    showPanelError(
+      loginErrorEl,
+      "Staff sign-in uses email or phone. Choose Landlord if you need recovery username access.",
+      { reveal: true }
+    );
+    return;
+  }
+
+  if (!password) {
+    showPanelError(loginErrorEl, "Provide staff password.", { reveal: true });
+    return;
+  }
+
+  loginBtnEl.disabled = true;
+  setStatus("Signing in as staff...");
+
+  try {
+    const payload = await requestJson("/api/auth/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(identifierLoginPayload(identifier, password))
+    });
+
+    const role = payload.data?.role;
+    if (!isOwnerStaffPortalRole(role)) {
+      throw new Error("This account is not eligible for staff portal access.");
+    }
+
+    const handled = await handleSignedInRole(role, payload.data ?? {});
+    if (!handled) {
+      throw new Error("This account is not eligible for staff portal access.");
+    }
+  } catch (error) {
+    const message = normalizeStaffSignInError(error);
+    showPanelError(loginErrorEl, message, { reveal: true });
+    setStatus("Check the message above and try again.");
+  } finally {
+    loginBtnEl.disabled = false;
+  }
+}
+
+async function signInCaretaker() {
+  const phoneNumber = String(caretakerPhoneEl?.value || "").trim();
+  const houseNumber = normalizeHouseNumber(caretakerHouseNumberEl?.value);
+  const password = String(caretakerPasswordEl?.value || "");
+  const newPassword = String(caretakerNewPasswordEl?.value || "");
+  const confirmPassword = String(caretakerConfirmPasswordEl?.value || "");
+
+  if (!phoneNumber || !houseNumber) {
+    showPanelError(loginErrorEl, "Provide phone number and verification house.", {
+      reveal: true
+    });
+    return;
+  }
+
+  loginBtnEl.disabled = true;
+  setStatus("Checking house manager access...");
+
+  try {
+    if (newPassword || confirmPassword) {
+      if (newPassword.length < 8) {
+        showPanelError(loginErrorEl, "New password must be at least 8 characters.", {
+          reveal: true
+        });
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        showPanelError(loginErrorEl, "Confirmation password must match the new password.", {
+          reveal: true
+        });
+        return;
+      }
+
+      const payload = await requestJson("/api/auth/caretaker/setup-password", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(buildCaretakerPayload({ newPassword }))
+      });
+
+      await handleSignedInRole(payload.data?.role, payload.data ?? {});
+      return;
+    }
+
+    if (!password) {
+      const payload = await requestJson("/api/auth/caretaker/resolve", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(buildCaretakerPayload())
+      });
+      const setupRequired = Boolean(payload.data?.requiresPasswordSetup);
+      showPanelError(
+        loginErrorEl,
+        setupRequired
+          ? "First-time setup required. Enter and confirm a new password below."
+          : "Enter your house manager password.",
+        { reveal: true }
+      );
+      setStatus(
+        setupRequired
+          ? "House manager access found. Set a permanent password to continue."
+          : "House manager access found. Enter password to sign in."
+      );
+      return;
+    }
+
+    const payload = await requestJson("/api/auth/caretaker/login-phone", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(buildCaretakerPayload({ password }))
+    });
+
+    await handleSignedInRole(payload.data?.role, payload.data ?? {});
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to sign in house manager.";
+    showPanelError(loginErrorEl, message, { reveal: true });
+    setStatus("Check the message above and try again.");
+  } finally {
+    loginBtnEl.disabled = false;
+  }
+}
+
+async function requestPasswordReset(event) {
+  event.preventDefault();
+  clearAllErrors();
+
+  const identifier = landlordForgotIdentifierEl.value.trim();
+  if (!identifier) {
+    showPanelError(landlordSecondaryErrorEl, "Provide email or phone number.", {
+      reveal: true
+    });
+    return;
+  }
+
+  landlordForgotBtnEl.disabled = true;
+
+  try {
+    const payload = await requestJson("/api/auth/password-recovery/request", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        identifier
+      })
+    });
+
+    landlordForgotFormEl.reset();
+    setStatus(
+      payload.message ??
+        "Recovery request received. Management will verify and contact you."
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to submit recovery request.";
+    showPanelError(landlordSecondaryErrorEl, message, { reveal: true });
+  } finally {
+    landlordForgotBtnEl.disabled = false;
+  }
+}
+
+async function submitPermanentPasswordChange(event) {
+  event.preventDefault();
+  clearAllErrors();
+
+  const newPassword = String(landlordNewPasswordEl?.value || "");
+  const confirmPassword = String(landlordConfirmPasswordEl?.value || "");
+
+  if (newPassword.length < 8) {
+    showPanelError(
+      landlordPasswordChangeErrorEl,
+      "New password must be at least 8 characters.",
+      { reveal: true }
+    );
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    showPanelError(
+      landlordPasswordChangeErrorEl,
+      "Confirmation password must match the new password.",
+      { reveal: true }
+    );
+    return;
+  }
+
+  if (landlordPasswordChangeBtnEl instanceof HTMLButtonElement) {
+    landlordPasswordChangeBtnEl.disabled = true;
+  }
+  setStatus("Updating password...");
+
+  try {
+    const payload = await requestJson("/api/auth/account/change-password", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        newPassword,
+        confirmPassword
+      })
+    });
+
+    landlordPasswordChangeFormEl?.reset();
+    setStatus("Password updated. Redirecting...");
+    const handled = await handleSignedInRole(payload.data?.role, payload.data ?? {});
+    if (!handled) {
+      throw new Error("Password updated, but this account cannot open the manager portal.");
+    }
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to update password.";
+    showPanelError(landlordPasswordChangeErrorEl, message, { reveal: true });
+    setStatus("Password update failed.");
+  } finally {
+    if (landlordPasswordChangeBtnEl instanceof HTMLButtonElement) {
+      landlordPasswordChangeBtnEl.disabled = false;
+    }
+  }
+}
+
+loginFormEl.addEventListener("submit", (event) => {
+  void signIn(event);
+});
+
+landlordForgotFormEl.addEventListener("submit", (event) => {
+  void requestPasswordReset(event);
+});
+
+landlordPasswordChangeFormEl?.addEventListener("submit", (event) => {
+  void submitPermanentPasswordChange(event);
+});
+
+managerModeButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    if (button instanceof HTMLElement) {
+      setManagerMode(button.dataset.managerMode);
+    }
+  });
+});
+
+initPasswordVisibilityToggles();
+setManagerMode("");
+void loadCaretakerBuildings();
+void checkSession();

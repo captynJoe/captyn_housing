@@ -41,6 +41,12 @@ npm run dev
 
 API base URL: `http://localhost:4000`
 
+Frontend script sources live in `src/public/*.ts` and compile into the static files served from `public/*.js`:
+
+```bash
+npm run build:public
+```
+
 - Public portal: `GET /`
 - Resident desk: `GET /users`
 - Admin login: `GET /admin/login`

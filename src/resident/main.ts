@@ -10,13 +10,13 @@ declare global {
   }
 }
 
-const LEGACY_RESIDENT_SCRIPT = "/users.js?v=20260717c";
+const LEGACY_RESIDENT_SCRIPT = "/users.js?v=20260801a";
 
 function markTypeScriptRuntime() {
   document.documentElement.dataset.captynUiRuntime = "typescript";
   document.body.classList.add("resident-ts-shell");
   window.__CAPTYN_RESIDENT_TS_RUNTIME__ = {
-    version: "resident-shell-3",
+    version: "resident-shell-4",
     legacyScript: LEGACY_RESIDENT_SCRIPT,
     loadedAt: new Date().toISOString()
   };
@@ -54,28 +54,23 @@ function setAuthHeroCopy() {
   }
 
   const heroCopy = document.querySelector<HTMLElement>(".portal-copy");
-  if (heroCopy && !heroCopy.querySelector(".resident-auth-subtitle")) {
-    const subtitle = document.createElement("p");
-    subtitle.className = "resident-auth-subtitle";
-    subtitle.textContent = "Room access, payments, support, notices, and Wi-Fi in one resident workspace.";
-    heroCopy.append(subtitle);
+  if (heroCopy) {
+    heroCopy.querySelector(".resident-auth-signal-grid")?.remove();
+    if (!heroCopy.querySelector(".resident-auth-kicker")) {
+      const kicker = document.createElement("p");
+      kicker.className = "resident-auth-kicker";
+      kicker.textContent = "Resident workspace";
+      heroCopy.prepend(kicker);
+    }
+    if (!heroCopy.querySelector(".resident-auth-subtitle")) {
+      const subtitle = document.createElement("p");
+      subtitle.className = "resident-auth-subtitle";
+      subtitle.textContent = "Access your room account, rent, utilities, support requests, notices, and Wi-Fi from one secure place.";
+      heroCopy.append(subtitle);
+    }
   }
 
-  const hero = document.querySelector<HTMLElement>(".hero.portal-header");
-  if (hero && !hero.querySelector(".resident-auth-signal-grid")) {
-    const signalGrid = document.createElement("section");
-    signalGrid.className = "resident-auth-signal-grid";
-    signalGrid.setAttribute("aria-label", "Resident workspace status");
-    const items = [
-      ["Secure", "Session protected"],
-      ["M-PESA", "Payment ready"],
-      ["Support", "Requests tracked"]
-    ];
-    signalGrid.innerHTML = items
-      .map(([label, value]) => "<article><span>" + label + "</span><strong>" + value + "</strong></article>")
-      .join("");
-    hero.append(signalGrid);
-  }
+  document.querySelector<HTMLElement>(".hero.portal-header .resident-auth-signal-grid")?.remove();
 }
 
 function wrapNodes(wrapper: HTMLElement, nodes: Element[]) {

@@ -520,138 +520,171 @@ html[data-captyn-ui-runtime="typescript"] body {
 
 /* Auth mode redesign */
 
+.resident-auth-mode {
+  background:
+    linear-gradient(rgba(17, 68, 64, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(17, 68, 64, 0.055) 1px, transparent 1px),
+    #f5f8f6;
+  background-size: 32px 32px;
+}
+
 .resident-auth-mode .shell {
+  width: min(1260px, calc(100% - 48px));
+  margin-top: 8px;
   display: grid;
-  grid-template-columns: minmax(0, 0.92fr) minmax(420px, 560px);
+  grid-template-columns: minmax(420px, 0.95fr) minmax(420px, 560px);
   grid-template-areas:
     "topbar topbar"
     "hero auth"
     "feedback auth";
   align-items: start;
-  gap: 14px;
-  min-height: calc(100vh - 28px);
+  gap: 64px;
+  min-height: calc(100vh - 24px);
 }
 
 .resident-auth-mode .topbar {
   grid-area: topbar;
+  min-height: 60px;
   position: relative;
   top: auto;
+  padding: 8px 12px;
+  border-radius: 7px;
+  background: #102426;
+  box-shadow: 0 10px 22px rgba(16, 28, 40, 0.12);
+}
+
+.resident-auth-mode .brand {
+  position: relative;
+  padding-left: 24px;
+  color: #ffffff;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.98rem;
+}
+
+.resident-auth-mode .brand::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #47c883;
+  box-shadow: 0 0 0 7px rgba(71, 200, 131, 0.13);
+  transform: translateY(-50%);
+}
+
+.resident-auth-mode .user-link {
+  width: 42px;
+  height: 42px;
+  border-radius: 7px;
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
 }
 
 .resident-auth-mode .hero.portal-header {
   grid-area: hero;
-  display: grid;
-  grid-template-columns: 1fr;
-  grid-template-rows: auto auto;
-  align-content: space-between;
-  align-items: stretch;
-  gap: 28px;
-  min-height: 560px;
-  padding: 30px;
+  display: flex;
+  align-items: flex-end;
+  min-height: 430px;
+  margin-top: 0;
+  padding: 42px 46px;
   overflow: hidden;
-  background: #102426 !important;
+  border: 0;
+  border-radius: 7px;
+  background:
+    linear-gradient(135deg, rgba(16, 36, 38, 0.96), rgba(17, 58, 54, 0.92)),
+    url("/icons/housing-app.svg") right 36px top 34px / 96px 96px no-repeat;
   color: #ffffff;
+  box-shadow: 0 18px 42px rgba(16, 28, 40, 0.16);
 }
 
 .resident-auth-mode .portal-copy {
+  width: min(100%, 520px);
   min-width: 0;
 }
 
-.resident-auth-mode .portal-copy h1 {
-  max-width: 12ch;
-  color: #ffffff;
-  font-size: clamp(2.25rem, 4vw, 3.65rem) !important;
-  line-height: 1;
-  word-break: normal;
-}
-
-.resident-auth-mode .portal-copy h1::after {
-  width: 92px;
-  height: 5px;
-  background: #44c27f;
-}
-
-.resident-auth-mode .resident-auth-subtitle {
-  max-width: 34ch;
-  margin: 18px 0 0;
-  color: #c7dfdc;
-  font-size: 1rem;
-  line-height: 1.55;
-}
-
-.resident-auth-mode .hero-workspace {
-  display: none;
-}
-
-.resident-auth-signal-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  width: 100%;
-  margin-top: 0;
-}
-
-.resident-auth-signal-grid article {
-  min-width: 0;
-  min-height: 88px;
-  padding: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.07);
-}
-
-.resident-auth-signal-grid span,
-.resident-auth-signal-grid strong {
-  display: block;
-}
-
-.resident-auth-signal-grid span {
-  color: #9bc6c1;
-  font-size: 0.74rem;
-  font-weight: 850;
+.resident-auth-mode .resident-auth-kicker {
+  margin: 0 0 14px;
+  color: #8fe0b6;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.2;
   text-transform: uppercase;
 }
 
-.resident-auth-signal-grid strong {
-  margin-top: 8px;
+.resident-auth-mode .portal-copy h1 {
+  max-width: 100%;
+  margin: 0;
   color: #ffffff;
-  font-size: 0.96rem;
-  line-height: 1.25;
+  font-size: 4.15rem !important;
+  line-height: 0.96;
+  letter-spacing: 0;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.resident-auth-mode .portal-copy h1::after {
+  display: block;
+  width: 90px;
+  height: 4px;
+  margin-top: 22px;
+  border-radius: 999px;
+  background: #47c883;
+}
+
+.resident-auth-mode .resident-auth-subtitle {
+  max-width: 38ch;
+  margin: 22px 0 0;
+  color: #d5e8e4;
+  font-size: 1.05rem;
+  line-height: 1.55;
+}
+
+.resident-auth-mode .hero-workspace,
+.resident-auth-signal-grid {
+  display: none !important;
 }
 
 .resident-auth-mode #feedback-box,
 .resident-auth-mode #resident-id-notice {
   grid-area: feedback;
+  margin: 0;
 }
 
 .resident-auth-mode .auth-stack {
   grid-area: auth;
   width: 100%;
-  max-height: calc(100vh - 100px);
-  margin: 0;
-  overflow-y: auto;
+  max-height: none;
+  margin: 58px 0 0;
+  overflow: visible;
   padding: 0;
+  border-radius: 7px;
   background: #ffffff !important;
+  box-shadow: 0 18px 42px rgba(16, 28, 40, 0.12);
 }
 
 .resident-auth-mode .auth-stack > .section-head {
-  padding: 22px 22px 0;
+  padding: 24px 24px 0;
   margin-bottom: 0;
 }
 
 .resident-auth-mode .auth-stack > .section-head h2 {
-  font-size: 1.35rem;
+  font-size: 1.12rem;
 }
 
 .resident-auth-mode .auth-stack > .section-head p {
-  max-width: 48ch;
-  margin: 6px 0 0;
+  max-width: 52ch;
+  margin: 8px 0 0;
+  line-height: 1.45;
 }
 
 .resident-auth-mode #resident-auth-form {
   display: grid;
   gap: 12px;
-  padding: 16px 22px 22px;
+  padding: 18px 22px 22px;
 }
 
 .resident-login-card,
@@ -662,14 +695,27 @@ html[data-captyn-ui-runtime="typescript"] body {
 
 .resident-login-card {
   padding: 14px;
-  border: 1px solid rgba(15, 123, 118, 0.14);
-  border-radius: 8px;
-  background: #f8fbf8;
+  border: 1px solid rgba(15, 123, 118, 0.18);
+  border-radius: 7px;
+  background: #f9fbfa;
+}
+
+.resident-auth-mode .report-form label {
+  color: #0b5f5b;
+  letter-spacing: 0;
+}
+
+.resident-auth-mode .report-form input,
+.resident-auth-mode .report-form select,
+.resident-auth-mode .report-form textarea {
+  min-height: 44px;
+  border-radius: 7px;
 }
 
 .resident-auth-mode .auth-primary-actions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
 }
 
 .resident-auth-mode #resident-login-btn {
@@ -678,7 +724,8 @@ html[data-captyn-ui-runtime="typescript"] body {
 }
 
 .resident-auth-mode #resident-forgot-btn {
-  min-width: 148px;
+  min-width: 156px;
+  min-height: 48px;
 }
 
 .resident-auth-mode .remember-device-toggle {
@@ -687,7 +734,7 @@ html[data-captyn-ui-runtime="typescript"] body {
   gap: 9px;
   color: var(--resident-muted) !important;
   font-size: 0.88rem;
-  font-weight: 750;
+  font-weight: 700;
   text-transform: none;
 }
 
@@ -699,13 +746,14 @@ html[data-captyn-ui-runtime="typescript"] body {
 .resident-access-toggle {
   justify-content: center;
   width: 100%;
+  min-height: 46px;
 }
 
 .resident-access-card {
   display: none;
   padding: 14px;
   border: 1px solid var(--resident-line);
-  border-radius: 8px;
+  border-radius: 7px;
   background: #ffffff;
 }
 
@@ -737,38 +785,48 @@ html[data-captyn-ui-runtime="typescript"] body {
 
 @media (max-width: 1040px) {
   .resident-auth-mode .shell {
+    width: min(100% - 32px, 720px);
     grid-template-columns: 1fr;
     grid-template-areas:
       "topbar"
       "hero"
       "auth"
       "feedback";
+    gap: 18px;
   }
 
   .resident-auth-mode .hero.portal-header {
     min-height: auto;
+    padding: 34px;
   }
 
   .resident-auth-mode .auth-stack {
-    max-height: none;
+    margin-top: 0;
   }
 }
 
 @media (max-width: 680px) {
+  .resident-auth-mode .shell {
+    width: min(100% - 22px, 560px);
+    margin-top: 6px;
+  }
+
+  .resident-auth-mode .topbar {
+    min-height: 56px;
+  }
+
   .resident-auth-mode .hero.portal-header {
-    padding: 22px;
+    padding: 28px 24px;
   }
 
   .resident-auth-mode .portal-copy h1 {
-    max-width: 100%;
-    font-size: clamp(2rem, 12vw, 3rem) !important;
+    font-size: 2.9rem !important;
   }
 
-  .resident-auth-mode .hero.portal-header {
-    gap: 22px;
+  .resident-auth-mode .resident-auth-subtitle {
+    font-size: 1rem;
   }
 
-  .resident-auth-signal-grid,
   .resident-auth-mode .auth-primary-actions,
   .resident-auth-mode .resident-access-card .field-grid {
     grid-template-columns: 1fr;

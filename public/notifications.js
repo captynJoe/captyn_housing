@@ -1,19 +1,17 @@
 const QUIET_STATUS_PATTERNS = [
-  /checking/i,
-  /loading/i,
-  /refreshing/i,
-  /signing in/i,
-  /signed in/i,
-  /redirecting/i,
-  /uploading/i,
-  /data refreshed/i,
-  /load failed/i,
-  /failed$/i,
-  /unavailable/i
+    /checking/i,
+    /loading/i,
+    /refreshing/i,
+    /signing in/i,
+    /signed in/i,
+    /redirecting/i,
+    /uploading/i,
+    /data refreshed/i,
+    /load failed/i,
+    /failed$/i,
+    /unavailable/i
 ];
-
 const TOAST_LIFETIME_MS = 5200;
-
 let layerReady = false;
 let toastRegion = null;
 let modalBackdrop = null;
@@ -24,19 +22,16 @@ let lastToastKey = "";
 let lastToastAt = 0;
 let lastModalKey = "";
 let lastModalAt = 0;
-
 function normalizeMessage(message) {
-  return String(message ?? "").replace(/\s+/g, " ").trim();
+    return String(message ?? "").replace(/\s+/g, " ").trim();
 }
-
 function ensureLayer() {
-  if (layerReady) {
-    return;
-  }
-
-  const style = document.createElement("style");
-  style.dataset.captynNotifications = "true";
-  style.textContent = `
+    if (layerReady) {
+        return;
+    }
+    const style = document.createElement("style");
+    style.dataset.captynNotifications = "true";
+    style.textContent = `
     .app-notification-region {
       position: fixed;
       top: 18px;
@@ -168,18 +163,16 @@ function ensureLayer() {
       }
     }
   `;
-  document.head.append(style);
-
-  toastRegion = document.createElement("section");
-  toastRegion.className = "app-notification-region";
-  toastRegion.setAttribute("aria-live", "polite");
-  toastRegion.setAttribute("aria-label", "Notifications");
-  document.body.append(toastRegion);
-
-  modalBackdrop = document.createElement("div");
-  modalBackdrop.className = "app-notification-backdrop hidden";
-  modalBackdrop.setAttribute("role", "presentation");
-  modalBackdrop.innerHTML = `
+    document.head.append(style);
+    toastRegion = document.createElement("section");
+    toastRegion.className = "app-notification-region";
+    toastRegion.setAttribute("aria-live", "polite");
+    toastRegion.setAttribute("aria-label", "Notifications");
+    document.body.append(toastRegion);
+    modalBackdrop = document.createElement("div");
+    modalBackdrop.className = "app-notification-backdrop hidden";
+    modalBackdrop.setAttribute("role", "presentation");
+    modalBackdrop.innerHTML = `
     <section class="app-notification-dialog" role="alertdialog" aria-modal="true" aria-labelledby="app-notification-title" aria-describedby="app-notification-message">
       <h2 id="app-notification-title"></h2>
       <p id="app-notification-message"></p>
@@ -188,139 +181,121 @@ function ensureLayer() {
       </div>
     </section>
   `;
-  document.body.append(modalBackdrop);
-
-  modalTitleEl = modalBackdrop.querySelector("#app-notification-title");
-  modalMessageEl = modalBackdrop.querySelector("#app-notification-message");
-  modalCloseBtn = modalBackdrop.querySelector("button");
-  modalCloseBtn?.addEventListener("click", closeNotificationModal);
-  modalBackdrop.addEventListener("click", (event) => {
-    if (event.target === modalBackdrop) {
-      closeNotificationModal();
-    }
-  });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      closeNotificationModal();
-    }
-  });
-
-  layerReady = true;
+    document.body.append(modalBackdrop);
+    modalTitleEl = modalBackdrop.querySelector("#app-notification-title");
+    modalMessageEl = modalBackdrop.querySelector("#app-notification-message");
+    modalCloseBtn = modalBackdrop.querySelector("button");
+    modalCloseBtn?.addEventListener("click", closeNotificationModal);
+    modalBackdrop.addEventListener("click", (event) => {
+        if (event.target === modalBackdrop) {
+            closeNotificationModal();
+        }
+    });
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+            closeNotificationModal();
+        }
+    });
+    layerReady = true;
 }
-
 function inferStatusTone(message) {
-  if (/deleted|removed|revoked|no new|no .*changes/i.test(message)) {
-    return "warning";
-  }
-  return "success";
+    if (/deleted|removed|revoked|no new|no .*changes/i.test(message)) {
+        return "warning";
+    }
+    return "success";
 }
-
 function shouldNotifyStatus(message, force) {
-  if (force) {
-    return true;
-  }
-  return !QUIET_STATUS_PATTERNS.some((pattern) => pattern.test(message));
+    if (force) {
+        return true;
+    }
+    return !QUIET_STATUS_PATTERNS.some((pattern) => pattern.test(message));
 }
-
 function titleForTone(tone) {
-  if (tone === "error") return "Action needs attention";
-  if (tone === "warning") return "Review complete";
-  return "Done";
+    if (tone === "error")
+        return "Action needs attention";
+    if (tone === "warning")
+        return "Review complete";
+    return "Done";
 }
-
 export function notifyStatus(message, options = {}) {
-  const text = normalizeMessage(message);
-  if (!text || !shouldNotifyStatus(text, Boolean(options.force))) {
-    return;
-  }
-
-  showToast({
-    message: text,
-    tone: options.tone ?? inferStatusTone(text),
-    title: options.title
-  });
+    const text = normalizeMessage(message);
+    if (!text || !shouldNotifyStatus(text, Boolean(options.force))) {
+        return;
+    }
+    showToast({
+        message: text,
+        tone: options.tone ?? inferStatusTone(text),
+        title: options.title
+    });
 }
-
 export function notifyError(message, options = {}) {
-  const text = normalizeMessage(message);
-  if (!text) {
-    return;
-  }
-
-  showNotificationModal({
-    message: text,
-    tone: "error",
-    title: options.title ?? "Action needs attention"
-  });
+    const text = normalizeMessage(message);
+    if (!text) {
+        return;
+    }
+    showNotificationModal({
+        message: text,
+        tone: "error",
+        title: options.title ?? "Action needs attention"
+    });
 }
-
 export function showToast({ message, tone = "success", title } = {}) {
-  const text = normalizeMessage(message);
-  if (!text) {
-    return;
-  }
-
-  ensureLayer();
-  const key = `${tone}:${text}`;
-  const now = Date.now();
-  if (key === lastToastKey && now - lastToastAt < 1500) {
-    return;
-  }
-  lastToastKey = key;
-  lastToastAt = now;
-
-  const toast = document.createElement("article");
-  toast.className = `app-toast is-${tone}`;
-  toast.setAttribute("role", tone === "error" ? "alert" : "status");
-
-  const heading = document.createElement("h2");
-  heading.textContent = title ?? titleForTone(tone);
-  const close = document.createElement("button");
-  close.type = "button";
-  close.setAttribute("aria-label", "Dismiss notification");
-  close.textContent = "X";
-  const copy = document.createElement("p");
-  copy.textContent = text;
-
-  toast.append(heading, close, copy);
-  toastRegion?.prepend(toast);
-
-  const removeToast = () => {
-    toast.remove();
-  };
-  close.addEventListener("click", removeToast);
-  window.setTimeout(removeToast, TOAST_LIFETIME_MS);
+    const text = normalizeMessage(message);
+    if (!text) {
+        return;
+    }
+    ensureLayer();
+    const key = `${tone}:${text}`;
+    const now = Date.now();
+    if (key === lastToastKey && now - lastToastAt < 1500) {
+        return;
+    }
+    lastToastKey = key;
+    lastToastAt = now;
+    const toast = document.createElement("article");
+    toast.className = `app-toast is-${tone}`;
+    toast.setAttribute("role", tone === "error" ? "alert" : "status");
+    const heading = document.createElement("h2");
+    heading.textContent = title ?? titleForTone(tone);
+    const close = document.createElement("button");
+    close.type = "button";
+    close.setAttribute("aria-label", "Dismiss notification");
+    close.textContent = "X";
+    const copy = document.createElement("p");
+    copy.textContent = text;
+    toast.append(heading, close, copy);
+    toastRegion?.prepend(toast);
+    const removeToast = () => {
+        toast.remove();
+    };
+    close.addEventListener("click", removeToast);
+    window.setTimeout(removeToast, TOAST_LIFETIME_MS);
 }
-
 export function showNotificationModal({ message, tone = "error", title } = {}) {
-  const text = normalizeMessage(message);
-  if (!text) {
-    return;
-  }
-
-  ensureLayer();
-  const key = `${tone}:${text}`;
-  const now = Date.now();
-  if (key === lastModalKey && now - lastModalAt < 1000) {
-    return;
-  }
-  lastModalKey = key;
-  lastModalAt = now;
-
-  const dialog = modalBackdrop?.querySelector(".app-notification-dialog");
-  dialog?.classList.remove("is-error", "is-warning", "is-success");
-  dialog?.classList.add(`is-${tone}`);
-
-  if (modalTitleEl instanceof HTMLElement) {
-    modalTitleEl.textContent = title ?? titleForTone(tone);
-  }
-  if (modalMessageEl instanceof HTMLElement) {
-    modalMessageEl.textContent = text;
-  }
-  modalBackdrop?.classList.remove("hidden");
-  modalCloseBtn?.focus();
+    const text = normalizeMessage(message);
+    if (!text) {
+        return;
+    }
+    ensureLayer();
+    const key = `${tone}:${text}`;
+    const now = Date.now();
+    if (key === lastModalKey && now - lastModalAt < 1000) {
+        return;
+    }
+    lastModalKey = key;
+    lastModalAt = now;
+    const dialog = modalBackdrop?.querySelector(".app-notification-dialog");
+    dialog?.classList.remove("is-error", "is-warning", "is-success");
+    dialog?.classList.add(`is-${tone}`);
+    if (modalTitleEl instanceof HTMLElement) {
+        modalTitleEl.textContent = title ?? titleForTone(tone);
+    }
+    if (modalMessageEl instanceof HTMLElement) {
+        modalMessageEl.textContent = text;
+    }
+    modalBackdrop?.classList.remove("hidden");
+    modalCloseBtn?.focus();
 }
-
 export function closeNotificationModal() {
-  modalBackdrop?.classList.add("hidden");
+    modalBackdrop?.classList.add("hidden");
 }

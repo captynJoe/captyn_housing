@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "dev:local": "bash scripts/dev-local.sh",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm run build:public",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --import tsx --test tests/*.test.ts",
@@ -24,7 +24,10 @@
     "typecheck:ui": "tsc --noEmit -p tsconfig.ui.json",
     "dev:resident": "vite --config vite.resident.config.ts",
     "build:resident": "vite build --config vite.resident.config.ts",
-    "typecheck:resident": "tsc --noEmit -p tsconfig.resident.json"
+    "typecheck:resident": "tsc --noEmit -p tsconfig.resident.json",
+    "build:api": "tsc -p tsconfig.json",
+    "build:public": "tsc -p tsconfig.public.json",
+    "typecheck:public": "tsc --noEmit -p tsconfig.public.json"
   },
   "dependencies": {
     "@prisma/client": "^6.3.1",

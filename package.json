@@ -20,7 +20,10 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "dev:ui": "vite --config vite.config.ts",
     "build:ui": "vite build --config vite.config.ts",
-    "typecheck:ui": "tsc --noEmit -p tsconfig.ui.json"
+    "typecheck:ui": "tsc --noEmit -p tsconfig.ui.json",
+    "dev:resident": "vite --config vite.resident.config.ts",
+    "build:resident": "vite build --config vite.resident.config.ts",
+    "typecheck:resident": "tsc --noEmit -p tsconfig.resident.json"
   },
   "dependencies": {
     "@prisma/client": "^6.3.1",

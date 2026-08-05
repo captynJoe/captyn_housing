@@ -5,7 +5,7 @@
   --resident-line: var(--captyn-line, rgba(11, 26, 58, 0.14));
   --resident-panel: var(--captyn-panel-strong, #ffffff);
   --resident-panel-soft: var(--captyn-panel-soft, #f6f8fc);
-  --resident-teal: var(--captyn-teal, #14b8ac);
+  --resident-teal: var(--captyn-blue, #2454e6);
   --resident-teal-dark: var(--captyn-blue-dark, #1c42c2);
   --resident-green: var(--captyn-green, #0f8a5f);
   --resident-amber: var(--captyn-amber, #a3660a);
@@ -322,15 +322,28 @@ html[data-captyn-ui-runtime="typescript"] body {
   letter-spacing: 0;
 }
 
-.resident-ts-shell button:not(.ghost-btn):not(.user-link):not(.hero-workspace-btn):not(.modal-backdrop) {
+.resident-ts-shell button:not(.ghost-btn):not(.user-link):not(.hero-workspace-btn):not(.modal-backdrop):not(.theme-toggle-btn) {
   background: var(--resident-teal) !important;
   border-color: var(--resident-teal) !important;
   color: #ffffff !important;
-  box-shadow: 0 8px 18px rgba(15, 123, 118, 0.18) !important;
+  box-shadow: 0 8px 18px rgba(11, 26, 58, 0.18) !important;
 }
 
-.resident-ts-shell button:not(.ghost-btn):not(.user-link):not(.hero-workspace-btn):not(.modal-backdrop):hover {
+.resident-ts-shell button:not(.ghost-btn):not(.user-link):not(.hero-workspace-btn):not(.modal-backdrop):not(.theme-toggle-btn):hover {
   background: var(--resident-teal-dark) !important;
+}
+
+.resident-ts-shell .theme-toggle-btn {
+  min-height: 38px !important;
+  background: var(--captyn-panel-strong, #fff) !important;
+  color: var(--captyn-muted, #616b85) !important;
+  border: 1px solid var(--captyn-line, rgba(11, 26, 58, 0.14)) !important;
+  box-shadow: none !important;
+}
+
+.resident-ts-shell .theme-toggle-btn:hover {
+  color: var(--captyn-blue, #2454e6) !important;
+  border-color: var(--captyn-blue, #2454e6) !important;
 }
 
 .resident-ts-shell .ghost-btn {

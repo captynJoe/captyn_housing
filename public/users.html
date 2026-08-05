@@ -74,6 +74,9 @@
               Payments
               <span class="nav-dot hidden" data-dot="payments" aria-hidden="true"></span>
             </button>
+            <button type="button" class="hero-workspace-btn" data-resident-view="wifi">
+              Wi-Fi
+            </button>
             <button type="button" class="hero-workspace-btn" data-resident-view="notices">
               Notices
               <span class="nav-dot hidden" data-dot="notices" aria-hidden="true"></span>
@@ -756,6 +759,39 @@
                   </section>
                 </aside>
               </div>
+            </article>
+          </section>
+
+          <section class="resident-view hidden" data-resident-view-panel="wifi">
+            <article class="panel-card">
+              <section class="section-head">
+                <h2>Wi-Fi</h2>
+                <p id="wifi-packages-count">0 packages</p>
+              </section>
+              <p id="wifi-error" class="feedback hidden"></p>
+              <p id="wifi-empty" class="item-details hidden">
+                Wi-Fi is not available for your building yet.
+              </p>
+              <section id="wifi-packages" class="wifi-package-grid" aria-label="Wi-Fi packages"></section>
+
+              <section id="wifi-status-section" class="payment-section mpesa-section hidden">
+                <p id="wifi-status-text" class="item-details payment-state"></p>
+              </section>
+
+              <section id="wifi-access-section" class="payment-section hidden">
+                <p class="subheading">Your Wi-Fi login</p>
+                <div class="field-grid">
+                  <label>
+                    Username
+                    <input id="wifi-access-username" type="text" readonly />
+                  </label>
+                  <label>
+                    Password
+                    <input id="wifi-access-password" type="text" readonly />
+                  </label>
+                </div>
+                <p id="wifi-access-expires" class="item-details"></p>
+              </section>
             </article>
           </section>
 

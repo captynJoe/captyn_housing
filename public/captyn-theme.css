@@ -40,9 +40,9 @@
   --warn-700: var(--captyn-amber);
   --warn-bg: #fdf3df;
   --line: var(--captyn-line);
-  --radius-xl: 12px;
-  --radius-lg: 10px;
-  --radius-md: 8px;
+  --radius-xl: 20px;
+  --radius-lg: 16px;
+  --radius-md: 12px;
   --shadow: var(--captyn-shadow);
 }
 

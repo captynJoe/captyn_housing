@@ -40,7 +40,7 @@ html[data-captyn-ui-runtime="typescript"] body {
   min-height: 58px;
   padding: 8px 10px 8px 16px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--resident-navy);
   box-shadow: 0 16px 34px rgba(16, 36, 38, 0.18);
 }
@@ -66,7 +66,7 @@ html[data-captyn-ui-runtime="typescript"] body {
 .resident-ts-shell .user-link {
   width: 42px;
   height: 42px;
-  border-radius: 8px !important;
+  border-radius: 14px !important;
   border-color: rgba(255, 255, 255, 0.2) !important;
   background: rgba(255, 255, 255, 0.08) !important;
   color: #ffffff !important;
@@ -74,7 +74,7 @@ html[data-captyn-ui-runtime="typescript"] body {
 }
 
 .resident-ts-shell .user-panel {
-  border-radius: 8px !important;
+  border-radius: 14px !important;
   box-shadow: var(--resident-shadow);
 }
 
@@ -86,7 +86,7 @@ html[data-captyn-ui-runtime="typescript"] body {
   min-height: 118px;
   margin-top: 14px;
   padding: 22px;
-  border-radius: 8px !important;
+  border-radius: 14px !important;
   border: 1px solid var(--resident-line) !important;
   background: linear-gradient(180deg, #ffffff 0%, #f7fbf8 100%) !important;
   box-shadow: var(--resident-shadow);
@@ -132,14 +132,14 @@ html[data-captyn-ui-runtime="typescript"] body {
   gap: 8px;
   padding: 6px;
   border: 1px solid var(--resident-line);
-  border-radius: 8px;
-  background: #eef5f1;
+  border-radius: 14px;
+  background: var(--captyn-blue-soft, #e8effe);
 }
 
 .resident-ts-shell .hero-workspace-btn {
   min-height: 42px;
   padding: 0 10px;
-  border-radius: 8px !important;
+  border-radius: 14px !important;
   background: transparent !important;
   color: var(--resident-muted) !important;
   box-shadow: none !important;
@@ -155,14 +155,14 @@ html[data-captyn-ui-runtime="typescript"] body {
 
 .resident-ts-shell .feedback,
 .resident-ts-shell .panel-card {
-  border-radius: 8px !important;
+  border-radius: 14px !important;
   border: 1px solid var(--resident-line) !important;
   background: rgba(255, 255, 255, 0.96) !important;
   box-shadow: 0 14px 36px rgba(27, 44, 45, 0.08) !important;
 }
 
 .resident-ts-shell .panel-card {
-  padding: 18px;
+  padding: 22px;
 }
 
 .resident-ts-shell .auth-stack {
@@ -171,17 +171,17 @@ html[data-captyn-ui-runtime="typescript"] body {
 }
 
 .resident-ts-shell .resident-workspace {
-  margin-top: 16px;
+  margin-top: 20px;
 }
 
 .resident-ts-shell .resident-content {
   display: grid;
-  gap: 16px;
+  gap: 20px;
 }
 
 .resident-ts-shell .resident-view:not(.hidden) {
   display: grid;
-  gap: 16px;
+  gap: 20px;
 }
 
 .resident-ts-shell .section-head {
@@ -208,8 +208,8 @@ html[data-captyn-ui-runtime="typescript"] body {
 
 .resident-ts-shell .resident-home-card,
 .resident-ts-shell .payment-summary-card {
-  border: 1px solid rgba(15, 123, 118, 0.14);
-  border-radius: 8px;
+  border: 1px solid rgba(36, 84, 230, 0.16);
+  border-radius: 16px;
   background: var(--resident-navy);
   color: #ffffff;
 }
@@ -217,14 +217,14 @@ html[data-captyn-ui-runtime="typescript"] body {
 .resident-ts-shell .resident-home-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 18px;
+  gap: 20px;
   align-items: center;
-  padding: 18px;
+  padding: 24px;
 }
 
 .resident-ts-shell .resident-home-card .subheading,
 .resident-ts-shell .payment-summary-card .subheading {
-  color: #a9cfca !important;
+  color: #aec2f5 !important;
 }
 
 .resident-ts-shell .resident-home-card h3,
@@ -236,7 +236,7 @@ html[data-captyn-ui-runtime="typescript"] body {
 
 .resident-ts-shell .resident-home-card .item-details,
 .resident-ts-shell .payment-summary-card .item-details {
-  color: #c6dfdc;
+  color: #c4d0f2;
 }
 
 .resident-ts-shell .resident-home-actions,
@@ -254,12 +254,12 @@ html[data-captyn-ui-runtime="typescript"] body {
 .resident-ts-shell .field-grid,
 .resident-ts-shell .payments-grid {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .resident-ts-shell .overview-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin-top: 14px;
+  margin-top: 16px;
 }
 
 .resident-ts-shell .overview-card,
@@ -268,19 +268,19 @@ html[data-captyn-ui-runtime="typescript"] body {
 .resident-ts-shell .stack-list > article,
 .resident-ts-shell .stack-list > div {
   border: 1px solid var(--resident-line);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--resident-panel-soft);
 }
 
 .resident-ts-shell .overview-card {
-  min-height: 92px;
-  padding: 14px;
+  min-height: 96px;
+  padding: 18px;
 }
 
 .resident-ts-shell .overview-value {
-  margin: 7px 0 0;
+  margin: 8px 0 0;
   color: var(--resident-ink);
-  font-size: 1.25rem;
+  font-size: 1.35rem;
   font-weight: 850;
   word-break: break-word;
 }
@@ -304,7 +304,7 @@ html[data-captyn-ui-runtime="typescript"] body {
 .resident-ts-shell textarea {
   min-height: 44px;
   border: 1px solid rgba(21, 34, 38, 0.18) !important;
-  border-radius: 8px !important;
+  border-radius: 14px !important;
   background: #ffffff !important;
   color: var(--resident-ink) !important;
   box-shadow: inset 0 1px 0 rgba(21, 34, 38, 0.04) !important;
@@ -317,20 +317,43 @@ html[data-captyn-ui-runtime="typescript"] body {
 .resident-ts-shell button,
 .resident-ts-shell .ghost-btn {
   min-height: 42px;
-  border-radius: 8px !important;
+  border-radius: 14px !important;
   font-weight: 850;
   letter-spacing: 0;
 }
 
-.resident-ts-shell button:not(.ghost-btn):not(.user-link):not(.hero-workspace-btn):not(.modal-backdrop):not(.theme-toggle-btn) {
+.resident-ts-shell button:not(.ghost-btn):not(.user-link):not(.hero-workspace-btn):not(.modal-backdrop):not(.theme-toggle-btn):not([data-quick]):not([data-fixed]):not(.receipt-toggle-btn):not(.receipt-open-btn) {
   background: var(--resident-teal) !important;
   border-color: var(--resident-teal) !important;
   color: #ffffff !important;
   box-shadow: 0 8px 18px rgba(11, 26, 58, 0.18) !important;
 }
 
-.resident-ts-shell button:not(.ghost-btn):not(.user-link):not(.hero-workspace-btn):not(.modal-backdrop):not(.theme-toggle-btn):hover {
+.resident-ts-shell button:not(.ghost-btn):not(.user-link):not(.hero-workspace-btn):not(.modal-backdrop):not(.theme-toggle-btn):not([data-quick]):not([data-fixed]):not(.receipt-toggle-btn):not(.receipt-open-btn):hover {
   background: var(--resident-teal-dark) !important;
+}
+
+/* Secondary/shortcut actions (quick-pay presets, receipt toggles) stay
+   outlined so they don't visually compete with the primary Pay CTA. */
+.resident-ts-shell .quick-pay-row button,
+.resident-ts-shell .receipt-toggle-btn,
+.resident-ts-shell .receipt-open-btn {
+  min-height: 36px !important;
+  padding: 0 12px !important;
+  border-radius: 999px !important;
+  background: var(--captyn-panel-strong, #fff) !important;
+  border: 1px solid var(--resident-line) !important;
+  color: var(--resident-teal-dark) !important;
+  font-size: 0.78rem !important;
+  font-weight: 700 !important;
+  box-shadow: none !important;
+}
+
+.resident-ts-shell .quick-pay-row button:hover,
+.resident-ts-shell .receipt-toggle-btn:hover,
+.resident-ts-shell .receipt-open-btn:hover {
+  border-color: var(--resident-teal) !important;
+  color: var(--resident-teal) !important;
 }
 
 .resident-ts-shell .theme-toggle-btn {
@@ -375,7 +398,7 @@ html[data-captyn-ui-runtime="typescript"] body {
   margin-top: 16px;
   padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 8px;
+  border-radius: 14px;
   background: rgba(255, 255, 255, 0.08);
 }
 
@@ -403,15 +426,15 @@ html[data-captyn-ui-runtime="typescript"] body {
 
 .resident-ts-shell .payment-summary-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin: 16px 0 0;
+  margin: 18px 0 0;
 }
 
 .resident-ts-shell .payment-summary-grid div {
-  min-height: 76px;
-  padding: 12px;
+  min-height: 80px;
+  padding: 16px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .resident-ts-shell .payment-summary-grid dt,
@@ -420,32 +443,32 @@ html[data-captyn-ui-runtime="typescript"] body {
 }
 
 .resident-ts-shell .payment-summary-grid dt {
-  color: #a9cfca;
+  color: #aec2f5;
   font-size: 0.76rem;
   font-weight: 850;
   text-transform: uppercase;
 }
 
 .resident-ts-shell .payment-summary-grid dd {
-  margin-top: 7px;
+  margin-top: 8px;
   color: #ffffff;
-  font-size: 1.15rem;
+  font-size: 1.2rem;
   font-weight: 850;
 }
 
 .resident-ts-shell .payment-instructions-card {
-  margin-top: 14px;
-  padding: 14px;
+  margin-top: 16px;
+  padding: 18px;
 }
 
 .resident-ts-shell .payments-grid {
   grid-template-columns: minmax(0, 1fr) minmax(320px, 0.72fr);
-  margin-top: 14px;
+  margin-top: 16px;
 }
 
 .resident-ts-shell .payment-section,
 .resident-ts-shell .payment-cluster {
-  border-radius: 8px;
+  border-radius: 14px;
 }
 
 .resident-ts-shell .stack-list {
@@ -459,7 +482,7 @@ html[data-captyn-ui-runtime="typescript"] body {
   place-items: center;
   min-height: 86px;
   border: 1px dashed rgba(21, 34, 38, 0.2);
-  border-radius: 8px;
+  border-radius: 14px;
   color: var(--resident-muted);
   font-weight: 750;
 }
@@ -469,7 +492,7 @@ html[data-captyn-ui-runtime="typescript"] body {
 }
 
 .resident-ts-shell .modal-card {
-  border-radius: 8px !important;
+  border-radius: 14px !important;
 }
 
 .resident-ts-shell.resident-ts-ready .panel-card,

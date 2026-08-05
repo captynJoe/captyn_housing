@@ -40,6 +40,14 @@ export interface CaptynWifiIntegrationOptions {
   apiUrl?: string;
   token?: string;
   timeoutMs?: number;
+  /**
+   * When set, forwards all housing Wi-Fi payments under this existing
+   * captyn-wifi site (its real UUID) instead of the building's own id, so
+   * purchases land under one site when a building shares a physical router
+   * with an existing (e.g. admin-created walk-in) site.
+   */
+  sharedSiteId?: string;
+  sharedSiteName?: string;
 }
 
 function trimTrailingSlash(value: string): string {
@@ -55,11 +63,15 @@ export class CaptynWifiIntegrationService {
   private readonly apiUrl?: string;
   private readonly token?: string;
   private readonly timeoutMs: number;
+  private readonly sharedSiteId?: string;
+  private readonly sharedSiteName?: string;
 
   constructor(options: CaptynWifiIntegrationOptions) {
     this.apiUrl = options.apiUrl ? trimTrailingSlash(options.apiUrl) : undefined;
     this.token = options.token?.trim() || undefined;
     this.timeoutMs = normalizeTimeoutMs(options.timeoutMs);
+    this.sharedSiteId = options.sharedSiteId?.trim() || undefined;
+    this.sharedSiteName = options.sharedSiteName?.trim() || undefined;
   }
 
   get enabled(): boolean {
@@ -92,10 +104,9 @@ export class CaptynWifiIntegrationService {
           body: JSON.stringify({
             sourceReference: payment.checkoutReference,
             providerReference: payment.providerReference,
-            site: {
-              id: payment.building.id,
-              name: payment.building.name
-            },
+            site: this.sharedSiteId
+              ? { id: this.sharedSiteId, name: this.sharedSiteName ?? payment.building.name }
+              : { id: payment.building.id, name: payment.building.name },
             package: {
               id: payment.package.id,
               name: payment.package.name,
@@ -156,6 +167,8 @@ export function createCaptynWifiIntegrationServiceFromEnv() {
   return new CaptynWifiIntegrationService({
     apiUrl: process.env.CAPTYN_WIFI_API_URL,
     token: process.env.CAPTYN_WIFI_INTEGRATION_TOKEN,
-    timeoutMs: Number(process.env.CAPTYN_WIFI_TIMEOUT_MS)
+    timeoutMs: Number(process.env.CAPTYN_WIFI_TIMEOUT_MS),
+    sharedSiteId: process.env.CAPTYN_WIFI_SHARED_SITE_ID,
+    sharedSiteName: process.env.CAPTYN_WIFI_SHARED_SITE_NAME
   });
 }

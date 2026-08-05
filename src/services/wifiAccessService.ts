@@ -10,6 +10,9 @@ export interface WifiPackage {
   name: string;
   hours: number;
   priceKsh: number;
+  residentPriceKsh?: number | null;
+  rateLimit?: string | null;
+  deviceLimit?: number;
   profile: string;
   enabled?: boolean;
 }

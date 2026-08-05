@@ -178,6 +178,7 @@ import {
   tenantResolveSchema,
   residentTenantProfileUpsertSchema,
   updateWifiPackageSchema,
+  residentWifiPaymentSchema,
   ownerStaffCreateSchema,
   ownerStaffDisableSchema,
   landlordRentBulkSheetSchema,
@@ -1344,8 +1345,18 @@ async function bootstrap() {
     );
   }
 
+  const mpesaWifiCallbackToken =
+    process.env.MPESA_WIFI_CALLBACK_TOKEN ?? "dev-mpesa-wifi-token";
+
+  if (!process.env.MPESA_WIFI_CALLBACK_TOKEN) {
+    console.warn(
+      "MPESA_WIFI_CALLBACK_TOKEN is not set. Using dev default token. Set this in production."
+    );
+  }
+
   const pendingRentStkRequests = new Map<string, PendingRentStkRequest>();
   const pendingUtilityStkRequests = new Map<string, PendingUtilityStkRequest>();
+  const pendingWifiStkRequests = new Map<string, { checkoutReference: string; initiatedAt: string }>();
   const mpesaVerifyWindow = new Map<string, { windowStartMs: number; count: number }>();
   const householdMembersByUnit = new Map<string, HouseholdMemberRegistryRecord>();
   const utilityChargeDefaultsByUnit = new Map<string, UtilityChargeDefaultRecord>();
@@ -2924,6 +2935,55 @@ async function bootstrap() {
     }
 
     persistRuntimeQueuesState();
+  };
+
+  const finalizeWifiPaymentAfterMpesaResult = async (
+    checkoutReference: string,
+    result: { status: "success" | "failed"; providerReference?: string; message?: string }
+  ) => {
+    const payment = await wifiService.confirmPayment(checkoutReference, result);
+    if (!payment) {
+      return null;
+    }
+
+    const captynWifi =
+      result.status === "success"
+        ? await captynWifiIntegrationService.forwardConfirmedHousingWifiPayment(payment)
+        : { status: "disabled" as const, reason: "Payment was not successful." };
+
+    if (captynWifi.status === "failed") {
+      console.error("Failed to forward Housing Wi-Fi payment to CAPTYN Wi-Fi:", {
+        checkoutReference: payment.checkoutReference,
+        responseStatus: captynWifi.responseStatus,
+        error: captynWifi.error
+      });
+    }
+
+    // CAPTYN Wi-Fi (FreeRADIUS) is the real access-control system now — the
+    // local `voucher` from wifiService is a placeholder with no working
+    // credentials unless direct MikroTik REST config is set, which it isn't
+    // in production. Replace it with the real entitlement, or mark the
+    // payment as failed so a fake-looking voucher never reaches a customer.
+    let finalPayment = payment;
+    if (result.status === "success") {
+      if (captynWifi.status === "forwarded" && captynWifi.entitlement) {
+        finalPayment = {
+          ...payment,
+          voucher: captynWifi.entitlement,
+          message: "Access provisioned successfully."
+        };
+      } else {
+        finalPayment = {
+          ...payment,
+          status: "provisioning_failed",
+          provisioningStatus: "failed",
+          voucher: undefined,
+          message: "Payment confirmed, but Wi-Fi access could not be provisioned. Contact support."
+        };
+      }
+    }
+
+    return { payment: finalPayment, captynWifi };
   };
 
   const rememberUtilityStkRequest = (
@@ -12806,12 +12866,78 @@ async function bootstrap() {
         }
       }
 
+      const buildingPaymentProfile = paymentProfileService.resolveForBuilding(
+        building.id,
+        "/api/payments/mpesa/wifi-callback"
+      );
+      const mpesaConfig = buildingPaymentProfile.config;
+      if (!buildingPaymentProfile.publicProfile || !mpesaConfig) {
+        return res.status(503).json({
+          error:
+            "M-PESA payment profile is not available for this building. Ask management to update payment routing."
+        });
+      }
+      if (!mpesaConfig.enabled) {
+        return res.status(503).json({ error: "M-PESA STK is disabled for this building payment profile." });
+      }
+      if (!mpesaConfig.isConfigured) {
+        return res.status(503).json({
+          error: "M-PESA STK is not fully configured for this building payment profile.",
+          missing: mpesaConfig.missing
+        });
+      }
+
+      const formattedPhone = formatDarajaMsisdn(parsed.phoneNumber);
+      if (!formattedPhone) {
+        return res.status(400).json({ error: "Invalid Kenyan phone number for M-PESA STK push." });
+      }
+
       const payment = wifiService.createPayment(parsed, {
         id: building.id,
         name: building.name
       }, selectedPackage ?? undefined);
 
-      return res.status(202).json({ data: payment });
+      try {
+        const callbackUrl = mpesaConfig.callbackUrl.includes("token=")
+          ? mpesaConfig.callbackUrl
+          : appendQueryParam(mpesaConfig.callbackUrl, "token", mpesaWifiCallbackToken);
+
+        const client = new DarajaClient(mpesaConfig);
+        const result = await client.initiateStkPush({
+          amount: Math.round(payment.amountKsh),
+          phoneNumber: formattedPhone,
+          accountReference: payment.checkoutReference.slice(0, 12),
+          transactionDesc: `${building.name} WiFi ${payment.package.name}`.slice(0, 80),
+          callbackUrl
+        });
+
+        const checkoutRequestId =
+          typeof result.CheckoutRequestID === "string" ? result.CheckoutRequestID.trim() : "";
+        if (!checkoutRequestId) {
+          await wifiService.confirmPayment(payment.checkoutReference, {
+            status: "failed",
+            message: "M-PESA did not return a checkout request ID."
+          });
+          return res.status(502).json({ error: "M-PESA did not return a checkout request ID." });
+        }
+
+        pendingWifiStkRequests.set(checkoutRequestId, {
+          checkoutReference: payment.checkoutReference,
+          initiatedAt: payment.createdAt
+        });
+
+        return res.status(202).json({
+          data: payment,
+          checkoutRequestId,
+          customerMessage: result.CustomerMessage
+        });
+      } catch (stkError) {
+        await wifiService.confirmPayment(payment.checkoutReference, {
+          status: "failed",
+          message: stkError instanceof Error ? stkError.message : "Unable to start M-PESA payment."
+        });
+        return next(stkError);
+      }
     } catch (error) {
       return next(error);
     }
@@ -13007,6 +13133,189 @@ async function bootstrap() {
     }
 
     return res.json({ data: payment });
+  });
+
+  app.get("/api/resident/wifi/packages", async (req, res, next) => {
+    try {
+      const session = await getResidentSession(req, res);
+      if (!session) {
+        return;
+      }
+
+      if (!buildingWifiPackageService) {
+        return res.json({ data: [] });
+      }
+
+      const building = await store.getBuilding(session.buildingId);
+      if (!building) {
+        return res.status(404).json({ error: "Building not found" });
+      }
+
+      if (buildingConfigurationService) {
+        await buildingConfigurationService.ensureDefaultsForBuildings([building]);
+        const config = await buildingConfigurationService.getForBuilding(building.id);
+        if (config && (!config.wifiEnabled || config.wifiAccessMode === "disabled")) {
+          return res.json({ data: [] });
+        }
+      }
+
+      await buildingWifiPackageService.ensureDefaultsForBuildings([building]);
+      const packages = await buildingWifiPackageService.listForBuilding(building.id, {
+        enabledOnly: true
+      });
+
+      return res.json({
+        data: packages.map((item) => ({
+          id: item.id,
+          name: item.name,
+          hours: item.hours,
+          priceKsh: item.residentPriceKsh ?? item.priceKsh,
+          rateLimit: item.rateLimit,
+          deviceLimit: item.deviceLimit,
+          profile: item.profile
+        }))
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.post("/api/resident/wifi/payments", async (req, res, next) => {
+    try {
+      const session = await getResidentSession(req, res);
+      if (!session) {
+        return;
+      }
+
+      if (!buildingWifiPackageService) {
+        return res.status(503).json({ error: "Resident Wi-Fi purchase is not available." });
+      }
+
+      const parsed = residentWifiPaymentSchema.parse(req.body);
+      const building = await store.getBuilding(session.buildingId);
+      if (!building) {
+        return res.status(404).json({ error: "Building not found" });
+      }
+
+      if (buildingConfigurationService) {
+        await buildingConfigurationService.ensureDefaultsForBuildings([building]);
+        const config = await buildingConfigurationService.getForBuilding(building.id);
+        if (config && (!config.wifiEnabled || config.wifiAccessMode === "disabled")) {
+          return res.status(403).json({ error: "Wi-Fi is not enabled for this building." });
+        }
+      }
+
+      await buildingWifiPackageService.ensureDefaultsForBuildings([building]);
+      const selectedPackage = await buildingWifiPackageService.getForBuildingPackage(
+        building.id,
+        parsed.packageId
+      );
+      if (!selectedPackage) {
+        return res.status(404).json({ error: "Wi-Fi package not found" });
+      }
+      if (!selectedPackage.enabled) {
+        return res.status(403).json({ error: "Wi-Fi package is disabled" });
+      }
+
+      const residentPackage = {
+        ...selectedPackage,
+        priceKsh: selectedPackage.residentPriceKsh ?? selectedPackage.priceKsh
+      };
+
+      const buildingPaymentProfile = paymentProfileService.resolveForBuilding(
+        building.id,
+        "/api/payments/mpesa/wifi-callback"
+      );
+      const mpesaConfig = buildingPaymentProfile.config;
+      if (!buildingPaymentProfile.publicProfile || !mpesaConfig) {
+        return res.status(503).json({
+          error:
+            "M-PESA payment profile is not available for this building. Ask management to update payment routing."
+        });
+      }
+      if (!mpesaConfig.enabled) {
+        return res.status(503).json({ error: "M-PESA STK is disabled for this building payment profile." });
+      }
+      if (!mpesaConfig.isConfigured) {
+        return res.status(503).json({
+          error: "M-PESA STK is not fully configured for this building payment profile.",
+          missing: mpesaConfig.missing
+        });
+      }
+
+      const formattedPhone = formatDarajaMsisdn(session.phoneNumber);
+      if (!formattedPhone) {
+        return res.status(400).json({ error: "No valid phone number on this resident account for M-PESA." });
+      }
+
+      const payment = wifiService.createPayment(
+        { buildingId: building.id, packageId: parsed.packageId, phoneNumber: session.phoneNumber },
+        { id: building.id, name: building.name },
+        residentPackage
+      );
+
+      try {
+        const callbackUrl = mpesaConfig.callbackUrl.includes("token=")
+          ? mpesaConfig.callbackUrl
+          : appendQueryParam(mpesaConfig.callbackUrl, "token", mpesaWifiCallbackToken);
+
+        const client = new DarajaClient(mpesaConfig);
+        const result = await client.initiateStkPush({
+          amount: Math.round(payment.amountKsh),
+          phoneNumber: formattedPhone,
+          accountReference: payment.checkoutReference.slice(0, 12),
+          transactionDesc: `${building.name} WiFi ${payment.package.name}`.slice(0, 80),
+          callbackUrl
+        });
+
+        const checkoutRequestId =
+          typeof result.CheckoutRequestID === "string" ? result.CheckoutRequestID.trim() : "";
+        if (!checkoutRequestId) {
+          await wifiService.confirmPayment(payment.checkoutReference, {
+            status: "failed",
+            message: "M-PESA did not return a checkout request ID."
+          });
+          return res.status(502).json({ error: "M-PESA did not return a checkout request ID." });
+        }
+
+        pendingWifiStkRequests.set(checkoutRequestId, {
+          checkoutReference: payment.checkoutReference,
+          initiatedAt: payment.createdAt
+        });
+
+        return res.status(202).json({
+          data: payment,
+          checkoutRequestId,
+          customerMessage: result.CustomerMessage
+        });
+      } catch (stkError) {
+        await wifiService.confirmPayment(payment.checkoutReference, {
+          status: "failed",
+          message: stkError instanceof Error ? stkError.message : "Unable to start M-PESA payment."
+        });
+        return next(stkError);
+      }
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.get("/api/resident/wifi/payments/:checkoutReference", async (req, res, next) => {
+    try {
+      const session = await getResidentSession(req, res);
+      if (!session) {
+        return;
+      }
+
+      const payment = wifiService.getPayment(req.params.checkoutReference);
+      if (!payment || payment.building.id !== session.buildingId) {
+        return res.status(404).json({ error: "Payment not found" });
+      }
+
+      return res.json({ data: payment });
+    } catch (error) {
+      return next(error);
+    }
   });
 
   app.post("/api/user/reports", async (req, res, next) => {
@@ -14415,29 +14724,55 @@ async function bootstrap() {
       }
 
       const parsed = confirmWifiPaymentSchema.parse(req.body);
-      const payment = await wifiService.confirmPayment(
+      const result = await finalizeWifiPaymentAfterMpesaResult(
         req.params.checkoutReference,
         parsed
       );
 
-      if (!payment) {
+      if (!result) {
         return res.status(404).json({ error: "Payment not found" });
       }
 
-      const captynWifi =
-        parsed.status === "success"
-          ? await captynWifiIntegrationService.forwardConfirmedHousingWifiPayment(payment)
-          : { status: "disabled" as const, reason: "Payment was not successful." };
+      return res.json({ data: result.payment, captynWifi: result.captynWifi });
+    } catch (error) {
+      return next(error);
+    }
+  });
 
-      if (captynWifi.status === "failed") {
-        console.error("Failed to forward Housing Wi-Fi payment to CAPTYN Wi-Fi:", {
-          checkoutReference: payment.checkoutReference,
-          responseStatus: captynWifi.responseStatus,
-          error: captynWifi.error
+  app.post("/api/payments/mpesa/wifi-callback", async (req, res, next) => {
+    try {
+      if (!callbackTokenMatches(req, mpesaWifiCallbackToken)) {
+        return res.status(401).json({ error: "Invalid M-PESA callback token" });
+      }
+
+      const extracted = parseMpesaCallbackPayload(req.body);
+      const pending = extracted.checkoutRequestId
+        ? pendingWifiStkRequests.get(extracted.checkoutRequestId)
+        : undefined;
+
+      if (extracted.checkoutRequestId) {
+        pendingWifiStkRequests.delete(extracted.checkoutRequestId);
+      }
+
+      if (!pending) {
+        return res.status(202).json({
+          received: true,
+          applied: false,
+          message: "No matching pending WiFi payment."
         });
       }
 
-      return res.json({ data: payment, captynWifi });
+      const result = await finalizeWifiPaymentAfterMpesaResult(pending.checkoutReference, {
+        status: extracted.resultCode === 0 ? "success" : "failed",
+        providerReference: extracted.providerReference ?? extracted.checkoutRequestId,
+        message: extracted.resultDesc
+      });
+
+      if (!result) {
+        return res.status(404).json({ error: "Payment not found" });
+      }
+
+      return res.status(200).json({ data: result.payment, captynWifi: result.captynWifi });
     } catch (error) {
       return next(error);
     }

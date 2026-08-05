@@ -141,6 +141,10 @@ export const createWifiPaymentSchema = z.object({
   phoneNumber: kenyaPhoneSchema
 });
 
+export const residentWifiPaymentSchema = z.object({
+  packageId: wifiPackageIdSchema
+});
+
 export const confirmWifiPaymentSchema = z.object({
   status: z.enum(["success", "failed"]),
   providerReference: z.string().trim().min(1).optional(),
@@ -153,6 +157,9 @@ export const updateWifiPackageSchema = z
     profile: z.string().trim().min(1).max(100).optional(),
     hours: z.number().int().min(1).max(72).optional(),
     priceKsh: z.number().int().min(1).max(10_000).optional(),
+    residentPriceKsh: z.number().int().min(0).max(10_000).nullable().optional(),
+    rateLimit: z.string().trim().min(1).max(64).nullable().optional(),
+    deviceLimit: z.number().int().min(1).max(10).optional(),
     enabled: z.boolean().optional()
   })
   .refine((value) => Object.keys(value).length > 0, {

@@ -4,7 +4,15 @@ export interface CaptynWifiPaymentPackage {
   hours: number;
   priceKsh: number;
   profile?: string;
+  rateLimit?: string | null;
+  deviceLimit?: number;
   enabled?: boolean;
+}
+
+export interface CaptynWifiEntitlement {
+  username: string;
+  password: string;
+  expiresAt: string;
 }
 
 export interface CaptynWifiConfirmedPayment {
@@ -25,7 +33,7 @@ export interface CaptynWifiConfirmedPayment {
 
 export type CaptynWifiForwardResult =
   | { status: "disabled"; reason: string }
-  | { status: "forwarded"; responseStatus: number }
+  | { status: "forwarded"; responseStatus: number; entitlement?: CaptynWifiEntitlement }
   | { status: "failed"; responseStatus?: number; error: string };
 
 export interface CaptynWifiIntegrationOptions {
@@ -93,6 +101,8 @@ export class CaptynWifiIntegrationService {
               name: payment.package.name,
               hours: payment.package.hours,
               priceKsh: payment.package.priceKsh,
+              rateLimit: payment.package.rateLimit ?? undefined,
+              deviceLimit: payment.package.deviceLimit ?? 1,
               enabled: payment.package.enabled ?? true
             },
             customerPhone: payment.phoneNumber,
@@ -116,7 +126,22 @@ export class CaptynWifiIntegrationService {
         };
       }
 
-      return { status: "forwarded", responseStatus: response.status };
+      const body = await response.json().catch(() => null) as {
+        data?: {
+          entitlement?: { username?: string; cleartextSecret?: string; expiresAt?: string };
+        };
+      } | null;
+      const rawEntitlement = body?.data?.entitlement;
+      const entitlement: CaptynWifiEntitlement | undefined =
+        rawEntitlement?.username && rawEntitlement?.cleartextSecret && rawEntitlement?.expiresAt
+          ? {
+              username: rawEntitlement.username,
+              password: rawEntitlement.cleartextSecret,
+              expiresAt: rawEntitlement.expiresAt
+            }
+          : undefined;
+
+      return { status: "forwarded", responseStatus: response.status, entitlement };
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "CAPTYN Wi-Fi forwarding failed";

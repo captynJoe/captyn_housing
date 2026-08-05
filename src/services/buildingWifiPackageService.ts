@@ -16,6 +16,9 @@ export const DEFAULT_BUILDING_WIFI_PACKAGES: WifiPackage[] = [
     name: "Quick Check-In",
     hours: 1,
     priceKsh: 15,
+    residentPriceKsh: 8,
+    rateLimit: "2M/5M",
+    deviceLimit: 1,
     profile: "Short tasks"
   },
   {
@@ -23,6 +26,9 @@ export const DEFAULT_BUILDING_WIFI_PACKAGES: WifiPackage[] = [
     name: "Focused Session",
     hours: 3,
     priceKsh: 30,
+    residentPriceKsh: 18,
+    rateLimit: "3M/8M",
+    deviceLimit: 1,
     profile: "Meetings + classes"
   },
   {
@@ -30,6 +36,9 @@ export const DEFAULT_BUILDING_WIFI_PACKAGES: WifiPackage[] = [
     name: "Work Block",
     hours: 8,
     priceKsh: 65,
+    residentPriceKsh: 40,
+    rateLimit: "5M/10M",
+    deviceLimit: 2,
     profile: "Full shift"
   },
   {
@@ -37,6 +46,9 @@ export const DEFAULT_BUILDING_WIFI_PACKAGES: WifiPackage[] = [
     name: "Day Pass",
     hours: 24,
     priceKsh: 120,
+    residentPriceKsh: 70,
+    rateLimit: "5M/10M",
+    deviceLimit: 2,
     profile: "24-hour access"
   }
 ];
@@ -48,6 +60,9 @@ function mapRow(
     name: string;
     hours: number;
     priceKsh: number;
+    residentPriceKsh: number | null;
+    rateLimit: string | null;
+    deviceLimit: number;
     profile: string;
     enabled: boolean;
     createdAt: Date;
@@ -60,6 +75,9 @@ function mapRow(
     name: row.name,
     hours: row.hours,
     priceKsh: row.priceKsh,
+    residentPriceKsh: row.residentPriceKsh,
+    rateLimit: row.rateLimit,
+    deviceLimit: row.deviceLimit,
     profile: row.profile,
     enabled: row.enabled,
     createdAt: row.createdAt.toISOString(),
@@ -91,6 +109,9 @@ export class BuildingWifiPackageService {
             name: pkg.name,
             hours: pkg.hours,
             priceKsh: pkg.priceKsh,
+            residentPriceKsh: pkg.residentPriceKsh ?? null,
+            rateLimit: pkg.rateLimit ?? null,
+            deviceLimit: pkg.deviceLimit ?? 1,
             profile: pkg.profile,
             enabled: true
           }
@@ -157,6 +178,10 @@ export class BuildingWifiPackageService {
         profile: input.profile ?? existing.profile,
         hours: input.hours ?? existing.hours,
         priceKsh: input.priceKsh ?? existing.priceKsh,
+        residentPriceKsh:
+          input.residentPriceKsh !== undefined ? input.residentPriceKsh : existing.residentPriceKsh,
+        rateLimit: input.rateLimit !== undefined ? input.rateLimit : existing.rateLimit,
+        deviceLimit: input.deviceLimit ?? existing.deviceLimit,
         enabled: typeof input.enabled === "boolean" ? input.enabled : existing.enabled
       }
     });

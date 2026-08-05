@@ -3866,7 +3866,7 @@ function renderUtilityPayments(payments, fallbackMessage) {
 
   payments.slice(0, 8).forEach((payment) => {
     const card = document.createElement("article");
-    card.className = "stack-item";
+    card.className = "stack-item receipt-history-item";
     card.dataset.paymentKind = "utility";
     card.dataset.paymentId = payment.id;
 
@@ -3884,15 +3884,33 @@ function renderUtilityPayments(payments, fallbackMessage) {
       chip.classList.add("chip-mpesa");
     }
 
-    top.append(title, chip);
+    const receiptPanelId = `utility-receipt-${payment.id}`;
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "receipt-toggle-btn";
+    toggleBtn.dataset.receiptToggle = receiptPanelId;
+    toggleBtn.setAttribute("aria-expanded", "false");
+    toggleBtn.setAttribute("aria-controls", receiptPanelId);
+    toggleBtn.textContent = "Receipt";
+
+    top.append(title, chip, toggleBtn);
 
     const details = document.createElement("p");
     details.className = "item-details";
     const receiptRef = payment.providerReference ?? "pending";
-    details.textContent =
-      `${payment.billingMonth ?? "latest"} • ${formatDateTime(
-        payment.paidAt
-      )} • Receipt ${receiptRef}`;
+    details.textContent = `${payment.billingMonth ?? "latest"} • ${formatDateTime(
+      payment.paidAt
+    )}`;
+
+    const receiptPanel = document.createElement("div");
+    receiptPanel.id = receiptPanelId;
+    receiptPanel.className = "receipt-inline-panel hidden";
+    receiptPanel.setAttribute("aria-hidden", "true");
+
+    const receiptSummary = document.createElement("p");
+    receiptSummary.className = "item-details receipt-inline-summary";
+    receiptSummary.textContent = `Receipt ${receiptRef}`;
 
     const actions = document.createElement("div");
     actions.className = "action-row payment-history-actions";
@@ -3905,8 +3923,9 @@ function renderUtilityPayments(payments, fallbackMessage) {
     receiptBtn.textContent = "View receipt";
 
     actions.append(receiptBtn);
+    receiptPanel.append(receiptSummary, actions);
 
-    card.append(top, details, actions);
+    card.append(top, details, receiptPanel);
     utilityPaymentsListEl.append(card);
   });
 }
@@ -3933,7 +3952,7 @@ function renderRentPayments(payments, fallbackMessage) {
 
   payments.slice(0, 8).forEach((payment) => {
     const card = document.createElement("article");
-    card.className = "stack-item";
+    card.className = "stack-item receipt-history-item";
     card.dataset.paymentKind = "rent";
     card.dataset.paymentId = payment.id;
 
@@ -3948,12 +3967,31 @@ function renderRentPayments(payments, fallbackMessage) {
     chip.className = "item-chip chip-success";
     chip.textContent = payment.billingMonth ?? "-";
 
-    top.append(title, chip);
+    const receiptPanelId = `rent-receipt-${payment.id}`;
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "receipt-toggle-btn";
+    toggleBtn.dataset.receiptToggle = receiptPanelId;
+    toggleBtn.setAttribute("aria-expanded", "false");
+    toggleBtn.setAttribute("aria-controls", receiptPanelId);
+    toggleBtn.textContent = "Receipt";
+
+    top.append(title, chip, toggleBtn);
 
     const details = document.createElement("p");
     details.className = "item-details";
     const receiptRef = payment.providerReference ?? "pending";
-    details.textContent = `${formatDateTime(payment.paidAt)} • Receipt ${receiptRef}`;
+    details.textContent = formatDateTime(payment.paidAt);
+
+    const receiptPanel = document.createElement("div");
+    receiptPanel.id = receiptPanelId;
+    receiptPanel.className = "receipt-inline-panel hidden";
+    receiptPanel.setAttribute("aria-hidden", "true");
+
+    const receiptSummary = document.createElement("p");
+    receiptSummary.className = "item-details receipt-inline-summary";
+    receiptSummary.textContent = `Receipt ${receiptRef}`;
 
     const actions = document.createElement("div");
     actions.className = "action-row payment-history-actions";
@@ -3966,10 +4004,29 @@ function renderRentPayments(payments, fallbackMessage) {
     receiptBtn.textContent = "View receipt";
 
     actions.append(receiptBtn);
+    receiptPanel.append(receiptSummary, actions);
 
-    card.append(top, details, actions);
+    card.append(top, details, receiptPanel);
     rentPaymentsListEl.append(card);
   });
+}
+
+function toggleInlineReceiptPanel(toggleBtn: HTMLButtonElement) {
+  const panelId = toggleBtn.dataset.receiptToggle;
+  if (!panelId) {
+    return;
+  }
+
+  const panel = document.getElementById(panelId);
+  if (!(panel instanceof HTMLElement)) {
+    return;
+  }
+
+  const isOpen = toggleBtn.getAttribute("aria-expanded") === "true";
+  toggleBtn.setAttribute("aria-expanded", String(!isOpen));
+  toggleBtn.textContent = isOpen ? "Receipt" : "Hide receipt";
+  panel.classList.toggle("hidden", isOpen);
+  panel.setAttribute("aria-hidden", String(isOpen));
 }
 
 function showSignedOutState() {
@@ -5650,6 +5707,12 @@ function startResidentPortal() {
       return;
     }
 
+    const toggleBtn = trigger.closest("button[data-receipt-toggle]");
+    if (toggleBtn instanceof HTMLButtonElement) {
+      toggleInlineReceiptPanel(toggleBtn);
+      return;
+    }
+
     const receiptBtn = trigger.closest("button[data-receipt-kind][data-payment-id]");
     if (!(receiptBtn instanceof HTMLButtonElement)) {
       return;
@@ -5661,6 +5724,12 @@ function startResidentPortal() {
   rentPaymentsListEl.addEventListener("click", (event) => {
     const trigger = event.target;
     if (!(trigger instanceof HTMLElement)) {
+      return;
+    }
+
+    const toggleBtn = trigger.closest("button[data-receipt-toggle]");
+    if (toggleBtn instanceof HTMLButtonElement) {
+      toggleInlineReceiptPanel(toggleBtn);
       return;
     }
 

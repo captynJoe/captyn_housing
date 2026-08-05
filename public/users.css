@@ -1407,6 +1407,49 @@ button,
   padding: 8px 12px;
 }
 
+.receipt-history-item {
+  display: grid;
+  gap: 6px;
+}
+
+.receipt-history-item .stack-top {
+  align-items: center;
+}
+
+.receipt-history-item .item-title {
+  min-width: 0;
+}
+
+.receipt-toggle-btn {
+  flex: 0 0 auto;
+  border: 1px solid rgba(16, 28, 40, 0.16);
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--ink-700);
+  padding: 7px 10px;
+  font-size: 0.78rem;
+}
+
+.receipt-toggle-btn[aria-expanded="true"] {
+  border-color: rgba(15, 123, 118, 0.32);
+  background: rgba(15, 123, 118, 0.1);
+  color: #0b5f5b;
+}
+
+.receipt-inline-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 123, 118, 0.16);
+  background: rgba(242, 250, 246, 0.72);
+}
+
+.receipt-inline-summary {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 body.modal-open {
   overflow: hidden;
 }
@@ -1605,6 +1648,15 @@ body.app-loading #resident-password-change-panel {
   .payment-summary-actions {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .receipt-history-item .stack-top {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .receipt-toggle-btn {
+    margin-left: auto;
   }
 
   .payment-priority-brand,

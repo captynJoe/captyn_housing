@@ -1,27 +1,27 @@
 :root {
-  --resident-bg: #f4f7f3;
-  --resident-ink: #152226;
-  --resident-muted: #5d6f73;
-  --resident-line: rgba(21, 34, 38, 0.13);
-  --resident-panel: #ffffff;
-  --resident-panel-soft: #f8fbf8;
-  --resident-teal: #0f7b76;
-  --resident-teal-dark: #0a5f5a;
-  --resident-green: #23835a;
-  --resident-amber: #a96412;
-  --resident-red: #bb3f38;
-  --resident-blue: #276aa4;
-  --resident-shadow: 0 18px 50px rgba(27, 44, 45, 0.1);
+  --resident-bg: var(--captyn-canvas, #f2f4fa);
+  --resident-ink: var(--captyn-ink-strong, #060a17);
+  --resident-muted: var(--captyn-muted, #616b85);
+  --resident-line: var(--captyn-line, rgba(11, 26, 58, 0.14));
+  --resident-panel: var(--captyn-panel-strong, #ffffff);
+  --resident-panel-soft: var(--captyn-panel-soft, #f6f8fc);
+  --resident-teal: var(--captyn-teal, #14b8ac);
+  --resident-teal-dark: var(--captyn-blue-dark, #1c42c2);
+  --resident-green: var(--captyn-green, #0f8a5f);
+  --resident-amber: var(--captyn-amber, #a3660a);
+  --resident-red: var(--captyn-red, #c22b1f);
+  --resident-blue: var(--captyn-blue, #2454e6);
+  --resident-navy: var(--captyn-navy, #0b1a3a);
+  --resident-shadow: var(--captyn-shadow, 0 18px 50px rgba(11, 26, 58, 0.12));
 }
 
 html[data-captyn-ui-runtime="typescript"] body {
   background:
-    linear-gradient(90deg, rgba(15, 123, 118, 0.055) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(15, 123, 118, 0.045) 1px, transparent 1px),
+    radial-gradient(circle at 15% -10%, rgba(36, 84, 230, 0.08) 0%, transparent 40%),
     var(--resident-bg) !important;
-  background-size: 34px 34px !important;
+  background-size: auto !important;
   color: var(--resident-ink);
-  font-family: Inter, Aptos, "Segoe UI", Arial, sans-serif;
+  font-family: var(--captyn-font-body, "Inter", Aptos, "Segoe UI", Arial, sans-serif);
 }
 
 .resident-ts-shell .ambient {
@@ -41,7 +41,7 @@ html[data-captyn-ui-runtime="typescript"] body {
   padding: 8px 10px 8px 16px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
-  background: #102426;
+  background: var(--resident-navy);
   box-shadow: 0 16px 34px rgba(16, 36, 38, 0.18);
 }
 
@@ -210,7 +210,7 @@ html[data-captyn-ui-runtime="typescript"] body {
 .resident-ts-shell .payment-summary-card {
   border: 1px solid rgba(15, 123, 118, 0.14);
   border-radius: 8px;
-  background: #102426;
+  background: var(--resident-navy);
   color: #ffffff;
 }
 
@@ -355,7 +355,7 @@ html[data-captyn-ui-runtime="typescript"] body {
   min-width: 118px;
   background: #44c27f !important;
   border-color: #44c27f !important;
-  color: #102426 !important;
+  color: var(--resident-navy) !important;
 }
 
 .resident-ts-shell .resident-pay-sheet {
@@ -549,7 +549,7 @@ html[data-captyn-ui-runtime="typescript"] body {
   top: auto;
   padding: 8px 12px;
   border-radius: 7px;
-  background: #102426;
+  background: var(--resident-navy);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 10px 22px rgba(16, 28, 40, 0.16);
 }

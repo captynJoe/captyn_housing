@@ -18,7 +18,7 @@
     <link rel="stylesheet" href="/users.css?v=20260806c" />
     <script src="/captyn-theme.js?v=20260806a"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=20260806b" />
-    <link rel="stylesheet" href="/resident-app/assets/resident.css?v=20260806d" />
+    <link rel="stylesheet" href="/resident-app/assets/resident.css?v=20260806e" />
   </head>
   <body class="app-loading">
     <div class="ambient" aria-hidden="true"></div>
@@ -268,49 +268,42 @@
 
       <section id="resident-layout" class="resident-workspace hidden">
         <section class="resident-content">
-          <section class="resident-view" data-resident-view-panel="overview">
-            <article class="panel-card">
-              <section class="section-head">
-                <h2>Overview</h2>
-              </section>
-
-              <section class="resident-home-card">
-                <div class="resident-home-copy">
-                  <p class="subheading">Today</p>
-                  <h3 id="resident-home-balance">KSh 0 due</h3>
-                  <p id="resident-home-summary" class="item-details">Your room balance will appear after sign-in.</p>
-                </div>
-                <div class="resident-home-actions">
-                  <button id="open-payments-view-btn" type="button" data-resident-pay-open="auto">Pay</button>
-                  <button id="open-support-view-btn" type="button" class="ghost-btn">Report Issue</button>
-                </div>
-              </section>
-
-              <section class="overview-grid resident-home-grid">
-                <article class="overview-card">
-                  <p class="subheading">Building</p>
-                  <p id="overview-building" class="overview-value">-</p>
-                </article>
-                <article class="overview-card">
-                  <p class="subheading">House Number</p>
-                  <p id="overview-house-number" class="overview-value">-</p>
-                </article>
-                <article class="overview-card">
-                  <p class="subheading">Rent</p>
-                  <p id="overview-rent-balance" class="overview-value">KSh 0</p>
-                </article>
-                <article class="overview-card">
-                  <p class="subheading">Utilities</p>
-                  <p id="overview-utility-balance" class="overview-value">KSh 0</p>
-                </article>
-              </section>
-
-              <div class="resident-home-secondary-actions">
-                <button id="open-notices-view-btn" type="button" class="ghost-btn">View Notices</button>
+          <section class="resident-view rv-overview" data-resident-view-panel="overview">
+            <section class="rv-hero">
+              <p class="rv-eyebrow">Today</p>
+              <h1 id="resident-home-balance" class="rv-hero-amount">KSh 0 due</h1>
+              <p id="resident-home-summary" class="rv-hero-copy">Your room balance will appear after sign-in.</p>
+              <div class="rv-hero-actions">
+                <button id="open-payments-view-btn" type="button" data-resident-pay-open="auto" class="rv-btn-primary">Pay now</button>
+                <button id="open-support-view-btn" type="button" class="rv-btn-ghost">Report an issue</button>
               </div>
+            </section>
 
-              <p id="overview-session-expiry" class="item-details"></p>
-            </article>
+            <section class="rv-stat-grid">
+              <article class="rv-stat">
+                <span class="rv-stat-label">Building</span>
+                <p id="overview-building" class="rv-stat-value">-</p>
+              </article>
+              <article class="rv-stat">
+                <span class="rv-stat-label">House</span>
+                <p id="overview-house-number" class="rv-stat-value">-</p>
+              </article>
+              <article class="rv-stat">
+                <span class="rv-stat-label">Rent due</span>
+                <p id="overview-rent-balance" class="rv-stat-value">KSh 0</p>
+              </article>
+              <article class="rv-stat">
+                <span class="rv-stat-label">Utilities due</span>
+                <p id="overview-utility-balance" class="rv-stat-value">KSh 0</p>
+              </article>
+            </section>
+
+            <button id="open-notices-view-btn" type="button" class="rv-quicklink">
+              <span>Building notices</span>
+              <em>See what's new &rarr;</em>
+            </button>
+
+            <p id="overview-session-expiry" class="rv-footnote"></p>
           </section>
 
           <section class="resident-view hidden" data-resident-view-panel="support">
@@ -956,6 +949,6 @@
       </article>
     </section>
 
-    <script type="module" src="/resident-app/assets/resident.js?v=20260806d"></script>
+    <script type="module" src="/resident-app/assets/resident.js?v=20260806e"></script>
   </body>
 </html>

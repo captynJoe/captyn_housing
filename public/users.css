@@ -1346,47 +1346,54 @@ button,
 
 .wifi-package-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 14px;
   margin: 14px 0;
 }
 
 .wifi-package-card {
   display: grid;
-  gap: 8px;
-  padding: 14px;
-  border-radius: 12px;
-  border: 1px solid rgba(16, 28, 40, 0.14);
-  background: rgba(255, 255, 255, 0.9);
+  gap: 10px;
+  padding: 18px;
+  border-radius: 16px !important;
+  border: 1px solid rgba(6, 40, 26, 0.28) !important;
+  background: linear-gradient(150deg, #128a58, #0a5c3a) !important;
+  box-shadow: 0 10px 22px rgba(9, 66, 43, 0.22);
   text-align: left;
   cursor: pointer;
   font: inherit;
-  color: inherit;
+  color: #fff !important;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .wifi-package-card:hover,
 .wifi-package-card:focus-visible {
-  border-color: rgba(15, 123, 118, 0.5);
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px rgba(9, 66, 43, 0.3);
+  background: linear-gradient(150deg, #159263, #0c6640) !important;
 }
 
 .wifi-package-card.pending {
   opacity: 0.6;
   cursor: wait;
+  transform: none;
 }
 
 .wifi-package-card .wifi-package-name {
   font-weight: 700;
+  color: rgba(255, 255, 255, 0.92);
 }
 
 .wifi-package-card .wifi-package-price {
-  font-size: 20px;
+  font-family: var(--captyn-font-display, "Manrope", sans-serif);
+  font-size: 24px;
   font-weight: 800;
-  color: #0b5f5b;
+  color: #8ff2c4;
 }
 
 .wifi-package-card .wifi-package-meta {
   font-size: 12px;
-  color: rgba(16, 28, 40, 0.62);
+  color: rgba(255, 255, 255, 0.72);
 }
 
 .payment-channel-grid {

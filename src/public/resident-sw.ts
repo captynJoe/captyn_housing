@@ -1,5 +1,5 @@
 // @ts-nocheck
-const CACHE_NAME = "captyn-resident-v20260806c";
+const CACHE_NAME = "captyn-resident-v20260806d";
 const RESIDENT_SHELL_URL = "/resident";
 const PROFILE_SHELL_URL = "/user";
 const LANDLORD_SHELL_URL = "/landlord";
@@ -7,7 +7,7 @@ const APP_ASSETS = [
   RESIDENT_SHELL_URL,
   PROFILE_SHELL_URL,
   LANDLORD_SHELL_URL,
-  "/users.css?v=20260806c",
+  "/users.css?v=20260806d",
   "/user.css?v=20260523b",
   "/landlord.css?v=20260806a",
   "/captyn-theme.css?v=20260806b",

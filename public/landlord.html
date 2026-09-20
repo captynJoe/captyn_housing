@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=20260322b" />
-    <link rel="stylesheet" href="/landlord.css?v=20260806a" />
+    <link rel="stylesheet" href="/landlord.css?v=20260915a" />
     <script src="/captyn-theme.js?v=20260806a"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=20260806c" />
   </head>
@@ -429,24 +429,6 @@
 
         <section
           class="panel wide-panel landlord-view hidden"
-          data-landlord-view-panel="settings"
-          id="overview-wifi-packages-section"
-        >
-          <div class="panel-head">
-            <h2>Wi-Fi Package Setup</h2>
-            <button id="refresh-wifi-packages" type="button">Refresh</button>
-          </div>
-          <div class="inline-fields compact-fields">
-            <label>
-              Building
-              <select id="wifi-package-building-select"></select>
-            </label>
-          </div>
-          <div id="wifi-package-list" class="package-list"></div>
-        </section>
-
-        <section
-          class="panel wide-panel landlord-view hidden"
           data-landlord-view-panel="buildings"
           id="buildings-section"
         >
@@ -694,6 +676,84 @@
             </p>
           </div>
 
+          <div class="package-card">
+            <div class="panel-head">
+              <div>
+                <h3>Building Defaults</h3>
+                <p id="building-defaults-summary" class="status-text">
+                  Rent, utility, and meter-reading defaults for the building selected above.
+                </p>
+              </div>
+            </div>
+            <form id="building-defaults-form" class="inline-fields compact-fields">
+              <label>
+                Utility Billing Mode
+                <select id="building-defaults-utility-billing-mode">
+                  <option value="metered">metered</option>
+                  <option value="fixed_charge">fixed_charge</option>
+                  <option value="combined_charge">combined_charge</option>
+                  <option value="disabled">disabled</option>
+                </select>
+              </label>
+              <label>
+                Default Water Rate (KSh/unit)
+                <input id="building-defaults-water-rate" type="number" min="0" step="0.01" />
+              </label>
+              <label>
+                Default Electricity Rate (KSh/unit)
+                <input id="building-defaults-electricity-rate" type="number" min="0" step="0.01" />
+              </label>
+              <label>
+                Default Water Fixed Charge (KSh)
+                <input id="building-defaults-water-fixed" type="number" min="0" step="1" />
+              </label>
+              <label>
+                Default Electricity Fixed Charge (KSh)
+                <input id="building-defaults-electricity-fixed" type="number" min="0" step="1" />
+              </label>
+              <label>
+                Default Combined Utility Charge (KSh)
+                <input id="building-defaults-combined-charge" type="number" min="0" step="1" />
+              </label>
+              <label>
+                Utility Balance Visible Days
+                <input id="building-defaults-balance-visible-days" type="number" min="0" max="60" step="1" />
+              </label>
+              <label>
+                Default Monthly Rent (KSh)
+                <input id="building-defaults-monthly-rent" type="number" min="0" step="1" />
+              </label>
+              <label>
+                Rent Due Day
+                <input id="building-defaults-rent-due-day" type="number" min="1" max="31" step="1" />
+              </label>
+              <label>
+                Meter Reading Day
+                <input id="building-defaults-meter-reading-day" type="number" min="1" max="31" step="1" placeholder="e.g. 25" />
+              </label>
+              <p class="status-text building-defaults-full-width">
+                Landlord and house manager get a reminder from this day each month until every
+                metered house is read. Entry is never blocked before this day — this only
+                controls when the reminder starts.
+              </p>
+              <label class="checkbox-row building-defaults-full-width">
+                <input id="building-defaults-allow-manual-rent" type="checkbox" /> Allow Manual Rent Posting
+              </label>
+              <label class="checkbox-row building-defaults-full-width">
+                <input id="building-defaults-allow-manual-utility" type="checkbox" /> Allow Manual Utility Posting
+              </label>
+              <label class="checkbox-row building-defaults-full-width">
+                <input id="building-defaults-acknowledge" type="checkbox" required />
+                I understand changing these defaults affects future billing for this building.
+              </label>
+              <label class="building-defaults-full-width">
+                Note (optional)
+                <input id="building-defaults-note" type="text" maxlength="280" />
+              </label>
+              <button id="building-defaults-save-btn" type="submit" class="building-defaults-full-width">Save Building Defaults</button>
+            </form>
+          </div>
+
           <div class="settings-danger-grid">
             <article class="package-card settings-danger-card">
               <div class="panel-head">
@@ -846,14 +906,14 @@
         >
           <summary>Rent Setup + Collection</summary>
           <div class="panel-head">
-            <h2>Rent Setup Sheet + Manual Payments</h2>
+            <h2>Rent Collection Status</h2>
             <div class="action-row">
-              <button id="open-rent-sheet-btn" type="button">Rent Setup Sheet</button>
+              <button id="open-rent-sheet-btn" type="button">One-Time Rent Setup Sheet</button>
               <button id="refresh-rent-status" type="button">Refresh</button>
             </div>
           </div>
           <details id="rent-payment-details" class="landlord-inline-details">
-            <summary>Record offline rent payment</summary>
+            <summary>Record a Payment</summary>
             <form id="rent-payment-form" class="package-card">
               <div class="inline-fields compact-fields">
                 <label>
@@ -1879,7 +1939,7 @@
           </label>
 
           <div class="table-wrap utility-sheet-table-wrap">
-            <table class="utility-sheet-table">
+            <table class="utility-sheet-table" data-mobile-cards="true">
               <thead>
                 <tr>
                   <th>House</th>
@@ -2400,6 +2460,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=20260801a"></script>
+    <script type="module" src="/landlord.js?v=20260915a"></script>
   </body>
 </html>

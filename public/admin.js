@@ -66,6 +66,11 @@ const adminUtilityPaymentPaidAtEl = document.getElementById("admin-utility-payme
 const adminUtilityPaymentReferenceEl = document.getElementById("admin-utility-payment-reference");
 const adminUtilityPaymentNoteEl = document.getElementById("admin-utility-payment-note");
 const adminUtilityPaymentsBodyEl = document.getElementById("admin-utility-payments-body");
+const adminWifiBuildingSelectEl = document.getElementById("admin-wifi-building-select");
+const refreshAdminWifiBtnEl = document.getElementById("refresh-admin-wifi");
+const adminWifiSummaryEl = document.getElementById("admin-wifi-summary");
+const adminWifiEntitlementsBodyEl = document.getElementById("admin-wifi-entitlements-body");
+const adminWifiSessionsBodyEl = document.getElementById("admin-wifi-sessions-body");
 const adminErrorEl = document.getElementById("admin-error");
 const state = {
     role: "-",
@@ -74,7 +79,11 @@ const state = {
     selectedAdminBillingBuildingId: "",
     adminBillingRegistryRows: [],
     adminUtilityPayments: [],
-    adminAccess: null
+    adminAccess: null,
+    selectedAdminWifiBuildingId: "",
+    adminWifiUnavailableReason: "",
+    adminWifiEntitlements: [],
+    adminWifiSessions: []
 };
 initResponsiveTables();
 function showError(message) {
@@ -974,6 +983,150 @@ async function loadAdminBillingConsole() {
         loadAdminMonthlyCombinedCharge()
     ]);
 }
+function isWifiEnabledForBuilding(building) {
+    return (Boolean(building?.wifiEnabled) &&
+        String(building?.wifiAccessMode ?? "").trim().toLowerCase() !== "disabled");
+}
+function getSelectedAdminWifiBuildingId() {
+    return adminWifiBuildingSelectEl instanceof HTMLSelectElement
+        ? String(adminWifiBuildingSelectEl.value || state.selectedAdminWifiBuildingId || "").trim()
+        : String(state.selectedAdminWifiBuildingId || "").trim();
+}
+function renderAdminWifiSummary() {
+    if (!(adminWifiSummaryEl instanceof HTMLElement)) {
+        return;
+    }
+    const buildingId = getSelectedAdminWifiBuildingId();
+    if (!buildingId) {
+        adminWifiSummaryEl.textContent =
+            "Select a building with Wi-Fi enabled to view access history and live sessions.";
+        return;
+    }
+    const building = state.buildings.find((item) => item.id === buildingId);
+    const activeCount = state.adminWifiEntitlements.filter((item) => item.status === "active").length;
+    adminWifiSummaryEl.textContent =
+        `${getBuildingDisplayName(building)} has ${activeCount} active Wi-Fi access record(s).`;
+}
+function syncAdminWifiBuildingOptions() {
+    if (!(adminWifiBuildingSelectEl instanceof HTMLSelectElement)) {
+        return;
+    }
+    const currentValue = getSelectedAdminWifiBuildingId();
+    const wifiBuildings = state.buildings
+        .filter(isWifiEnabledForBuilding)
+        .sort((left, right) => `${left.name}:${left.id}`.localeCompare(`${right.name}:${right.id}`));
+    adminWifiBuildingSelectEl.replaceChildren();
+    if (wifiBuildings.length === 0) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "No Wi-Fi-enabled buildings";
+        adminWifiBuildingSelectEl.append(option);
+        state.selectedAdminWifiBuildingId = "";
+        renderAdminWifiSummary();
+        return;
+    }
+    wifiBuildings.forEach((building) => {
+        const option = document.createElement("option");
+        option.value = building.id;
+        option.textContent = getBuildingDisplayName(building);
+        adminWifiBuildingSelectEl.append(option);
+    });
+    state.selectedAdminWifiBuildingId = wifiBuildings.some((item) => item.id === currentValue)
+        ? currentValue
+        : wifiBuildings[0].id;
+    adminWifiBuildingSelectEl.value = state.selectedAdminWifiBuildingId;
+    renderAdminWifiSummary();
+}
+function renderAdminWifiEntitlements(rows) {
+    if (!(adminWifiEntitlementsBodyEl instanceof HTMLElement)) {
+        return;
+    }
+    adminWifiEntitlementsBodyEl.replaceChildren();
+    if (!Array.isArray(rows) || rows.length === 0) {
+        appendEmptyRow(adminWifiEntitlementsBodyEl, 6, "No Wi-Fi vouchers issued for this building yet.");
+        return;
+    }
+    rows.forEach((item) => {
+        const row = document.createElement("tr");
+        const canRevoke = item.status === "active";
+        row.innerHTML = `
+      <td>${escapeHtml(item.customerPhone || "-")}</td>
+      <td>${escapeHtml(item.plan?.name ?? "-")}</td>
+      <td>${escapeHtml(item.status)}</td>
+      <td>${escapeHtml(formatDateTime(item.startsAt))}</td>
+      <td>${escapeHtml(formatDateTime(item.expiresAt))}</td>
+      <td>${canRevoke
+            ? `<button type="button" class="btn-danger" data-action="revoke-wifi-entitlement" data-entitlement-id="${escapeHtml(item.id)}">Revoke</button>`
+            : "<small>-</small>"}</td>
+    `;
+        adminWifiEntitlementsBodyEl.append(row);
+    });
+}
+function renderAdminWifiSessions(rows) {
+    if (!(adminWifiSessionsBodyEl instanceof HTMLElement)) {
+        return;
+    }
+    adminWifiSessionsBodyEl.replaceChildren();
+    if (!Array.isArray(rows) || rows.length === 0) {
+        appendEmptyRow(adminWifiSessionsBodyEl, 5, "No RADIUS accounting sessions reported for this building yet.");
+        return;
+    }
+    rows.forEach((item) => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+      <td>${escapeHtml(item.username)}</td>
+      <td>${escapeHtml(item.callingStationId ?? "-")}</td>
+      <td>${escapeHtml(item.framedIpAddress ?? "-")}</td>
+      <td>${escapeHtml(formatDateTime(item.startedAt))}</td>
+      <td>${escapeHtml(formatDateTime(item.lastInterimAt))}</td>
+    `;
+        adminWifiSessionsBodyEl.append(row);
+    });
+}
+async function loadAdminWifiEntitlementsSessions() {
+    const buildingId = getSelectedAdminWifiBuildingId();
+    if (!buildingId) {
+        state.adminWifiEntitlements = [];
+        state.adminWifiSessions = [];
+        state.adminWifiUnavailableReason = "";
+        renderAdminWifiEntitlements([]);
+        renderAdminWifiSessions([]);
+        return;
+    }
+    try {
+        const [entitlementsPayload, sessionsPayload] = await Promise.all([
+            requestJson(`/api/admin/buildings/${encodeURIComponent(buildingId)}/wifi/entitlements`),
+            requestJson(`/api/admin/buildings/${encodeURIComponent(buildingId)}/wifi/sessions`)
+        ]);
+        state.adminWifiEntitlements = Array.isArray(entitlementsPayload.data) ? entitlementsPayload.data : [];
+        state.adminWifiSessions = Array.isArray(sessionsPayload.data) ? sessionsPayload.data : [];
+        state.adminWifiUnavailableReason = "";
+    }
+    catch (error) {
+        if (error && error.status === 503) {
+            state.adminWifiEntitlements = [];
+            state.adminWifiSessions = [];
+            state.adminWifiUnavailableReason =
+                "CAPTYN Wi-Fi integration is not configured — access history and sessions are unavailable.";
+        }
+        else {
+            throw error;
+        }
+    }
+    renderAdminWifiEntitlements(state.adminWifiEntitlements);
+    renderAdminWifiSessions(state.adminWifiSessions);
+}
+async function loadAdminWifiDepartment() {
+    const buildingId = getSelectedAdminWifiBuildingId();
+    if (!buildingId) {
+        renderAdminWifiEntitlements([]);
+        renderAdminWifiSessions([]);
+        renderAdminWifiSummary();
+        return;
+    }
+    await loadAdminWifiEntitlementsSessions();
+    renderAdminWifiSummary();
+}
 function renderBuildings(rows) {
     if (!(buildingsBodyEl instanceof HTMLElement)) {
         return;
@@ -1086,7 +1239,8 @@ async function loadBuildings() {
     renderOwnershipGaps(state.buildings);
     renderRegistrySummary();
     syncAdminBillingBuildingOptions();
-    await loadAdminBillingConsole();
+    syncAdminWifiBuildingOptions();
+    await Promise.all([loadAdminBillingConsole(), loadAdminWifiDepartment()]);
 }
 async function loadAdminData() {
     clearError();
@@ -1568,6 +1722,56 @@ adminMonthlyCombinedChargeMonthEl?.addEventListener("change", () => {
         handleAdminError(error, "Unable to load monthly combined utility charge.");
     });
 });
+adminWifiBuildingSelectEl?.addEventListener("change", () => {
+    state.selectedAdminWifiBuildingId = getSelectedAdminWifiBuildingId();
+    void loadAdminWifiDepartment().catch((error) => {
+        handleAdminError(error, "Unable to refresh the Wi-Fi department.");
+    });
+});
+refreshAdminWifiBtnEl?.addEventListener("click", () => {
+    state.selectedAdminWifiBuildingId = getSelectedAdminWifiBuildingId();
+    void loadAdminWifiDepartment().catch((error) => {
+        handleAdminError(error, "Unable to refresh the Wi-Fi department.");
+    });
+});
+if (adminWifiEntitlementsBodyEl instanceof HTMLElement) {
+    adminWifiEntitlementsBodyEl.addEventListener("click", (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLButtonElement)) {
+            return;
+        }
+        if (String(target.dataset.action ?? "") !== "revoke-wifi-entitlement") {
+            return;
+        }
+        const entitlementId = String(target.dataset.entitlementId || "").trim();
+        if (!entitlementId) {
+            return;
+        }
+        const shouldProceed = window.confirm("Revoke this Wi-Fi voucher? The customer will no longer be able to (re)authenticate. This does not force-disconnect an already-connected device.");
+        if (!shouldProceed) {
+            return;
+        }
+        target.disabled = true;
+        clearError();
+        void (async () => {
+            try {
+                await requestJson(`/api/admin/wifi/entitlements/${encodeURIComponent(entitlementId)}/revoke`, {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ status: "revoked" })
+                });
+                setStatus("Revoked Wi-Fi voucher.");
+                await loadAdminWifiEntitlementsSessions();
+            }
+            catch (error) {
+                handleAdminError(error, "Failed to revoke Wi-Fi voucher.");
+            }
+            finally {
+                target.disabled = false;
+            }
+        })();
+    });
+}
 refreshLandlordAccessBtn?.addEventListener("click", () => {
     void loadLandlordAccessRequests().catch((error) => {
         handleAdminError(error, "Unable to refresh landlord access requests.");

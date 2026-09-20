@@ -15,10 +15,10 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="CAPTYN Housing" />
     <link rel="icon" href="/icons/housing-app.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/users.css?v=20260806d" />
+    <link rel="stylesheet" href="/users.css?v=20260821b" />
     <script src="/captyn-theme.js?v=20260806a"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=20260806c" />
-    <link rel="stylesheet" href="/resident-app/assets/resident.css?v=20260806e" />
+    <link rel="stylesheet" href="/resident-app/assets/resident.css?v=20260821b" />
   </head>
   <body class="app-loading">
     <div class="ambient" aria-hidden="true"></div>
@@ -509,10 +509,6 @@
 
                 <dl class="payment-summary-grid">
                   <div>
-                    <dt>Total outstanding</dt>
-                    <dd id="payments-total-outstanding">KSh 0</dd>
-                  </div>
-                  <div>
                     <dt>Rent</dt>
                     <dd id="payments-rent-outstanding">KSh 0</dd>
                   </div>
@@ -531,9 +527,6 @@
                   </button>
                   <button type="button" data-payment-shortcut="rent-full">
                     Use full rent balance
-                  </button>
-                  <button type="button" data-payment-shortcut="suggested-start">
-                    Use suggested starter
                   </button>
                 </div>
                 <p class="quick-pay-note payment-summary-note">
@@ -761,32 +754,30 @@
             <article class="panel-card">
               <section class="section-head">
                 <h2>Wi-Fi</h2>
-                <p id="wifi-packages-count">0 packages</p>
               </section>
               <p id="wifi-error" class="feedback hidden"></p>
-              <p id="wifi-empty" class="item-details hidden">
-                Wi-Fi is not available for your building yet.
-              </p>
-              <section id="wifi-packages" class="wifi-package-grid" aria-label="Wi-Fi packages"></section>
 
-              <section id="wifi-status-section" class="payment-section mpesa-section hidden">
-                <p id="wifi-status-text" class="item-details payment-state"></p>
-              </section>
-
-              <section id="wifi-access-section" class="payment-section hidden">
-                <p class="subheading">Your Wi-Fi login</p>
-                <div class="field-grid">
-                  <label>
-                    Username
-                    <input id="wifi-access-username" type="text" readonly />
-                  </label>
-                  <label>
-                    Password
-                    <input id="wifi-access-password" type="text" readonly />
-                  </label>
+              <section id="wifi-current-card" class="payment-summary-card hidden">
+                <div class="payment-summary-copy">
+                  <p class="subheading">Your Wi-Fi</p>
+                  <h3 id="wifi-current-plan-name">Active plan</h3>
+                  <p id="wifi-current-expiry" class="item-details"></p>
+                  <p id="wifi-current-usage" class="item-details"></p>
                 </div>
-                <p id="wifi-access-expires" class="item-details"></p>
               </section>
+
+              <p id="wifi-empty" class="item-details hidden">
+                No active Wi-Fi plan right now — see what's available below.
+              </p>
+
+              <p class="subheading">Available on CAPTYN Wi-Fi</p>
+              <section id="wifi-plans" class="wifi-package-grid" aria-label="Wi-Fi plans"></section>
+
+              <div class="action-row">
+                <a id="wifi-buy-link" class="ghost-btn" href="https://captyn.shop/wifi" target="_blank" rel="noopener noreferrer">
+                  Buy Wi-Fi on captyn.shop
+                </a>
+              </div>
             </article>
           </section>
 
@@ -949,6 +940,6 @@
       </article>
     </section>
 
-    <script type="module" src="/resident-app/assets/resident.js?v=20260806e"></script>
+    <script type="module" src="/resident-app/assets/resident.js?v=20260821b"></script>
   </body>
 </html>

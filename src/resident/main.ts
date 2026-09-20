@@ -10,7 +10,7 @@ declare global {
   }
 }
 
-const LEGACY_RESIDENT_SCRIPT = "/users.js?v=20260801a";
+const LEGACY_RESIDENT_SCRIPT = "/users.js?v=20260821a";
 
 function markTypeScriptRuntime() {
   document.documentElement.dataset.captynUiRuntime = "typescript";
@@ -26,11 +26,20 @@ function isVisible(element: HTMLElement | null) {
   return Boolean(element && !element.classList.contains("hidden"));
 }
 
+function removeAuthHeroCopy() {
+  document.querySelector(".resident-auth-kicker")?.remove();
+  document.querySelector(".resident-auth-subtitle")?.remove();
+}
+
 function syncResidentModeClass() {
   const authPanel = document.getElementById("resident-auth-panel");
   const residentLayout = document.getElementById("resident-layout");
+  const sessionMode = isVisible(residentLayout);
   document.body.classList.toggle("resident-auth-mode", isVisible(authPanel));
-  document.body.classList.toggle("resident-session-mode", isVisible(residentLayout));
+  document.body.classList.toggle("resident-session-mode", sessionMode);
+  if (sessionMode) {
+    removeAuthHeroCopy();
+  }
 }
 
 function watchResidentMode() {

@@ -63,6 +63,23 @@ const settingsSummaryEl = document.getElementById("settings-summary");
 const refreshSettingsViewBtnEl = document.getElementById("refresh-settings-view");
 const settingsClearCacheBtnEl = document.getElementById("settings-clear-cache-btn");
 const settingsClearDataBtnEl = document.getElementById("settings-clear-data-btn");
+const buildingDefaultsFormEl = document.getElementById("building-defaults-form");
+const buildingDefaultsSummaryEl = document.getElementById("building-defaults-summary");
+const buildingDefaultsSaveBtnEl = document.getElementById("building-defaults-save-btn");
+const buildingDefaultsUtilityBillingModeEl = document.getElementById("building-defaults-utility-billing-mode");
+const buildingDefaultsWaterRateEl = document.getElementById("building-defaults-water-rate");
+const buildingDefaultsElectricityRateEl = document.getElementById("building-defaults-electricity-rate");
+const buildingDefaultsWaterFixedEl = document.getElementById("building-defaults-water-fixed");
+const buildingDefaultsElectricityFixedEl = document.getElementById("building-defaults-electricity-fixed");
+const buildingDefaultsCombinedChargeEl = document.getElementById("building-defaults-combined-charge");
+const buildingDefaultsBalanceVisibleDaysEl = document.getElementById("building-defaults-balance-visible-days");
+const buildingDefaultsMonthlyRentEl = document.getElementById("building-defaults-monthly-rent");
+const buildingDefaultsRentDueDayEl = document.getElementById("building-defaults-rent-due-day");
+const buildingDefaultsMeterReadingDayEl = document.getElementById("building-defaults-meter-reading-day");
+const buildingDefaultsAllowManualRentEl = document.getElementById("building-defaults-allow-manual-rent");
+const buildingDefaultsAllowManualUtilityEl = document.getElementById("building-defaults-allow-manual-utility");
+const buildingDefaultsAcknowledgeEl = document.getElementById("building-defaults-acknowledge");
+const buildingDefaultsNoteEl = document.getElementById("building-defaults-note");
 const landlordFocusUnitsEl = document.getElementById("landlord-focus-units");
 const landlordFocusResidentsEl = document.getElementById("landlord-focus-residents");
 const landlordFocusOpenBillsEl = document.getElementById("landlord-focus-open-bills");
@@ -232,10 +249,6 @@ const refreshPaymentProfilesBtnEl = document.getElementById("refresh-payment-pro
 const paymentInstructionsBodyEl = document.getElementById("payment-instructions-body");
 const paymentInstructionsSummaryEl = document.getElementById("payment-instructions-summary");
 const refreshPaymentInstructionsBtnEl = document.getElementById("refresh-payment-instructions");
-const wifiPackageBuildingSelectEl = document.getElementById("wifi-package-building-select");
-const wifiPackageListEl = document.getElementById("wifi-package-list");
-const refreshWifiPackagesBtnEl = document.getElementById("refresh-wifi-packages");
-const overviewWifiPackagesSectionEl = document.getElementById("overview-wifi-packages-section");
 const refreshOverviewDashboardBtnEl = document.getElementById("refresh-overview-dashboard");
 const overviewCollectionsBodyEl = document.getElementById("overview-collections-body");
 const overviewRoomBuildingSelectEl = document.getElementById("overview-room-building-select");
@@ -375,9 +388,6 @@ const state = {
     buildingPaymentProfileByBuildingId: new Map(),
     buildingPaymentInstructions: [],
     buildingPaymentInstructionByBuildingId: new Map(),
-    wifiPackages: [],
-    wifiPackagesUnavailableReason: "",
-    selectedWifiPackageBuildingId: "",
     selectedRoomBuildingId: "",
     selectedRegistryBuildingId: "",
     selectedCaretakerBuildingId: "",
@@ -716,7 +726,7 @@ function updateApplicationsIndicator() {
     }
 }
 function isOwnerAlertRole() {
-    return isOwnerAccessRole() || isStaffRole();
+    return isOwnerAccessRole() || isStaffRole() || isCaretakerRole();
 }
 function updateOwnerNotificationControls() {
     const owner = isOwnerAlertRole();
@@ -1051,7 +1061,6 @@ function getFocusedBuildingId() {
         state.selectedRoomBuildingId,
         state.selectedCaretakerBuildingId,
         state.selectedRentPaymentBuildingId,
-        state.selectedWifiPackageBuildingId,
         state.buildings[0]?.id
     ];
     for (const candidate of candidates) {
@@ -1406,6 +1415,10 @@ function closeUtilitySheetModal() {
     if (utilitySheetBackdropEl instanceof HTMLElement) {
         utilitySheetBackdropEl.classList.add("hidden");
     }
+}
+function closeUtilitySheetModalAndReturnToSetup() {
+    closeUtilitySheetModal();
+    showUtilitySetupModal();
 }
 function showUtilitySheetModal() {
     if (utilitySheetModalEl instanceof HTMLElement) {
@@ -3702,7 +3715,8 @@ function renderUtilitySheetRows(rows) {
     utilitySheetBodyEl.replaceChildren();
     if (!Array.isArray(rows) || rows.length === 0) {
         const row = document.createElement("tr");
-        row.innerHTML = '<td colspan="9">No houses found for this building.</td>';
+        row.innerHTML =
+            '<td colspan="9" class="table-cell-full">No houses found for this building.</td>';
         utilitySheetBodyEl.append(row);
         return;
     }
@@ -3774,15 +3788,15 @@ function renderUtilitySheetRows(rows) {
         row.dataset.autoWaterFixedCharge = numberToInputString(autoWaterFixedCharge);
         row.dataset.autoElectricityFixedCharge = numberToInputString(autoElectricityFixedCharge);
         row.innerHTML = `
-      <td><strong>${escapeHtml(houseNumber)}</strong></td>
-      <td><input class="registry-table-input utility-sheet-input" data-field="waterMeterNumber" type="text" maxlength="80" placeholder="WTR-0001" value="${escapeHtml(waterMeterNumber)}" /></td>
-      <td><input class="registry-table-input utility-sheet-input" data-field="waterPreviousReading" type="number" min="0" step="0.001" placeholder="auto" value="${escapeHtml(numberToInputString(waterPrev))}" /></td>
-      <td><input class="registry-table-input utility-sheet-input" data-field="waterCurrentReading" type="number" min="0" step="0.001" placeholder="e.g. 358.5" value="${escapeHtml(numberToInputString(transferredWaterReading))}" /></td>
-      <td><input class="registry-table-input utility-sheet-input" data-field="waterFixedChargeKsh" type="number" min="0" step="0.01" value="${escapeHtml(numberToInputString(resolvedWaterFixedDefault))}" /></td>
-      <td><input class="registry-table-input utility-sheet-input" data-field="electricityMeterNumber" type="text" maxlength="80" placeholder="ELEC-0001" value="${escapeHtml(electricityMeterNumber)}" /></td>
-      <td><input class="registry-table-input utility-sheet-input" data-field="electricityPreviousReading" type="number" min="0" step="0.001" placeholder="auto" value="${escapeHtml(numberToInputString(electricityPrev))}" /></td>
-      <td><input class="registry-table-input utility-sheet-input" data-field="electricityCurrentReading" type="number" min="0" step="0.001" placeholder="e.g. 911.2" value="${escapeHtml(numberToInputString(transferredElectricityReading))}" /></td>
-      <td><input class="registry-table-input utility-sheet-input" data-field="electricityFixedChargeKsh" type="number" min="0" step="0.01" value="${escapeHtml(numberToInputString(resolvedElectricityFixedDefault))}" /></td>
+      <td data-label="House"><strong>${escapeHtml(houseNumber)}</strong></td>
+      <td data-label="Water Meter"><input class="registry-table-input utility-sheet-input" data-field="waterMeterNumber" type="text" maxlength="80" placeholder="WTR-0001" value="${escapeHtml(waterMeterNumber)}" /></td>
+      <td data-label="Water Prev"><input class="registry-table-input utility-sheet-input" data-field="waterPreviousReading" type="number" min="0" step="0.001" placeholder="auto" value="${escapeHtml(numberToInputString(waterPrev))}" /></td>
+      <td data-label="Water Current"><input class="registry-table-input utility-sheet-input" data-field="waterCurrentReading" type="number" min="0" step="0.001" placeholder="e.g. 358.5" value="${escapeHtml(numberToInputString(transferredWaterReading))}" /></td>
+      <td data-label="Water Fixed"><input class="registry-table-input utility-sheet-input" data-field="waterFixedChargeKsh" type="number" min="0" step="0.01" value="${escapeHtml(numberToInputString(resolvedWaterFixedDefault))}" /></td>
+      <td data-label="Electric Meter"><input class="registry-table-input utility-sheet-input" data-field="electricityMeterNumber" type="text" maxlength="80" placeholder="ELEC-0001" value="${escapeHtml(electricityMeterNumber)}" /></td>
+      <td data-label="Electric Prev"><input class="registry-table-input utility-sheet-input" data-field="electricityPreviousReading" type="number" min="0" step="0.001" placeholder="auto" value="${escapeHtml(numberToInputString(electricityPrev))}" /></td>
+      <td data-label="Electric Current"><input class="registry-table-input utility-sheet-input" data-field="electricityCurrentReading" type="number" min="0" step="0.001" placeholder="e.g. 911.2" value="${escapeHtml(numberToInputString(transferredElectricityReading))}" /></td>
+      <td data-label="Electric Fixed"><input class="registry-table-input utility-sheet-input" data-field="electricityFixedChargeKsh" type="number" min="0" step="0.01" value="${escapeHtml(numberToInputString(resolvedElectricityFixedDefault))}" /></td>
     `;
         utilitySheetBodyEl.append(row);
     });
@@ -5148,7 +5162,6 @@ function setPreferredBuildingSelection(buildingId, options = {}) {
     state.selectedCaretakerBuildingId = normalizedBuildingId;
     state.selectedTicketBuildingId = normalizedBuildingId;
     state.selectedOverviewRoomBuildingId = normalizedBuildingId;
-    state.selectedWifiPackageBuildingId = normalizedBuildingId;
     state.selectedRentPaymentBuildingId = normalizedBuildingId;
     state.selectedRentSheetBuildingId = normalizedBuildingId;
     state.selectedMessageBuildingId = normalizedBuildingId;
@@ -5166,9 +5179,6 @@ function setPreferredBuildingSelection(buildingId, options = {}) {
     }
     if (caretakerBuildingSelectEl instanceof HTMLSelectElement) {
         caretakerBuildingSelectEl.value = normalizedBuildingId;
-    }
-    if (wifiPackageBuildingSelectEl instanceof HTMLSelectElement) {
-        wifiPackageBuildingSelectEl.value = normalizedBuildingId;
     }
     if (rentPaymentBuildingSelectEl instanceof HTMLSelectElement) {
         rentPaymentBuildingSelectEl.value = normalizedBuildingId;
@@ -5266,7 +5276,142 @@ function syncSettingsBuildingOptions() {
     });
     settingsBuildingSelectEl.value = selected;
     renderSettingsPanel();
+    void loadBuildingDefaults(selected);
 }
+function setBuildingDefaultsFormDisabled(disabled) {
+    if (!(buildingDefaultsFormEl instanceof HTMLFormElement)) {
+        return;
+    }
+    [...buildingDefaultsFormEl.elements].forEach((element) => {
+        if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element instanceof HTMLButtonElement) {
+            element.disabled = disabled;
+        }
+    });
+}
+async function loadBuildingDefaults(buildingId) {
+    if (!(buildingDefaultsFormEl instanceof HTMLFormElement)) {
+        return;
+    }
+    if (!buildingId) {
+        setBuildingDefaultsFormDisabled(true);
+        if (buildingDefaultsSummaryEl instanceof HTMLElement) {
+            buildingDefaultsSummaryEl.textContent = "Select a building above to manage its defaults.";
+        }
+        return;
+    }
+    if (isCaretakerRole()) {
+        setBuildingDefaultsFormDisabled(true);
+        if (buildingDefaultsSummaryEl instanceof HTMLElement) {
+            buildingDefaultsSummaryEl.textContent =
+                "House manager accounts can view building defaults but cannot change them.";
+        }
+    }
+    try {
+        const payload = await requestJson(`/api/landlord/buildings/${encodeURIComponent(buildingId)}/configuration`);
+        const data = payload.data ?? {};
+        if (buildingDefaultsUtilityBillingModeEl instanceof HTMLSelectElement) {
+            buildingDefaultsUtilityBillingModeEl.value = data.utilityBillingMode ?? "metered";
+        }
+        if (buildingDefaultsWaterRateEl instanceof HTMLInputElement) {
+            buildingDefaultsWaterRateEl.value = data.defaultWaterRatePerUnitKsh ?? "";
+        }
+        if (buildingDefaultsElectricityRateEl instanceof HTMLInputElement) {
+            buildingDefaultsElectricityRateEl.value = data.defaultElectricityRatePerUnitKsh ?? "";
+        }
+        if (buildingDefaultsWaterFixedEl instanceof HTMLInputElement) {
+            buildingDefaultsWaterFixedEl.value = data.defaultWaterFixedChargeKsh ?? "";
+        }
+        if (buildingDefaultsElectricityFixedEl instanceof HTMLInputElement) {
+            buildingDefaultsElectricityFixedEl.value = data.defaultElectricityFixedChargeKsh ?? "";
+        }
+        if (buildingDefaultsCombinedChargeEl instanceof HTMLInputElement) {
+            buildingDefaultsCombinedChargeEl.value = data.defaultCombinedUtilityChargeKsh ?? "";
+        }
+        if (buildingDefaultsBalanceVisibleDaysEl instanceof HTMLInputElement) {
+            buildingDefaultsBalanceVisibleDaysEl.value = data.utilityBalanceVisibleDays ?? 7;
+        }
+        if (buildingDefaultsMonthlyRentEl instanceof HTMLInputElement) {
+            buildingDefaultsMonthlyRentEl.value = data.defaultMonthlyRentKsh ?? "";
+        }
+        if (buildingDefaultsRentDueDayEl instanceof HTMLInputElement) {
+            buildingDefaultsRentDueDayEl.value = data.defaultRentDueDay ?? "";
+        }
+        if (buildingDefaultsMeterReadingDayEl instanceof HTMLInputElement) {
+            buildingDefaultsMeterReadingDayEl.value = data.meterReadingDay ?? "";
+        }
+        if (buildingDefaultsAllowManualRentEl instanceof HTMLInputElement) {
+            buildingDefaultsAllowManualRentEl.checked = data.allowManualRentPosting !== false;
+        }
+        if (buildingDefaultsAllowManualUtilityEl instanceof HTMLInputElement) {
+            buildingDefaultsAllowManualUtilityEl.checked = data.allowManualUtilityPosting !== false;
+        }
+        if (buildingDefaultsAcknowledgeEl instanceof HTMLInputElement) {
+            buildingDefaultsAcknowledgeEl.checked = false;
+        }
+        if (buildingDefaultsNoteEl instanceof HTMLInputElement) {
+            buildingDefaultsNoteEl.value = "";
+        }
+        setBuildingDefaultsFormDisabled(isCaretakerRole());
+        if (buildingDefaultsSummaryEl instanceof HTMLElement && !isCaretakerRole()) {
+            buildingDefaultsSummaryEl.textContent = `Editing defaults for ${getBuildingDisplayNameById(buildingId, "the selected building")}. Last updated ${formatDateTime(data.updatedAt)}.`;
+        }
+    }
+    catch (error) {
+        setBuildingDefaultsFormDisabled(true);
+        handleLandlordError(error, "Failed to load building defaults.");
+    }
+}
+buildingDefaultsFormEl?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const buildingId = getSelectedSettingsBuildingId();
+    if (!buildingId) {
+        return;
+    }
+    if (!(buildingDefaultsAcknowledgeEl instanceof HTMLInputElement) || !buildingDefaultsAcknowledgeEl.checked) {
+        handleLandlordError(new Error("Confirm the acknowledgement checkbox before saving building defaults."), "Failed to update building defaults.");
+        return;
+    }
+    const body = {
+        utilityBillingMode: buildingDefaultsUtilityBillingModeEl?.value || undefined,
+        defaultWaterRatePerUnitKsh: toOptionalNumber(buildingDefaultsWaterRateEl?.value),
+        defaultElectricityRatePerUnitKsh: toOptionalNumber(buildingDefaultsElectricityRateEl?.value),
+        defaultWaterFixedChargeKsh: toOptionalNumber(buildingDefaultsWaterFixedEl?.value),
+        defaultElectricityFixedChargeKsh: toOptionalNumber(buildingDefaultsElectricityFixedEl?.value),
+        defaultCombinedUtilityChargeKsh: toOptionalNumber(buildingDefaultsCombinedChargeEl?.value),
+        utilityBalanceVisibleDays: toOptionalNumber(buildingDefaultsBalanceVisibleDaysEl?.value),
+        defaultMonthlyRentKsh: toOptionalNumber(buildingDefaultsMonthlyRentEl?.value),
+        defaultRentDueDay: toOptionalNumber(buildingDefaultsRentDueDayEl?.value),
+        meterReadingDay: toOptionalNumber(buildingDefaultsMeterReadingDayEl?.value),
+        allowManualRentPosting: Boolean(buildingDefaultsAllowManualRentEl?.checked),
+        allowManualUtilityPosting: Boolean(buildingDefaultsAllowManualUtilityEl?.checked),
+        acknowledgeImpact: true,
+        note: buildingDefaultsNoteEl?.value?.trim() || undefined
+    };
+    if (buildingDefaultsSaveBtnEl instanceof HTMLButtonElement) {
+        buildingDefaultsSaveBtnEl.disabled = true;
+    }
+    void (async () => {
+        try {
+            await requestJson(`/api/landlord/buildings/${encodeURIComponent(buildingId)}/configuration`, {
+                method: "PATCH",
+                headers: {
+                    "content-type": "application/json"
+                },
+                body: JSON.stringify(body)
+            });
+            setStatus(`Building defaults updated for ${getBuildingDisplayNameById(buildingId, buildingId)}.`);
+            await loadBuildingDefaults(buildingId);
+        }
+        catch (error) {
+            handleLandlordError(error, "Failed to update building defaults.");
+        }
+        finally {
+            if (buildingDefaultsSaveBtnEl instanceof HTMLButtonElement) {
+                buildingDefaultsSaveBtnEl.disabled = false;
+            }
+        }
+    })();
+});
 function renderRoomBuildingOptions() {
     if (!(roomTargetBuildingEl instanceof HTMLSelectElement)) {
         return;
@@ -8189,147 +8334,6 @@ function renderPaymentInstructions() {
         paymentInstructionsBodyEl.append(row);
     });
 }
-function isWifiEnabledForBuilding(building) {
-    return (Boolean(building?.wifiEnabled) &&
-        String(building?.wifiAccessMode ?? "").trim().toLowerCase() !== "disabled");
-}
-function syncWifiPackageSectionVisibility(rows = []) {
-    if (!(overviewWifiPackagesSectionEl instanceof HTMLElement)) {
-        return;
-    }
-    const hasVisibleWifiBuilding = Array.isArray(rows) && rows.some(isWifiEnabledForBuilding);
-    overviewWifiPackagesSectionEl.classList.toggle("hidden", !hasVisibleWifiBuilding);
-}
-function renderWifiPackageBuildingOptions(rows) {
-    if (!(wifiPackageBuildingSelectEl instanceof HTMLSelectElement)) {
-        return;
-    }
-    const visibleRows = Array.isArray(rows) ? rows.filter(isWifiEnabledForBuilding) : [];
-    syncWifiPackageSectionVisibility(visibleRows);
-    wifiPackageBuildingSelectEl.replaceChildren();
-    if (visibleRows.length === 0) {
-        const option = document.createElement("option");
-        option.value = "";
-        option.textContent = "Wi-Fi disabled";
-        wifiPackageBuildingSelectEl.append(option);
-        wifiPackageBuildingSelectEl.disabled = true;
-        state.selectedWifiPackageBuildingId = "";
-        state.wifiPackages = [];
-        state.wifiPackagesUnavailableReason = "Wi-Fi is hidden because no building has it enabled.";
-        renderWifiPackages([]);
-        return;
-    }
-    wifiPackageBuildingSelectEl.disabled = false;
-    visibleRows.forEach((building) => {
-        const option = document.createElement("option");
-        option.value = building.id;
-        option.textContent = getBuildingDisplayName(building);
-        wifiPackageBuildingSelectEl.append(option);
-    });
-    const selectedBuildingId = state.selectedWifiPackageBuildingId &&
-        visibleRows.some((item) => item.id === state.selectedWifiPackageBuildingId)
-        ? state.selectedWifiPackageBuildingId
-        : visibleRows[0]?.id ?? "";
-    state.selectedWifiPackageBuildingId = selectedBuildingId;
-    wifiPackageBuildingSelectEl.value = selectedBuildingId;
-}
-function createWifiPackageUpdatePayload(form) {
-    const formData = new FormData(form);
-    return {
-        name: String(formData.get("name") ?? "").trim(),
-        profile: String(formData.get("profile") ?? "").trim(),
-        hours: Number(formData.get("hours")),
-        priceKsh: Number(formData.get("priceKsh")),
-        enabled: formData.get("enabled") === "on",
-        acknowledgeImpact: true
-    };
-}
-function renderWifiPackages(rows) {
-    if (!(wifiPackageListEl instanceof HTMLElement)) {
-        return;
-    }
-    wifiPackageListEl.replaceChildren();
-    if (state.wifiPackagesUnavailableReason) {
-        wifiPackageListEl.textContent = state.wifiPackagesUnavailableReason;
-        return;
-    }
-    if (!Array.isArray(rows) || rows.length === 0) {
-        wifiPackageListEl.textContent = "No Wi-Fi packages available for this building.";
-        return;
-    }
-    rows.forEach((item) => {
-        const form = document.createElement("form");
-        form.className = "package-card";
-        form.innerHTML = `
-      <h3>${escapeHtml(item.id)}</h3>
-      <label>
-        Name
-        <input name="name" type="text" required value="${escapeHtml(item.name)}" />
-      </label>
-      <label>
-        Profile
-        <input name="profile" type="text" required value="${escapeHtml(item.profile)}" />
-      </label>
-      <label>
-        <input name="enabled" type="checkbox" ${item.enabled ? "checked" : ""} />
-        Enabled for checkout
-      </label>
-      <div class="inline-fields">
-        <label>
-          Hours
-          <input name="hours" type="number" min="1" max="72" required value="${Number(item.hours)}" />
-        </label>
-        <label>
-          Price (KSh)
-          <input name="priceKsh" type="number" min="1" max="10000" required value="${Number(item.priceKsh)}" />
-        </label>
-      </div>
-      <div class="action-row">
-        <button type="submit" ${isCaretakerRole() ? "disabled" : ""}>Save</button>
-      </div>
-    `;
-        form.addEventListener("submit", (event) => {
-            event.preventDefault();
-            clearError();
-            if (isCaretakerRole()) {
-                showError("House manager accounts cannot change Wi-Fi packages.");
-                return;
-            }
-            const buildingId = state.selectedWifiPackageBuildingId;
-            if (!buildingId) {
-                showError("Select a building first.");
-                return;
-            }
-            const submitButton = form.querySelector("button[type='submit']");
-            if (submitButton instanceof HTMLButtonElement) {
-                submitButton.disabled = true;
-            }
-            const payload = createWifiPackageUpdatePayload(form);
-            void (async () => {
-                try {
-                    await requestJson(`/api/landlord/buildings/${encodeURIComponent(buildingId)}/wifi/packages/${encodeURIComponent(item.id)}`, {
-                        method: "PATCH",
-                        headers: {
-                            "content-type": "application/json"
-                        },
-                        body: JSON.stringify(payload)
-                    });
-                    setStatus(`Wi-Fi package ${item.id} updated for ${buildingId}.`);
-                    await loadLandlordWifiPackages();
-                }
-                catch (error) {
-                    handleLandlordError(error, "Failed to update Wi-Fi package.");
-                }
-                finally {
-                    if (submitButton instanceof HTMLButtonElement) {
-                        submitButton.disabled = false;
-                    }
-                }
-            })();
-        });
-        wifiPackageListEl.append(form);
-    });
-}
 function renderMeters(rows) {
     metersBodyEl.replaceChildren();
     if (!Array.isArray(rows) || rows.length === 0) {
@@ -9167,7 +9171,6 @@ async function loadBuildings() {
     renderBuildings(state.buildings);
     renderRoomBuildingOptions();
     renderBuildingPhotoOptions();
-    renderWifiPackageBuildingOptions(state.buildings);
     renderGlobalSearchBuildingOptions();
     renderRegistryBuildingOptions();
     syncPaymentCorrectionBuildingOptions();
@@ -9257,32 +9260,6 @@ async function loadPaymentInstructions() {
     const payload = await requestJson("/api/landlord/payment-instructions");
     setPaymentInstructions(payload.data ?? []);
     renderPaymentInstructions();
-}
-async function loadLandlordWifiPackages() {
-    const buildingId = String(wifiPackageBuildingSelectEl?.value || state.selectedWifiPackageBuildingId || "").trim();
-    state.selectedWifiPackageBuildingId = buildingId;
-    state.wifiPackagesUnavailableReason = "";
-    if (!buildingId) {
-        state.wifiPackages = [];
-        state.wifiPackagesUnavailableReason = "Wi-Fi is hidden because no building has it enabled.";
-        renderWifiPackages([]);
-        return;
-    }
-    try {
-        const payload = await requestJson(`/api/landlord/buildings/${encodeURIComponent(buildingId)}/wifi/packages`);
-        state.wifiPackages = Array.isArray(payload.data) ? payload.data : [];
-        renderWifiPackages(state.wifiPackages);
-    }
-    catch (error) {
-        if (isMissingRouteError(error)) {
-            state.wifiPackages = [];
-            state.wifiPackagesUnavailableReason =
-                "Wi-Fi package controls are unavailable on this server.";
-            renderWifiPackages([]);
-            return;
-        }
-        throw error;
-    }
 }
 async function loadCaretakers() {
     const buildingId = state.selectedCaretakerBuildingId ||
@@ -9471,7 +9448,6 @@ async function activateBuilding(buildingId, options = {}) {
         loadCaretakerAccessRequests(),
         loadCaretakers(),
         loadLandlordTickets(),
-        loadLandlordWifiPackages(),
         loadResidents()
     ]);
 }
@@ -9499,7 +9475,6 @@ function applyLandlordStartupData(startup) {
     state.selectedOverviewRoomBuildingId =
         String(hasDeepLinkBuilding ? deepLinkBuildingId : selection.overviewRoomBuildingId || "all").trim() || "all";
     state.selectedTicketBuildingId = String(selection.ticketBuildingId || "").trim();
-    state.selectedWifiPackageBuildingId = String(selection.wifiPackageBuildingId || "").trim();
     state.selectedRentPaymentBuildingId = String((hasDeepLinkBuilding ? deepLinkBuildingId : selection.rentPaymentBuildingId) ||
         state.selectedRegistryBuildingId ||
         "").trim();
@@ -9539,15 +9514,9 @@ function applyLandlordStartupData(startup) {
     state.moveOutSettlements = Array.isArray(startup?.moveOutSettlements)
         ? startup.moveOutSettlements
         : [];
-    state.wifiPackages = Array.isArray(startup?.wifiPackages) ? startup.wifiPackages : [];
-    state.wifiPackagesUnavailableReason =
-        typeof startup?.wifiPackagesUnavailableReason === "string"
-            ? startup.wifiPackagesUnavailableReason
-            : "";
     renderBuildings(state.buildings);
     renderRoomBuildingOptions();
     renderBuildingPhotoOptions();
-    renderWifiPackageBuildingOptions(state.buildings);
     renderGlobalSearchBuildingOptions();
     renderRegistryBuildingOptions();
     renderResidentsBuildingOptions();
@@ -9565,7 +9534,6 @@ function applyLandlordStartupData(startup) {
     syncUtilityBillInputMode();
     renderRegistryRows(state.registryRows);
     renderResidentDirectory(state.residentDirectory);
-    renderWifiPackages(state.wifiPackages);
     renderOwnerStaff();
     renderOwnerNotifications();
     renderMessageCenter();
@@ -9598,7 +9566,6 @@ async function loadDataLegacy() {
             loadPaymentAccess(),
             loadPaymentProfiles(),
             loadPaymentInstructions(),
-            loadLandlordWifiPackages(),
             loadOwnerStaff(),
             loadMessageCenter(),
             loadCaretakerAccessRequests(),
@@ -9628,7 +9595,6 @@ async function hydrateDeferredLandlordData() {
         loadPaymentAccess,
         loadPaymentProfiles,
         loadPaymentInstructions,
-        loadLandlordWifiPackages,
         loadOwnerStaff,
         loadMessageCenter,
         loadCaretakerAccessRequests,
@@ -9731,10 +9697,7 @@ dashboardActionButtons.forEach((button) => {
                 break;
             case "record-rent":
                 setActiveLandlordView("tenants");
-                if (rentPaymentDetailsEl instanceof HTMLDetailsElement) {
-                    rentPaymentDetailsEl.open = true;
-                }
-                scrollToLandlordSection("overview-rent-status-section");
+                scrollToLandlordSection("rent-payment-details");
                 break;
             case "requests":
                 setActiveLandlordView("applications");
@@ -9822,13 +9785,13 @@ residentsOpenRentSheetBtnEl?.addEventListener("click", () => {
     void openRentSheetModal();
 });
 closeUtilitySheetBtnEl?.addEventListener("click", () => {
-    closeUtilitySheetModal();
+    closeUtilitySheetModalAndReturnToSetup();
 });
 closeRentSheetBtnEl?.addEventListener("click", () => {
     closeRentSheetModal();
 });
 utilitySheetBackdropEl?.addEventListener("click", () => {
-    closeUtilitySheetModal();
+    closeUtilitySheetModalAndReturnToSetup();
 });
 rentSheetBackdropEl?.addEventListener("click", () => {
     closeRentSheetModal();
@@ -12120,17 +12083,32 @@ refreshPaymentInstructionsBtnEl?.addEventListener("click", () => {
         handleLandlordError(error, "Unable to refresh payment instructions.");
     });
 });
-refreshWifiPackagesBtnEl?.addEventListener("click", () => {
-    void loadLandlordWifiPackages().catch((error) => {
-        handleLandlordError(error, "Unable to refresh Wi-Fi packages.");
+settingsBuildingSelectEl?.addEventListener("change", () => {
+    const buildingId = getSelectedSettingsBuildingId();
+    state.selectedRegistryBuildingId = buildingId;
+    renderSettingsPanel();
+    void loadBuildingDefaults(buildingId);
+});
+refreshSettingsViewBtnEl?.addEventListener("click", () => {
+    renderSettingsPanel();
+    void Promise.all([
+        loadPaymentAccess(),
+        loadPaymentProfiles(),
+        loadPaymentInstructions(),
+        loadBuildings(),
+        loadBuildingDefaults(getSelectedSettingsBuildingId())
+    ]).catch((error) => {
+        handleLandlordError(error, "Unable to refresh workspace settings.");
     });
 });
-wifiPackageBuildingSelectEl?.addEventListener("change", () => {
-    state.selectedWifiPackageBuildingId = String(wifiPackageBuildingSelectEl.value || "").trim();
-    updateLandlordBranding();
-    void loadLandlordWifiPackages().catch((error) => {
-        handleLandlordError(error, "Unable to refresh Wi-Fi packages.");
-    });
+settingsClearCacheBtnEl?.addEventListener("click", handleSettingsClearCacheClick);
+settingsClearDataBtnEl?.addEventListener("click", () => {
+    const buildingId = getSelectedSettingsBuildingId();
+    if (!buildingId) {
+        showError("Select a building first.");
+        return;
+    }
+    handleDeleteBuildingClick(settingsClearDataBtnEl, buildingId, getBuildingDisplayNameById(buildingId, buildingId));
 });
 refreshMetersBtnEl.addEventListener("click", () => {
     void (async () => {

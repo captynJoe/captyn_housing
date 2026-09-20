@@ -109,13 +109,6 @@ export const createVacancySnapshotSchema = z.object({
   notes: z.string().trim().optional()
 });
 
-export const wifiPackageIdSchema = z.enum([
-  "hour_1",
-  "hour_3",
-  "hour_8",
-  "day_24"
-]);
-
 export const utilityBillingModeSchema = z.enum([
   "metered",
   "fixed_charge",
@@ -135,36 +128,9 @@ export const kenyaPhoneSchema = z
     message: "Use a valid Kenyan number (e.g. 07..., 01..., or +254...)"
   });
 
-export const createWifiPaymentSchema = z.object({
-  buildingId: nonEmptyString,
-  packageId: wifiPackageIdSchema,
-  phoneNumber: kenyaPhoneSchema
+export const revokeWifiEntitlementSchema = z.object({
+  status: z.enum(["revoked", "suspended"]).default("revoked")
 });
-
-export const residentWifiPaymentSchema = z.object({
-  packageId: wifiPackageIdSchema
-});
-
-export const confirmWifiPaymentSchema = z.object({
-  status: z.enum(["success", "failed"]),
-  providerReference: z.string().trim().min(1).optional(),
-  message: z.string().trim().min(1).optional()
-});
-
-export const updateWifiPackageSchema = z
-  .object({
-    name: z.string().trim().min(1).max(80).optional(),
-    profile: z.string().trim().min(1).max(100).optional(),
-    hours: z.number().int().min(1).max(72).optional(),
-    priceKsh: z.number().int().min(1).max(10_000).optional(),
-    residentPriceKsh: z.number().int().min(0).max(10_000).nullable().optional(),
-    rateLimit: z.string().trim().min(1).max(64).nullable().optional(),
-    deviceLimit: z.number().int().min(1).max(10).optional(),
-    enabled: z.boolean().optional()
-  })
-  .refine((value) => Object.keys(value).length > 0, {
-    message: "Provide at least one package field to update."
-  });
 
 export const userReportTypeSchema = z.enum([
   "room_issue",
@@ -1013,6 +979,7 @@ export const landlordBuildingConfigurationUpdateSchema = z
     defaultCombinedUtilityChargeKsh: z.number().int().min(0).max(200_000).nullable().optional(),
     defaultMonthlyRentKsh: z.number().int().min(0).max(10_000_000).nullable().optional(),
     defaultRentDueDay: z.number().int().min(1).max(31).nullable().optional(),
+    meterReadingDay: z.number().int().min(1).max(31).nullable().optional(),
     utilityBalanceVisibleDays: z.number().int().min(0).max(60).optional(),
     rentGraceDays: z.number().int().min(0).max(31).optional(),
     lateRentPenaltyEnabled: z.boolean().optional(),
@@ -1043,6 +1010,7 @@ export const landlordBuildingConfigurationUpdateSchema = z
       value.defaultCombinedUtilityChargeKsh !== undefined ||
       value.defaultMonthlyRentKsh !== undefined ||
       value.defaultRentDueDay !== undefined ||
+      value.meterReadingDay !== undefined ||
       typeof value.rentGraceDays === "number" ||
       typeof value.lateRentPenaltyEnabled === "boolean" ||
       typeof value.lateRentPenaltyAmountKsh === "number" ||
@@ -1345,9 +1313,6 @@ export type UpdateIncidentStatusInput = z.infer<typeof updateIncidentStatusSchem
 export type CreateVacancySnapshotInput = z.infer<
   typeof createVacancySnapshotSchema
 >;
-export type CreateWifiPaymentInput = z.infer<typeof createWifiPaymentSchema>;
-export type ConfirmWifiPaymentInput = z.infer<typeof confirmWifiPaymentSchema>;
-export type UpdateWifiPackageInput = z.infer<typeof updateWifiPackageSchema>;
 export type CreateUserReportInput = z.infer<typeof createUserReportSchema>;
 export type UpsertRentDueInput = z.infer<typeof upsertRentDueSchema>;
 export type UtilityTypeInput = z.infer<typeof utilityTypeSchema>;

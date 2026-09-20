@@ -956,6 +956,10 @@ body.landlord-simple-manager-role .landlord-side-panel .metrics-panel {
   margin: 0;
 }
 
+.building-defaults-full-width {
+  grid-column: 1 / -1;
+}
+
 .settings-danger-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -1116,8 +1120,91 @@ body.landlord-simple-manager-role .landlord-side-panel .metrics-panel {
   border-radius: 10px;
 }
 
-.utility-registry-table-wrap table {
-  min-width: 1320px;
+@media (min-width: 1201px) {
+  .utility-registry-table-wrap table {
+    min-width: 1320px;
+  }
+}
+
+/*
+ * Below 1201px the registry table's 13 columns no longer fit any real viewport (most
+ * laptops included), and the unconditional 1320px min-width above used to force a
+ * horizontally-scrolling sliver of the table into the drawer with almost nothing visible.
+ * initResponsiveTables() already stamps data-mobile-cards="true" + data-label on this table
+ * (see mobile-table.ts), so this reuses that existing card layout — normally only active
+ * under 680px (see admin.css) — at a wider breakpoint for this one table specifically,
+ * without changing the 680px threshold used everywhere else.
+ */
+@media (max-width: 1200px) {
+  .utility-registry-table-wrap {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .utility-registry-table-wrap table[data-mobile-cards="true"] {
+    width: 100%;
+    min-width: 0;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .utility-registry-table-wrap table[data-mobile-cards="true"] thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+    white-space: nowrap;
+  }
+
+  .utility-registry-table-wrap table[data-mobile-cards="true"] tbody {
+    display: grid;
+    gap: 12px;
+  }
+
+  .utility-registry-table-wrap table[data-mobile-cards="true"] tr {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid rgba(16, 35, 49, 0.12);
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 10px 24px rgba(16, 35, 49, 0.06);
+  }
+
+  .utility-registry-table-wrap table[data-mobile-cards="true"] td {
+    display: grid;
+    grid-template-columns: minmax(96px, 34%) minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    padding: 0;
+    min-width: 0;
+    border-bottom: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .utility-registry-table-wrap table[data-mobile-cards="true"] td::before {
+    content: attr(data-label);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    line-height: 1.35;
+    text-transform: uppercase;
+    color: rgba(36, 64, 85, 0.78);
+  }
+
+  .utility-registry-table-wrap table[data-mobile-cards="true"] td > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .utility-registry-table-wrap table[data-mobile-cards="true"] td :is(button, a, input, select, textarea) {
+    width: 100%;
+    max-width: 100%;
+  }
 }
 
 .utility-meter-modal-form {
@@ -2404,11 +2491,11 @@ body.landlord-rooms-route #residents-section {
 .landlord-sheet-form {
   gap: 12px;
   min-height: 0;
+  overflow: auto;
+  align-content: start;
 }
 
 .rent-sheet-form {
-  overflow: auto;
-  align-content: start;
   padding-right: 4px;
 }
 
@@ -2856,8 +2943,18 @@ body.landlord-rooms-route #residents-section {
     padding: 14px;
   }
 
-  .rent-sheet-form {
+  .landlord-sheet-form {
     gap: 10px;
+  }
+
+  .utility-sheet-table-wrap {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .table-wrap table[data-mobile-cards="true"] td:first-child {
+    position: static;
+    background: transparent;
   }
 
   .landlord-drawer-head,

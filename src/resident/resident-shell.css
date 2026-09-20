@@ -5,8 +5,9 @@
   --resident-line: var(--captyn-line, rgba(11, 26, 58, 0.14));
   --resident-panel: var(--captyn-panel-strong, #ffffff);
   --resident-panel-soft: var(--captyn-panel-soft, #f6f8fc);
-  --resident-teal: var(--captyn-blue, #2454e6);
+  --resident-teal: var(--captyn-blue-dark, #1c42c2);
   --resident-teal-dark: var(--captyn-blue-dark, #1c42c2);
+  --resident-teal-press: #094f38;
   --resident-green: var(--captyn-green, #0f8a5f);
   --resident-amber: var(--captyn-amber, #a3660a);
   --resident-red: var(--captyn-red, #c22b1f);
@@ -330,7 +331,7 @@ html[data-captyn-ui-runtime="typescript"] body {
 }
 
 .resident-ts-shell button:not(.ghost-btn):not(.user-link):not(.hero-workspace-btn):not(.modal-backdrop):not(.theme-toggle-btn):not([data-quick]):not([data-fixed]):not(.receipt-toggle-btn):not(.receipt-open-btn):hover {
-  background: var(--resident-teal-dark) !important;
+  background: var(--resident-teal-press) !important;
 }
 
 /* Secondary/shortcut actions (quick-pay presets, receipt toggles) stay
@@ -425,13 +426,12 @@ html[data-captyn-ui-runtime="typescript"] body {
 }
 
 .resident-ts-shell .payment-summary-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin: 18px 0 0;
 }
 
 .resident-ts-shell .payment-summary-grid div {
-  min-height: 80px;
-  padding: 16px;
+  padding: 10px 12px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.06);
@@ -659,7 +659,6 @@ html[data-captyn-ui-runtime="typescript"] body {
   }
 
   .resident-ts-shell .overview-grid,
-  .resident-ts-shell .payment-summary-grid,
   .resident-ts-shell .payments-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -686,10 +685,21 @@ html[data-captyn-ui-runtime="typescript"] body {
   }
 
   .resident-ts-shell .overview-grid,
-  .resident-ts-shell .payment-summary-grid,
   .resident-ts-shell .payments-grid,
   .resident-ts-shell .field-grid {
     grid-template-columns: 1fr;
+  }
+
+  .resident-ts-shell .payment-summary-grid div {
+    padding: 8px 6px;
+  }
+
+  .resident-ts-shell .payment-summary-grid dt {
+    font-size: 0.64rem;
+  }
+
+  .resident-ts-shell .payment-summary-grid dd {
+    font-size: 0.98rem;
   }
 
   .resident-ts-shell .section-head,

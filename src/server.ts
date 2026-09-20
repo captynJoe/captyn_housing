@@ -64,15 +64,6 @@ import {
   createCaptynWifiIntegrationServiceFromEnv
 } from "./services/captynWifiIntegrationService.js";
 import {
-  WifiAccessService,
-  type WifiAccessPersistedState,
-  type WifiPackage
-} from "./services/wifiAccessService.js";
-import {
-  BuildingWifiPackageService,
-  DEFAULT_BUILDING_WIFI_PACKAGES
-} from "./services/buildingWifiPackageService.js";
-import {
   BuildingConfigurationService,
   type BuildingConfigurationRecord,
   toPaymentAccessRecord
@@ -108,7 +99,6 @@ import {
   adminAccessCredentialUpdateSchema,
   adminLoginSchema,
   deleteResidentPushSubscriptionSchema,
-  confirmWifiPaymentSchema,
   createRentPaymentSchema,
   residentPasswordSetupSchema,
   residentPhoneLoginSchema,
@@ -130,7 +120,6 @@ import {
   createIncidentSchema,
   createUserReportSchema,
   createVacancySnapshotSchema,
-  createWifiPaymentSchema,
   billingMonthSchema,
   houseNumberQuerySchema,
   rentMpesaCallbackSchema,
@@ -177,14 +166,12 @@ import {
   ticketStatusSchema,
   tenantResolveSchema,
   residentTenantProfileUpsertSchema,
-  updateWifiPackageSchema,
-  residentWifiPaymentSchema,
+  revokeWifiEntitlementSchema,
   ownerStaffCreateSchema,
   ownerStaffDisableSchema,
   landlordRentBulkSheetSchema,
   landlordRentSetupSheetSchema,
   upsertRentDueSchema,
-  wifiPackageIdSchema,
   landlordDecisionSchema,
   tenantAgreementUpsertSchema,
   tenantApplicationSchema,
@@ -321,7 +308,6 @@ const RENT_LEDGER_STATE_KEY = "rent_ledger_v1";
 const UTILITY_BILLING_STATE_KEY = "utility_billing_v1";
 const UTILITY_BULK_SUBMISSION_AUDIT_STATE_KEY = "utility_bulk_submission_audit_v1";
 const USER_SUPPORT_STATE_KEY = "user_support_v1";
-const WIFI_ACCESS_STATE_KEY = "wifi_access_v1";
 const PAYMENT_ACCESS_STATE_KEY = "payment_access_v1";
 const PAYMENT_PROFILE_STATE_KEY = "payment_profiles_v1";
 const PAYMENT_INSTRUCTIONS_STATE_KEY = "payment_instructions_v1";
@@ -677,10 +663,6 @@ interface CaretakerAccessPersistedState {
   records: CaretakerAccessRecord[];
   requests?: CaretakerAccessRequestRecord[];
 }
-
-const wifiPackages: WifiPackage[] = DEFAULT_BUILDING_WIFI_PACKAGES.map((item) => ({
-  ...item
-}));
 
 function parseCookies(cookieHeader: string | undefined): Record<string, string> {
   if (!cookieHeader) {
@@ -1312,15 +1294,6 @@ async function bootstrap() {
   app.set("trust proxy", 1);
   app.set("etag", false);
 
-  const callbackToken =
-    process.env.WIFI_PAYMENT_CALLBACK_TOKEN ?? "dev-wifi-callback-token";
-
-  if (!process.env.WIFI_PAYMENT_CALLBACK_TOKEN) {
-    console.warn(
-      "WIFI_PAYMENT_CALLBACK_TOKEN is not set. Using dev default token. Set this in production."
-    );
-  }
-
   const adminToken = process.env.WIFI_ADMIN_TOKEN ?? "dev-admin-token";
   if (!process.env.WIFI_ADMIN_TOKEN) {
     console.warn(
@@ -1345,18 +1318,8 @@ async function bootstrap() {
     );
   }
 
-  const mpesaWifiCallbackToken =
-    process.env.MPESA_WIFI_CALLBACK_TOKEN ?? "dev-mpesa-wifi-token";
-
-  if (!process.env.MPESA_WIFI_CALLBACK_TOKEN) {
-    console.warn(
-      "MPESA_WIFI_CALLBACK_TOKEN is not set. Using dev default token. Set this in production."
-    );
-  }
-
   const pendingRentStkRequests = new Map<string, PendingRentStkRequest>();
   const pendingUtilityStkRequests = new Map<string, PendingUtilityStkRequest>();
-  const pendingWifiStkRequests = new Map<string, { checkoutReference: string; initiatedAt: string }>();
   const mpesaVerifyWindow = new Map<string, { windowStartMs: number; count: number }>();
   const householdMembersByUnit = new Map<string, HouseholdMemberRegistryRecord>();
   const utilityChargeDefaultsByUnit = new Map<string, UtilityChargeDefaultRecord>();
@@ -2937,55 +2900,6 @@ async function bootstrap() {
     persistRuntimeQueuesState();
   };
 
-  const finalizeWifiPaymentAfterMpesaResult = async (
-    checkoutReference: string,
-    result: { status: "success" | "failed"; providerReference?: string; message?: string }
-  ) => {
-    const payment = await wifiService.confirmPayment(checkoutReference, result);
-    if (!payment) {
-      return null;
-    }
-
-    const captynWifi =
-      result.status === "success"
-        ? await captynWifiIntegrationService.forwardConfirmedHousingWifiPayment(payment)
-        : { status: "disabled" as const, reason: "Payment was not successful." };
-
-    if (captynWifi.status === "failed") {
-      console.error("Failed to forward Housing Wi-Fi payment to CAPTYN Wi-Fi:", {
-        checkoutReference: payment.checkoutReference,
-        responseStatus: captynWifi.responseStatus,
-        error: captynWifi.error
-      });
-    }
-
-    // CAPTYN Wi-Fi (FreeRADIUS) is the real access-control system now — the
-    // local `voucher` from wifiService is a placeholder with no working
-    // credentials unless direct MikroTik REST config is set, which it isn't
-    // in production. Replace it with the real entitlement, or mark the
-    // payment as failed so a fake-looking voucher never reaches a customer.
-    let finalPayment = payment;
-    if (result.status === "success") {
-      if (captynWifi.status === "forwarded" && captynWifi.entitlement) {
-        finalPayment = {
-          ...payment,
-          voucher: captynWifi.entitlement,
-          message: "Access provisioned successfully."
-        };
-      } else {
-        finalPayment = {
-          ...payment,
-          status: "provisioning_failed",
-          provisioningStatus: "failed",
-          voucher: undefined,
-          message: "Payment confirmed, but Wi-Fi access could not be provisioned. Contact support."
-        };
-      }
-    }
-
-    return { payment: finalPayment, captynWifi };
-  };
-
   const rememberUtilityStkRequest = (
     checkoutRequestId: string,
     data: PendingUtilityStkRequest
@@ -3064,21 +2978,10 @@ async function bootstrap() {
       .slice(0, boundedLimit);
   };
 
-  const wifiService = new WifiAccessService({
-    callbackToken,
-    packages: wifiPackages,
-    mikrotik: {
-      apiUrl: process.env.MIKROTIK_API_URL,
-      username: process.env.MIKROTIK_USERNAME,
-      password: process.env.MIKROTIK_PASSWORD,
-      hotspotProfile: process.env.MIKROTIK_HOTSPOT_PROFILE
-    }
-  });
-
   const captynWifiIntegrationService = createCaptynWifiIntegrationServiceFromEnv();
   if (!captynWifiIntegrationService.enabled) {
     console.warn(
-      "CAPTYN_WIFI_API_URL or CAPTYN_WIFI_INTEGRATION_TOKEN is not set. Housing Wi-Fi confirmations will not be forwarded to CAPTYN Wi-Fi."
+      "CAPTYN_WIFI_API_URL or CAPTYN_WIFI_INTEGRATION_TOKEN is not set. Resident Wi-Fi status will not be available."
     );
   }
 
@@ -3098,9 +3001,6 @@ async function bootstrap() {
     : null;
   const buildingConfigurationService = repositoryContext.prisma
     ? new BuildingConfigurationService(repositoryContext.prisma)
-    : null;
-  const buildingWifiPackageService = repositoryContext.prisma
-    ? new BuildingWifiPackageService(repositoryContext.prisma)
     : null;
   const userSupportService = new UserSupportService();
   const ownerNotificationService = new OwnerNotificationService();
@@ -3743,9 +3643,6 @@ async function bootstrap() {
     }
 
     await buildingConfigurationService.ensureDefaultsForBuildings(buildings);
-    if (buildingWifiPackageService) {
-      await buildingWifiPackageService.ensureDefaultsForBuildings(buildings);
-    }
 
     const legacyPaymentAccessState = paymentAccessService.exportState();
     if (legacyPaymentAccessState.records.length > 0) {
@@ -3875,7 +3772,6 @@ async function bootstrap() {
         rentState,
         utilityState,
         userSupportState,
-        wifiState,
         paymentAccessState,
         paymentProfileState,
         paymentInstructionsState,
@@ -3894,7 +3790,6 @@ async function bootstrap() {
           UTILITY_BILLING_STATE_KEY
         ),
         loadAppStateJsonSafely<UserSupportPersistedState>(USER_SUPPORT_STATE_KEY),
-        loadAppStateJsonSafely<WifiAccessPersistedState>(WIFI_ACCESS_STATE_KEY),
         loadAppStateJsonSafely<PaymentAccessPersistedState>(
           PAYMENT_ACCESS_STATE_KEY
         ),
@@ -3932,7 +3827,6 @@ async function bootstrap() {
       rentLedgerService.importState(rentState);
       const utilityStateNormalized = utilityBillingService.importState(utilityState);
       userSupportService.importState(userSupportState);
-      wifiService.importState(wifiState);
       paymentAccessService.importState(paymentAccessState);
       paymentProfileService.importState(paymentProfileState);
       paymentInstructionService.importState(paymentInstructionsState);
@@ -4091,9 +3985,6 @@ async function bootstrap() {
       userSupportService.setStateChangeHandler((state) =>
         queuePersist(USER_SUPPORT_STATE_KEY, state)
       );
-      wifiService.setStateChangeHandler((state) =>
-        queuePersist(WIFI_ACCESS_STATE_KEY, state)
-      );
       paymentAccessService.setStateChangeHandler((state) =>
         queuePersist(PAYMENT_ACCESS_STATE_KEY, state)
       );
@@ -4150,7 +4041,6 @@ async function bootstrap() {
         utilityBillingService.exportState()
       );
       void queuePersist(USER_SUPPORT_STATE_KEY, userSupportService.exportState());
-      void queuePersist(WIFI_ACCESS_STATE_KEY, wifiService.exportState());
       void queuePersist(
         PAYMENT_ACCESS_STATE_KEY,
         paymentAccessService.exportState()
@@ -6029,16 +5919,23 @@ async function bootstrap() {
     return `Resident Account: Hi ${firstName}, your resident account is ready. Sign in at ${input.residentUrl}. Temporary password: your ID number.`;
   };
 
+  const ACTION_METER_READING_DUE = "meter_reading.due";
+  // Notifications a caretaker session may see through the owner-alerts endpoints. Caretakers are
+  // otherwise excluded from owner alerts on purpose (those report caretaker actions TO the owner);
+  // this is a narrow, additive exception for reminders that genuinely belong to both roles, not a
+  // general unblock — a defense-in-depth filter alongside recipientUserIds actually being scoped.
+  const CARETAKER_VISIBLE_NOTIFICATION_ACTIONS = new Set([ACTION_METER_READING_DUE]);
   const LEGACY_OWNER_ALERT_USER_ID = "legacy-owner-alerts";
   const ownerAlertUserIdForLandlordContext = (context: {
     role: string;
     userId?: string;
   }) => {
+    const userId = String(context.userId ?? "").trim();
     if (context.role === "caretaker") {
-      return "";
+      return userId;
     }
 
-    return String(context.userId ?? "").trim() || LEGACY_OWNER_ALERT_USER_ID;
+    return userId || LEGACY_OWNER_ALERT_USER_ID;
   };
 
   const enqueueOwnerNotificationForManagementAction = async (
@@ -6148,6 +6045,86 @@ async function bootstrap() {
     }
 
     return notification;
+  };
+
+  const maybeEnqueueMeterReadingReminder = async (building: {
+    id: string;
+    name: string;
+  }): Promise<void> => {
+    if (!buildingConfigurationService) {
+      return;
+    }
+
+    const config = await buildingConfigurationService.getForBuilding(building.id);
+    if (!config || config.utilityBillingMode !== "metered" || !config.meterReadingDay) {
+      return;
+    }
+
+    const today = new Date();
+    if (today.getUTCDate() < config.meterReadingDay) {
+      return;
+    }
+
+    const billingMonth = billingMonthFromDate(today);
+    const meteredHouseNumbers = utilityBillingService
+      .listMeters({ buildingId: building.id })
+      .filter((meter) => hasUsableRoomMeterNumber(meter.meterNumber))
+      .map((meter) => meter.houseNumber);
+
+    const gap = utilityBillingService.collectMeterReadingGap(
+      building.id,
+      meteredHouseNumbers,
+      billingMonth
+    );
+    if (gap.unreadHouseCount === 0) {
+      return;
+    }
+
+    const ownerStaff = userAccountService
+      ? await userAccountService.listLandlordAndStaffUsers()
+      : { users: [] };
+    const caretakerUserIds = listCaretakerRecordsForBuilding(building.id).map(
+      (record) => record.userId
+    );
+    const recipientUserIds = [
+      ...new Set([
+        ...ownerStaff.users.map((item) => item.id),
+        ...caretakerUserIds,
+        LEGACY_OWNER_ALERT_USER_ID
+      ])
+    ];
+    if (recipientUserIds.length === 0) {
+      return;
+    }
+
+    const houseWord = gap.unreadHouseCount === 1 ? "house" : "houses";
+    const needsWord = gap.unreadHouseCount === 1 ? "needs" : "need";
+    const sample = gap.sampleUnreadHouses.join(", ");
+
+    const notification = ownerNotificationService.enqueue({
+      title: "Meter Readings Due",
+      message: `${gap.unreadHouseCount} ${houseWord} in ${building.name} still ${needsWord} a meter reading for ${billingMonth}${
+        sample ? ` (e.g. ${sample})` : ""
+      }.`,
+      level: "warning",
+      source: "system",
+      action: ACTION_METER_READING_DUE,
+      buildingId: building.id,
+      buildingName: building.name,
+      recipientUserIds,
+      dedupeKey: `meter-reading-due-${normalizeBuildingId(building.id)}-${billingMonth}`,
+      url: buildLandlordRoomUrl(building.id)
+    });
+
+    if (notification) {
+      void pushNotificationService.notifyUserIds(recipientUserIds, {
+        title: notification.title,
+        body: notification.message,
+        level: notification.level,
+        tag: notification.dedupeKey ?? `owner-alert-${notification.id}`,
+        url: notification.url ?? "/landlord"
+      });
+    }
   };
 
   const findActiveTenancyIdForRoomAudit = async (
@@ -7033,6 +7010,11 @@ async function bootstrap() {
             })
             .filter((item) => !visibleBuildingIds.size || visibleBuildingIds.has(item.buildingId))
         );
+    const meterReadingRemindersPromise = quickStartup
+      ? Promise.resolve()
+      : Promise.all(buildings.map((building) => maybeEnqueueMeterReadingReminder(building))).then(
+          () => undefined
+        );
 
     const [applications, rentStatus, residentDirectory, visibleHouseNumbers, tickets] =
       await Promise.all([
@@ -7040,7 +7022,8 @@ async function bootstrap() {
         listLandlordRentCollectionStatusRows(visibleBuildingIds, 1_200),
         residentDirectoryPromise,
         visibleHouseNumbersPromise,
-        ticketsPromise
+        ticketsPromise,
+        meterReadingRemindersPromise
       ]);
 
     const paymentAccess = await listPaymentAccessRowsForBuildings(buildings);
@@ -7075,37 +7058,6 @@ async function bootstrap() {
     )
       ? registryBuildingId
       : rentEnabledBuildings[0]?.id ?? "";
-    const wifiPackageBuildingId = buildings.find((building) => building.wifiEnabled)?.id ?? "";
-
-    const wifiPackagesPromise = quickStartup
-      ? Promise.resolve({
-          wifiPackages: [] as unknown[],
-          wifiPackagesUnavailableReason: wifiPackageBuildingId
-            ? "Wi-Fi package controls are loading."
-            : "Wi-Fi is hidden because no building has it enabled."
-        })
-      : (async () => {
-      if (!wifiPackageBuildingId) {
-        return {
-          wifiPackages: [] as unknown[],
-          wifiPackagesUnavailableReason:
-            "Wi-Fi is hidden because no building has it enabled."
-        };
-      }
-
-      if (!buildingWifiPackageService) {
-        throw new Error("Wi-Fi package management requires database connection.");
-      }
-
-      await buildingWifiPackageService.ensureDefaultsForBuildings([
-        { id: wifiPackageBuildingId }
-      ]);
-      return {
-        wifiPackages:
-          await buildingWifiPackageService.listForBuilding(wifiPackageBuildingId),
-        wifiPackagesUnavailableReason: ""
-      };
-    })();
     const utilityBuildingConfigurationPromise =
       !quickStartup && registryBuildingId && buildingConfigurationService
         ? buildingConfigurationService.getForBuilding(registryBuildingId)
@@ -7250,13 +7202,11 @@ async function bootstrap() {
           .slice(0, 500)
       : [];
     const [
-      { wifiPackages, wifiPackagesUnavailableReason },
       utilityBuildingConfiguration,
       moveOutSettlements,
       { caretakerRequests, caretakers },
       ownerStaff
     ] = await Promise.all([
-      wifiPackagesPromise,
       utilityBuildingConfigurationPromise,
       moveOutSettlementsPromise,
       caretakerAccessPromise,
@@ -7288,7 +7238,6 @@ async function bootstrap() {
         residentsBuildingId: buildings.length > 0 ? "all" : "",
         overviewRoomBuildingId: "all",
         ticketBuildingId: "",
-        wifiPackageBuildingId,
         rentPaymentBuildingId,
         messageBuildingId: registryBuildingId
       },
@@ -7300,8 +7249,6 @@ async function bootstrap() {
       paymentProfiles,
       buildingPaymentProfiles,
       buildingPaymentInstructions,
-      wifiPackages,
-      wifiPackagesUnavailableReason,
       ownerStaff,
       ownerNotifications,
       messageCenter,
@@ -10556,25 +10503,38 @@ async function bootstrap() {
         return;
       }
 
-      if (context.role === "caretaker") {
+      const ownerAlertUserId = ownerAlertUserIdForLandlordContext(context);
+      if (context.role === "caretaker" && !ownerAlertUserId) {
         return res.status(403).json({
           error: "House manager accounts do not receive owner alerts."
         });
       }
-      const ownerAlertUserId = ownerAlertUserIdForLandlordContext(context);
 
       const limitRaw = Number(req.query.limit ?? 50);
       const limit = Number.isFinite(limitRaw)
         ? Math.min(Math.max(Math.trunc(limitRaw), 1), 200)
         : 50;
-      const notifications = ownerNotificationService.listForUser(ownerAlertUserId, {
+      let notifications = ownerNotificationService.listForUser(ownerAlertUserId, {
         limit
       });
+      let unreadCount = ownerNotificationService.countUnreadForUser(ownerAlertUserId);
+      if (context.role === "caretaker") {
+        notifications = notifications.filter((item) =>
+          CARETAKER_VISIBLE_NOTIFICATION_ACTIONS.has(item.action)
+        );
+        // countUnreadForUser scans this user's full notification history, not just the
+        // limit-capped page above, so re-derive it under the same action allow-list rather
+        // than reusing the raw count.
+        unreadCount = ownerNotificationService
+          .listForUser(ownerAlertUserId, { limit: 200 })
+          .filter((item) => CARETAKER_VISIBLE_NOTIFICATION_ACTIONS.has(item.action) && !item.read)
+          .length;
+      }
 
       return res.json({
         data: {
           notifications,
-          unreadCount: ownerNotificationService.countUnreadForUser(ownerAlertUserId)
+          unreadCount
         },
         role: context.role
       });
@@ -10590,26 +10550,50 @@ async function bootstrap() {
         return;
       }
 
-      if (context.role === "caretaker") {
+      const ownerAlertUserId = ownerAlertUserIdForLandlordContext(context);
+      if (context.role === "caretaker" && !ownerAlertUserId) {
         return res.status(403).json({
           error: "House manager accounts do not receive owner alerts."
         });
       }
-      const ownerAlertUserId = ownerAlertUserIdForLandlordContext(context);
 
       const parsed = ownerNotificationReadSchema.parse(req.body ?? {});
+      let notificationIdsToMark = parsed.notificationIds;
+      if (context.role === "caretaker") {
+        const visibleIds = new Set(
+          ownerNotificationService
+            .listForUser(ownerAlertUserId, { limit: 200 })
+            .filter((item) => CARETAKER_VISIBLE_NOTIFICATION_ACTIONS.has(item.action))
+            .map((item) => item.id)
+        );
+        notificationIdsToMark = notificationIdsToMark
+          ? notificationIdsToMark.filter((id) => visibleIds.has(id))
+          : [...visibleIds];
+      }
       const readCount = ownerNotificationService.markRead(
         ownerAlertUserId,
-        parsed.notificationIds
+        notificationIdsToMark
       );
+
+      let notifications = ownerNotificationService.listForUser(ownerAlertUserId, {
+        limit: 50
+      });
+      let unreadCount = ownerNotificationService.countUnreadForUser(ownerAlertUserId);
+      if (context.role === "caretaker") {
+        notifications = notifications.filter((item) =>
+          CARETAKER_VISIBLE_NOTIFICATION_ACTIONS.has(item.action)
+        );
+        unreadCount = ownerNotificationService
+          .listForUser(ownerAlertUserId, { limit: 200 })
+          .filter((item) => CARETAKER_VISIBLE_NOTIFICATION_ACTIONS.has(item.action) && !item.read)
+          .length;
+      }
 
       return res.json({
         data: {
           readCount,
-          notifications: ownerNotificationService.listForUser(ownerAlertUserId, {
-            limit: 50
-          }),
-          unreadCount: ownerNotificationService.countUnreadForUser(ownerAlertUserId)
+          notifications,
+          unreadCount
         },
         role: context.role
       });
@@ -11349,6 +11333,7 @@ async function bootstrap() {
             defaultCombinedUtilityChargeKsh: parsed.defaultCombinedUtilityChargeKsh,
             defaultMonthlyRentKsh: parsed.defaultMonthlyRentKsh,
             defaultRentDueDay: parsed.defaultRentDueDay,
+            meterReadingDay: parsed.meterReadingDay,
             utilityBalanceVisibleDays: parsed.utilityBalanceVisibleDays,
             rentGraceDays: parsed.rentGraceDays,
             lateRentPenaltyEnabled: parsed.lateRentPenaltyEnabled,
@@ -11383,113 +11368,6 @@ async function bootstrap() {
           data: {
             ...data,
             buildingName: building.name
-          },
-          role: context.role
-        });
-      } catch (error) {
-        return next(error);
-      }
-    }
-  );
-
-  app.get(
-    "/api/landlord/buildings/:buildingId/wifi/packages",
-    async (req, res, next) => {
-      try {
-        const context = await resolveLandlordAccessContext(req, res);
-        if (!context) {
-          return;
-        }
-
-        if (!buildingWifiPackageService) {
-          return res.status(503).json({
-            error: "Wi-Fi package management requires database connection."
-          });
-        }
-
-        const buildingId = req.params.buildingId?.trim();
-        const building = buildingId ? await store.getBuilding(buildingId) : null;
-        if (!building) {
-          return res.status(404).json({ error: "Building not found" });
-        }
-
-        const hasAccess = await canManageBuildingFromLandlordContext(
-          context,
-          building.id
-        );
-        if (!hasAccess) {
-          return res.status(403).json({ error: "Building access denied" });
-        }
-
-        await buildingWifiPackageService.ensureDefaultsForBuildings([building]);
-        const data = await buildingWifiPackageService.listForBuilding(building.id);
-        return res.json({
-          data,
-          building: {
-            id: building.id,
-            name: building.name
-          },
-          role: context.role
-        });
-      } catch (error) {
-        return next(error);
-      }
-    }
-  );
-
-  app.patch(
-    "/api/landlord/buildings/:buildingId/wifi/packages/:packageId",
-    async (req, res, next) => {
-      try {
-        const context = await resolveLandlordAccessContext(req, res);
-        if (!context) {
-          return;
-        }
-
-        if (context.role === "caretaker") {
-          return res.status(403).json({
-            error: "Caretaker accounts cannot change Wi-Fi packages."
-          });
-        }
-
-        if (!buildingWifiPackageService) {
-          return res.status(503).json({
-            error: "Wi-Fi package management requires database connection."
-          });
-        }
-
-        const buildingId = req.params.buildingId?.trim();
-        const building = buildingId ? await store.getBuilding(buildingId) : null;
-        if (!building) {
-          return res.status(404).json({ error: "Building not found" });
-        }
-
-        const hasAccess = await canManageBuildingFromLandlordContext(
-          context,
-          building.id
-        );
-        if (!hasAccess) {
-          return res.status(403).json({ error: "Building access denied" });
-        }
-
-        const packageId = wifiPackageIdSchema.parse(req.params.packageId);
-        const parsed = updateWifiPackageSchema.parse(req.body ?? {});
-        await buildingWifiPackageService.ensureDefaultsForBuildings([building]);
-        const data = await buildingWifiPackageService.updateForBuilding(
-          building.id,
-          packageId,
-          parsed
-        );
-
-        if (!data) {
-          return res.status(404).json({ error: "Package not found" });
-        }
-
-        return res.json({
-          data,
-          building: {
-            id: building.id,
-            name: building.name
           },
           role: context.role
         });
@@ -12760,189 +12638,6 @@ async function bootstrap() {
     }
   });
 
-  app.get("/api/wifi/packages", async (req, res, next) => {
-    try {
-      const buildingId =
-        typeof req.query.buildingId === "string" ? req.query.buildingId.trim() : "";
-
-      if (!buildingId) {
-        if (!buildingWifiPackageService) {
-          const data = wifiService.listPackages().map((item) => ({
-            id: item.id,
-            name: item.name,
-            hours: item.hours,
-            priceKsh: item.priceKsh,
-            profile: item.profile
-          }));
-
-          return res.json({ data });
-        }
-
-        return res.json({ data: [] });
-      }
-
-      const building = await store.getBuilding(buildingId);
-      if (!building) {
-        return res.status(404).json({ error: "Building not found" });
-      }
-
-      if (!buildingWifiPackageService) {
-        const data = wifiService.listPackages().map((item) => ({
-          id: item.id,
-          name: item.name,
-          hours: item.hours,
-          priceKsh: item.priceKsh,
-          profile: item.profile
-        }));
-
-        return res.json({ data });
-      }
-
-      await buildingWifiPackageService.ensureDefaultsForBuildings([building]);
-      const config = buildingConfigurationService
-        ? await buildingConfigurationService.getForBuilding(building.id)
-        : null;
-      if (
-        config &&
-        (!config.wifiEnabled || config.wifiAccessMode === "disabled")
-      ) {
-        return res.json({ data: [] });
-      }
-
-      const data = await buildingWifiPackageService.listForBuilding(building.id, {
-        enabledOnly: true
-      });
-
-      return res.json({
-        data: data.map((item) => ({
-          id: item.id,
-          name: item.name,
-          hours: item.hours,
-          priceKsh: item.priceKsh,
-          profile: item.profile
-        }))
-      });
-    } catch (error) {
-      return next(error);
-    }
-  });
-
-  app.post("/api/wifi/payments", async (req, res, next) => {
-    try {
-      const parsed = createWifiPaymentSchema.parse(req.body);
-      const building = await store.getBuilding(parsed.buildingId);
-
-      if (!building) {
-        return res.status(404).json({ error: "Building not found" });
-      }
-
-      if (buildingConfigurationService) {
-        await buildingConfigurationService.ensureDefaultsForBuildings([building]);
-        const config = await buildingConfigurationService.getForBuilding(building.id);
-        if (config && (!config.wifiEnabled || config.wifiAccessMode === "disabled")) {
-          return res.status(403).json({
-            error: "Wi-Fi billing is disabled for this building."
-          });
-        }
-      }
-
-      const selectedPackage = buildingWifiPackageService
-        ? await (async () => {
-            await buildingWifiPackageService.ensureDefaultsForBuildings([building]);
-            return buildingWifiPackageService.getForBuildingPackage(
-              building.id,
-              parsed.packageId
-            );
-          })()
-        : null;
-
-      if (buildingWifiPackageService) {
-        if (!selectedPackage) {
-          return res.status(404).json({ error: "Wi-Fi package not found" });
-        }
-
-        if (!selectedPackage.enabled) {
-          return res.status(403).json({ error: "Wi-Fi package is disabled" });
-        }
-      }
-
-      const buildingPaymentProfile = paymentProfileService.resolveForBuilding(
-        building.id,
-        "/api/payments/mpesa/wifi-callback"
-      );
-      const mpesaConfig = buildingPaymentProfile.config;
-      if (!buildingPaymentProfile.publicProfile || !mpesaConfig) {
-        return res.status(503).json({
-          error:
-            "M-PESA payment profile is not available for this building. Ask management to update payment routing."
-        });
-      }
-      if (!mpesaConfig.enabled) {
-        return res.status(503).json({ error: "M-PESA STK is disabled for this building payment profile." });
-      }
-      if (!mpesaConfig.isConfigured) {
-        return res.status(503).json({
-          error: "M-PESA STK is not fully configured for this building payment profile.",
-          missing: mpesaConfig.missing
-        });
-      }
-
-      const formattedPhone = formatDarajaMsisdn(parsed.phoneNumber);
-      if (!formattedPhone) {
-        return res.status(400).json({ error: "Invalid Kenyan phone number for M-PESA STK push." });
-      }
-
-      const payment = wifiService.createPayment(parsed, {
-        id: building.id,
-        name: building.name
-      }, selectedPackage ?? undefined);
-
-      try {
-        const callbackUrl = mpesaConfig.callbackUrl.includes("token=")
-          ? mpesaConfig.callbackUrl
-          : appendQueryParam(mpesaConfig.callbackUrl, "token", mpesaWifiCallbackToken);
-
-        const client = new DarajaClient(mpesaConfig);
-        const result = await client.initiateStkPush({
-          amount: Math.round(payment.amountKsh),
-          phoneNumber: formattedPhone,
-          accountReference: payment.checkoutReference.slice(0, 12),
-          transactionDesc: `${building.name} WiFi ${payment.package.name}`.slice(0, 80),
-          callbackUrl
-        });
-
-        const checkoutRequestId =
-          typeof result.CheckoutRequestID === "string" ? result.CheckoutRequestID.trim() : "";
-        if (!checkoutRequestId) {
-          await wifiService.confirmPayment(payment.checkoutReference, {
-            status: "failed",
-            message: "M-PESA did not return a checkout request ID."
-          });
-          return res.status(502).json({ error: "M-PESA did not return a checkout request ID." });
-        }
-
-        pendingWifiStkRequests.set(checkoutRequestId, {
-          checkoutReference: payment.checkoutReference,
-          initiatedAt: payment.createdAt
-        });
-
-        return res.status(202).json({
-          data: payment,
-          checkoutRequestId,
-          customerMessage: result.CustomerMessage
-        });
-      } catch (stkError) {
-        await wifiService.confirmPayment(payment.checkoutReference, {
-          status: "failed",
-          message: stkError instanceof Error ? stkError.message : "Unable to start M-PESA payment."
-        });
-        return next(stkError);
-      }
-    } catch (error) {
-      return next(error);
-    }
-  });
-
   app.post("/api/media/upload", async (req, res, next) => {
     try {
       const formData = await parseMultipartFormData(req);
@@ -13126,24 +12821,15 @@ async function bootstrap() {
     }
   });
 
-  app.get("/api/wifi/payments/:checkoutReference", (req, res) => {
-    const payment = wifiService.getPayment(req.params.checkoutReference);
-    if (!payment) {
-      return res.status(404).json({ error: "Payment not found" });
-    }
-
-    return res.json({ data: payment });
-  });
-
-  app.get("/api/resident/wifi/packages", async (req, res, next) => {
+  app.get("/api/resident/wifi/status", async (req, res, next) => {
     try {
       const session = await getResidentSession(req, res);
       if (!session) {
         return;
       }
 
-      if (!buildingWifiPackageService) {
-        return res.json({ data: [] });
+      if (!captynWifiIntegrationService.enabled) {
+        return res.status(503).json({ error: "Wi-Fi status is not available right now." });
       }
 
       const building = await store.getBuilding(session.buildingId);
@@ -13151,168 +12837,115 @@ async function bootstrap() {
         return res.status(404).json({ error: "Building not found" });
       }
 
-      if (buildingConfigurationService) {
-        await buildingConfigurationService.ensureDefaultsForBuildings([building]);
-        const config = await buildingConfigurationService.getForBuilding(building.id);
-        if (config && (!config.wifiEnabled || config.wifiAccessMode === "disabled")) {
-          return res.json({ data: [] });
-        }
-      }
+      const buyUrl = process.env.CAPTYN_WIFI_BUY_URL?.trim() || "https://captyn.shop/wifi";
 
-      await buildingWifiPackageService.ensureDefaultsForBuildings([building]);
-      const packages = await buildingWifiPackageService.listForBuilding(building.id, {
-        enabledOnly: true
-      });
+      const [entitlementsResult, plansResult] = await Promise.all([
+        captynWifiIntegrationService.listEntitlements(building.id, {
+          phone: session.phoneNumber,
+          status: "active",
+          take: 1
+        }),
+        captynWifiIntegrationService.listPlans(building.id)
+      ]);
 
-      return res.json({
-        data: packages.map((item) => ({
-          id: item.id,
-          name: item.name,
-          hours: item.hours,
-          priceKsh: item.residentPriceKsh ?? item.priceKsh,
-          rateLimit: item.rateLimit,
-          deviceLimit: item.deviceLimit,
-          profile: item.profile
-        }))
-      });
-    } catch (error) {
-      return next(error);
-    }
-  });
-
-  app.post("/api/resident/wifi/payments", async (req, res, next) => {
-    try {
-      const session = await getResidentSession(req, res);
-      if (!session) {
-        return;
-      }
-
-      if (!buildingWifiPackageService) {
-        return res.status(503).json({ error: "Resident Wi-Fi purchase is not available." });
-      }
-
-      const parsed = residentWifiPaymentSchema.parse(req.body);
-      const building = await store.getBuilding(session.buildingId);
-      if (!building) {
-        return res.status(404).json({ error: "Building not found" });
-      }
-
-      if (buildingConfigurationService) {
-        await buildingConfigurationService.ensureDefaultsForBuildings([building]);
-        const config = await buildingConfigurationService.getForBuilding(building.id);
-        if (config && (!config.wifiEnabled || config.wifiAccessMode === "disabled")) {
-          return res.status(403).json({ error: "Wi-Fi is not enabled for this building." });
-        }
-      }
-
-      await buildingWifiPackageService.ensureDefaultsForBuildings([building]);
-      const selectedPackage = await buildingWifiPackageService.getForBuildingPackage(
-        building.id,
-        parsed.packageId
-      );
-      if (!selectedPackage) {
-        return res.status(404).json({ error: "Wi-Fi package not found" });
-      }
-      if (!selectedPackage.enabled) {
-        return res.status(403).json({ error: "Wi-Fi package is disabled" });
-      }
-
-      const residentPackage = {
-        ...selectedPackage,
-        priceKsh: selectedPackage.residentPriceKsh ?? selectedPackage.priceKsh
-      };
-
-      const buildingPaymentProfile = paymentProfileService.resolveForBuilding(
-        building.id,
-        "/api/payments/mpesa/wifi-callback"
-      );
-      const mpesaConfig = buildingPaymentProfile.config;
-      if (!buildingPaymentProfile.publicProfile || !mpesaConfig) {
-        return res.status(503).json({
+      if (entitlementsResult.status === "failed" || plansResult.status === "failed") {
+        return res.status(502).json({
           error:
-            "M-PESA payment profile is not available for this building. Ask management to update payment routing."
-        });
-      }
-      if (!mpesaConfig.enabled) {
-        return res.status(503).json({ error: "M-PESA STK is disabled for this building payment profile." });
-      }
-      if (!mpesaConfig.isConfigured) {
-        return res.status(503).json({
-          error: "M-PESA STK is not fully configured for this building payment profile.",
-          missing: mpesaConfig.missing
+            (entitlementsResult.status === "failed" && entitlementsResult.error) ||
+            (plansResult.status === "failed" && plansResult.error) ||
+            "Unable to reach CAPTYN Wi-Fi."
         });
       }
 
-      const formattedPhone = formatDarajaMsisdn(session.phoneNumber);
-      if (!formattedPhone) {
-        return res.status(400).json({ error: "No valid phone number on this resident account for M-PESA." });
+      const entitlements = (entitlementsResult.status === "ok" ? entitlementsResult.data : []) as Array<{
+        id: string;
+        expiresAt: string;
+        plan?: { name?: string } | null;
+      }>;
+      const activeEntitlement = entitlements[0] ?? null;
+
+      let current: {
+        planName: string;
+        expiresAt: string;
+        totalInputOctets: string;
+        totalOutputOctets: string;
+      } | null = null;
+
+      if (activeEntitlement) {
+        const usageResult = await captynWifiIntegrationService.getEntitlementUsage(
+          building.id,
+          activeEntitlement.id
+        );
+        const usage =
+          usageResult.status === "ok"
+            ? (usageResult.data as {
+                totalInputOctets?: string | number;
+                totalOutputOctets?: string | number;
+              } | null)
+            : null;
+
+        current = {
+          planName: activeEntitlement.plan?.name ?? "Active plan",
+          expiresAt: activeEntitlement.expiresAt,
+          totalInputOctets: String(usage?.totalInputOctets ?? 0),
+          totalOutputOctets: String(usage?.totalOutputOctets ?? 0)
+        };
       }
 
-      const payment = wifiService.createPayment(
-        { buildingId: building.id, packageId: parsed.packageId, phoneNumber: session.phoneNumber },
-        { id: building.id, name: building.name },
-        residentPackage
+      const rawPlans = (plansResult.status === "ok" ? plansResult.data : []) as Array<{
+        id: string;
+        name: string;
+        priceKsh: number;
+        durationSeconds: number;
+        source: string;
+        externalPackageId: string;
+        enabled: boolean;
+      }>;
+
+      const baselineById = new Map(
+        rawPlans.filter((plan) => plan.source === "captyn_admin").map((plan) => [plan.id, plan])
       );
 
-      try {
-        const callbackUrl = mpesaConfig.callbackUrl.includes("token=")
-          ? mpesaConfig.callbackUrl
-          : appendQueryParam(mpesaConfig.callbackUrl, "token", mpesaWifiCallbackToken);
+      const buyablePlans = rawPlans
+        .filter(
+          (plan) =>
+            plan.enabled &&
+            (plan.source === "captyn_dynamic" || (plan.source === "captyn_admin" && plan.priceKsh === 0))
+        )
+        .map((plan) => {
+          const baseline =
+            plan.source === "captyn_dynamic" ? baselineById.get(plan.externalPackageId) : undefined;
+          const isFree = plan.priceKsh === 0;
+          const discountPercent =
+            !isFree && baseline && baseline.priceKsh > plan.priceKsh
+              ? Math.round((1 - plan.priceKsh / baseline.priceKsh) * 100)
+              : 0;
 
-        const client = new DarajaClient(mpesaConfig);
-        const result = await client.initiateStkPush({
-          amount: Math.round(payment.amountKsh),
-          phoneNumber: formattedPhone,
-          accountReference: payment.checkoutReference.slice(0, 12),
-          transactionDesc: `${building.name} WiFi ${payment.package.name}`.slice(0, 80),
-          callbackUrl
+          return {
+            id: plan.id,
+            name: plan.name,
+            priceKsh: plan.priceKsh,
+            durationSeconds: plan.durationSeconds,
+            isFree,
+            discountPercent
+          };
         });
 
-        const checkoutRequestId =
-          typeof result.CheckoutRequestID === "string" ? result.CheckoutRequestID.trim() : "";
-        if (!checkoutRequestId) {
-          await wifiService.confirmPayment(payment.checkoutReference, {
-            status: "failed",
-            message: "M-PESA did not return a checkout request ID."
-          });
-          return res.status(502).json({ error: "M-PESA did not return a checkout request ID." });
+      let bestDiscountPlanId = "";
+      let bestDiscount = 0;
+      for (const plan of buyablePlans) {
+        if (!plan.isFree && plan.discountPercent > bestDiscount) {
+          bestDiscount = plan.discountPercent;
+          bestDiscountPlanId = plan.id;
         }
-
-        pendingWifiStkRequests.set(checkoutRequestId, {
-          checkoutReference: payment.checkoutReference,
-          initiatedAt: payment.createdAt
-        });
-
-        return res.status(202).json({
-          data: payment,
-          checkoutRequestId,
-          customerMessage: result.CustomerMessage
-        });
-      } catch (stkError) {
-        await wifiService.confirmPayment(payment.checkoutReference, {
-          status: "failed",
-          message: stkError instanceof Error ? stkError.message : "Unable to start M-PESA payment."
-        });
-        return next(stkError);
-      }
-    } catch (error) {
-      return next(error);
-    }
-  });
-
-  app.get("/api/resident/wifi/payments/:checkoutReference", async (req, res, next) => {
-    try {
-      const session = await getResidentSession(req, res);
-      if (!session) {
-        return;
       }
 
-      const payment = wifiService.getPayment(req.params.checkoutReference);
-      if (!payment || payment.building.id !== session.buildingId) {
-        return res.status(404).json({ error: "Payment not found" });
-      }
+      const plans = buyablePlans.map((plan) => ({
+        ...plan,
+        recommended: Boolean(bestDiscountPlanId) && plan.id === bestDiscountPlanId
+      }));
 
-      return res.json({ data: payment });
+      return res.json({ data: { current, plans, buyUrl } });
     } catch (error) {
       return next(error);
     }
@@ -14716,68 +14349,6 @@ async function bootstrap() {
     }
   });
 
-  app.post("/api/wifi/payments/:checkoutReference/confirm", async (req, res, next) => {
-    try {
-      const token = req.header("x-wifi-callback-token");
-      if (!wifiService.isValidCallbackToken(token ?? undefined)) {
-        return res.status(401).json({ error: "Invalid callback token" });
-      }
-
-      const parsed = confirmWifiPaymentSchema.parse(req.body);
-      const result = await finalizeWifiPaymentAfterMpesaResult(
-        req.params.checkoutReference,
-        parsed
-      );
-
-      if (!result) {
-        return res.status(404).json({ error: "Payment not found" });
-      }
-
-      return res.json({ data: result.payment, captynWifi: result.captynWifi });
-    } catch (error) {
-      return next(error);
-    }
-  });
-
-  app.post("/api/payments/mpesa/wifi-callback", async (req, res, next) => {
-    try {
-      if (!callbackTokenMatches(req, mpesaWifiCallbackToken)) {
-        return res.status(401).json({ error: "Invalid M-PESA callback token" });
-      }
-
-      const extracted = parseMpesaCallbackPayload(req.body);
-      const pending = extracted.checkoutRequestId
-        ? pendingWifiStkRequests.get(extracted.checkoutRequestId)
-        : undefined;
-
-      if (extracted.checkoutRequestId) {
-        pendingWifiStkRequests.delete(extracted.checkoutRequestId);
-      }
-
-      if (!pending) {
-        return res.status(202).json({
-          received: true,
-          applied: false,
-          message: "No matching pending WiFi payment."
-        });
-      }
-
-      const result = await finalizeWifiPaymentAfterMpesaResult(pending.checkoutReference, {
-        status: extracted.resultCode === 0 ? "success" : "failed",
-        providerReference: extracted.providerReference ?? extracted.checkoutRequestId,
-        message: extracted.resultDesc
-      });
-
-      if (!result) {
-        return res.status(404).json({ error: "Payment not found" });
-      }
-
-      return res.status(200).json({ data: result.payment, captynWifi: result.captynWifi });
-    } catch (error) {
-      return next(error);
-    }
-  });
-
   app.post("/api/payments/mpesa/rent-callback", async (req, res, next) => {
     try {
       if (!callbackTokenMatches(req, mpesaRentCallbackToken)) {
@@ -15162,114 +14733,170 @@ async function bootstrap() {
     }
   });
 
-  app.get("/api/admin/wifi/packages", async (req, res, next) => {
+  // Wi-Fi Department: building-scoped read-only resident/plan/session views
+  // that proxy to the real CAPTYN Wi-Fi service via captynWifiIntegrationService.
+
+  app.get("/api/admin/buildings/:buildingId/wifi/residents", async (req, res, next) => {
     try {
       const admin = getAdminSession(req, res, "admin");
       if (!admin) {
         return;
       }
 
-      const buildingId =
-        typeof req.query.buildingId === "string" ? req.query.buildingId.trim() : "";
-
-      if (!buildingWifiPackageService) {
-        return res.json({ data: wifiService.listPackages(), role: admin.role });
+      if (!repositoryContext.prisma) {
+        return res.status(503).json({ error: "Resident lookup requires database connection." });
       }
 
-      if (!buildingId) {
-        return res.json({ data: [], role: admin.role });
-      }
-
-      const building = await store.getBuilding(buildingId);
+      const buildingId = req.params.buildingId?.trim();
+      const building = buildingId ? await store.getBuilding(buildingId) : null;
       if (!building) {
         return res.status(404).json({ error: "Building not found" });
       }
 
-      await buildingWifiPackageService.ensureDefaultsForBuildings([building]);
-      const data = await buildingWifiPackageService.listForBuilding(building.id);
-
-      return res.json({
-        data,
-        building: {
-          id: building.id,
-          name: building.name
+      const tenancies = await repositoryContext.prisma.tenancy.findMany({
+        where: { buildingId: building.id, active: true },
+        select: {
+          id: true,
+          user: { select: { id: true, fullName: true, phone: true } },
+          unit: { select: { houseNumber: true } }
         },
-        role: admin.role
+        orderBy: { createdAt: "asc" }
       });
+
+      const data = tenancies.map((tenancy) => ({
+        tenancyId: tenancy.id,
+        userId: tenancy.user.id,
+        fullName: tenancy.user.fullName,
+        phone: tenancy.user.phone,
+        houseNumber: tenancy.unit.houseNumber
+      }));
+
+      return res.json({ data, building: { id: building.id, name: building.name }, role: admin.role });
     } catch (error) {
       return next(error);
     }
   });
 
-  app.patch("/api/admin/wifi/packages/:packageId", async (req, res, next) => {
+  app.get("/api/admin/buildings/:buildingId/wifi/plans", async (req, res, next) => {
     try {
       const admin = getAdminSession(req, res, "admin");
       if (!admin) {
         return;
       }
 
-      const packageId = wifiPackageIdSchema.parse(req.params.packageId);
-      const buildingId =
-        typeof req.query.buildingId === "string" ? req.query.buildingId.trim() : "";
-      const parsed = updateWifiPackageSchema.parse(req.body);
-
-      if (!buildingWifiPackageService) {
-        const updated = wifiService.updatePackage(packageId, parsed);
-
-        if (!updated) {
-          return res.status(404).json({ error: "Package not found" });
-        }
-
-        return res.json({ data: updated, role: admin.role });
-      }
-
-      if (!buildingId) {
-        return res.status(400).json({ error: "buildingId is required" });
-      }
-
-      const building = await store.getBuilding(buildingId);
+      const buildingId = req.params.buildingId?.trim();
+      const building = buildingId ? await store.getBuilding(buildingId) : null;
       if (!building) {
         return res.status(404).json({ error: "Building not found" });
       }
 
-      await buildingWifiPackageService.ensureDefaultsForBuildings([building]);
-      const updated = await buildingWifiPackageService.updateForBuilding(
-        building.id,
-        packageId,
-        parsed
-      );
-
-      if (!updated) {
-        return res.status(404).json({ error: "Package not found" });
+      if (!captynWifiIntegrationService.enabled) {
+        return res.status(503).json({ error: "CAPTYN Wi-Fi integration is not configured." });
       }
 
-      return res.json({
-        data: updated,
-        building: {
-          id: building.id,
-          name: building.name
-        },
-        role: admin.role
-      });
+      const result = await captynWifiIntegrationService.listPlans(building.id);
+      if (result.status !== "ok") {
+        return res.status(result.status === "disabled" ? 503 : 502).json({
+          error: result.status === "disabled" ? result.reason : result.error
+        });
+      }
+
+      return res.json({ data: result.data, building: { id: building.id, name: building.name }, role: admin.role });
     } catch (error) {
       return next(error);
     }
   });
 
-  app.get("/api/admin/wifi/payments", (req, res) => {
-    const admin = getAdminSession(req, res, "admin");
-    if (!admin) {
-      return;
+  app.get("/api/admin/buildings/:buildingId/wifi/entitlements", async (req, res, next) => {
+    try {
+      const admin = getAdminSession(req, res, "admin");
+      if (!admin) {
+        return;
+      }
+
+      const buildingId = req.params.buildingId?.trim();
+      const building = buildingId ? await store.getBuilding(buildingId) : null;
+      if (!building) {
+        return res.status(404).json({ error: "Building not found" });
+      }
+
+      if (!captynWifiIntegrationService.enabled) {
+        return res.status(503).json({ error: "CAPTYN Wi-Fi integration is not configured." });
+      }
+
+      const phone = typeof req.query.phone === "string" ? req.query.phone : undefined;
+      const status = typeof req.query.status === "string" ? req.query.status : undefined;
+      const result = await captynWifiIntegrationService.listEntitlements(building.id, { phone, status });
+      if (result.status !== "ok") {
+        return res.status(result.status === "disabled" ? 503 : 502).json({
+          error: result.status === "disabled" ? result.reason : result.error
+        });
+      }
+
+      return res.json({ data: result.data, building: { id: building.id, name: building.name }, role: admin.role });
+    } catch (error) {
+      return next(error);
     }
+  });
 
-    const limitRaw = req.query.limit;
-    const parsedLimit = Number(limitRaw);
-    const limit = Number.isFinite(parsedLimit)
-      ? Math.min(Math.max(parsedLimit, 1), 300)
-      : 100;
+  app.get("/api/admin/buildings/:buildingId/wifi/sessions", async (req, res, next) => {
+    try {
+      const admin = getAdminSession(req, res, "admin");
+      if (!admin) {
+        return;
+      }
 
-    const data = wifiService.listPayments().slice(0, limit);
-    return res.json({ data, role: admin.role });
+      const buildingId = req.params.buildingId?.trim();
+      const building = buildingId ? await store.getBuilding(buildingId) : null;
+      if (!building) {
+        return res.status(404).json({ error: "Building not found" });
+      }
+
+      if (!captynWifiIntegrationService.enabled) {
+        return res.status(503).json({ error: "CAPTYN Wi-Fi integration is not configured." });
+      }
+
+      const result = await captynWifiIntegrationService.listSessions(building.id);
+      if (result.status !== "ok") {
+        return res.status(result.status === "disabled" ? 503 : 502).json({
+          error: result.status === "disabled" ? result.reason : result.error
+        });
+      }
+
+      return res.json({ data: result.data, building: { id: building.id, name: building.name }, role: admin.role });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.post("/api/admin/wifi/entitlements/:entitlementId/revoke", async (req, res, next) => {
+    try {
+      const admin = getAdminSession(req, res, "admin");
+      if (!admin) {
+        return;
+      }
+
+      if (!captynWifiIntegrationService.enabled) {
+        return res.status(503).json({ error: "CAPTYN Wi-Fi integration is not configured." });
+      }
+
+      const entitlementId = req.params.entitlementId?.trim();
+      if (!entitlementId) {
+        return res.status(400).json({ error: "entitlementId is required" });
+      }
+
+      const parsed = revokeWifiEntitlementSchema.parse(req.body ?? {});
+      const result = await captynWifiIntegrationService.revokeEntitlement(entitlementId, parsed.status);
+      if (result.status !== "ok") {
+        return res.status(result.status === "disabled" ? 503 : 502).json({
+          error: result.status === "disabled" ? result.reason : result.error
+        });
+      }
+
+      return res.json({ data: result.data, role: admin.role });
+    } catch (error) {
+      return next(error);
+    }
   });
 
   app.get("/api/admin/rent-due", (req, res, next) => {

@@ -1108,6 +1108,40 @@ test("generates utility payment reminders for due balances", () => {
   assert.ok(reminders.some((item) => item.dedupeKey.includes("utility-reminder-d1")));
 });
 
+test("collectMeterReadingGap reports metered houses with no reading yet this month", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.createBill("water", BUILDING_A, "A-1", {
+    billingMonth: "2026-09",
+    currentReading: 120,
+    ratePerUnitKsh: 20,
+    dueDate
+  });
+
+  const gap = service.collectMeterReadingGap(BUILDING_A, ["A-1", "A-2", "A-3"], "2026-09");
+
+  assert.equal(gap.unreadHouseCount, 2);
+  assert.deepEqual(gap.sampleUnreadHouses, ["A-2", "A-3"]);
+});
+
+test("collectMeterReadingGap is empty once every metered house has a reading", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.createBill("water", BUILDING_A, "B-1", {
+    billingMonth: "2026-09",
+    currentReading: 40,
+    ratePerUnitKsh: 20,
+    dueDate
+  });
+
+  const gap = service.collectMeterReadingGap(BUILDING_A, ["B-1"], "2026-09");
+
+  assert.equal(gap.unreadHouseCount, 0);
+  assert.deepEqual(gap.sampleUnreadHouses, []);
+});
+
 test("keeps utility bills isolated per building for the same house number", () => {
   const service = new UtilityBillingService();
   const dueDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();

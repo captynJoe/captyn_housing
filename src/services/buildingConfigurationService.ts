@@ -28,6 +28,7 @@ export type BuildingConfigurationRecord = {
   defaultCombinedUtilityChargeKsh: number | null;
   defaultMonthlyRentKsh: number | null;
   defaultRentDueDay: number | null;
+  meterReadingDay: number | null;
   utilityBalanceVisibleDays: number;
   rentGraceDays: number;
   lateRentPenaltyEnabled: boolean;
@@ -65,6 +66,7 @@ export interface UpdateBuildingConfigurationInput {
   defaultCombinedUtilityChargeKsh?: number | null;
   defaultMonthlyRentKsh?: number | null;
   defaultRentDueDay?: number | null;
+  meterReadingDay?: number | null;
   utilityBalanceVisibleDays?: number;
   rentGraceDays?: number;
   lateRentPenaltyEnabled?: boolean;
@@ -100,6 +102,7 @@ const DEFAULT_CONFIG = {
   defaultCombinedUtilityChargeKsh: null as number | null,
   defaultMonthlyRentKsh: null as number | null,
   defaultRentDueDay: null as number | null,
+  meterReadingDay: null as number | null,
   utilityBalanceVisibleDays: 7,
   rentGraceDays: 0,
   lateRentPenaltyEnabled: false,
@@ -130,6 +133,7 @@ function mapConfig(value: BuildingConfiguration): BuildingConfigurationRecord {
     defaultCombinedUtilityChargeKsh: value.defaultCombinedUtilityChargeKsh,
     defaultMonthlyRentKsh: value.defaultMonthlyRentKsh,
     defaultRentDueDay: value.defaultRentDueDay,
+    meterReadingDay: value.meterReadingDay,
     utilityBalanceVisibleDays: value.utilityBalanceVisibleDays,
     rentGraceDays: value.rentGraceDays,
     lateRentPenaltyEnabled: value.lateRentPenaltyEnabled,
@@ -297,6 +301,10 @@ export class BuildingConfigurationService {
       input.defaultRentDueDay == null
         ? input.defaultRentDueDay
         : Math.min(31, Math.max(1, Math.round(Number(input.defaultRentDueDay) || 1)));
+    const normalizedMeterReadingDay =
+      input.meterReadingDay == null
+        ? input.meterReadingDay
+        : Math.min(31, Math.max(1, Math.round(Number(input.meterReadingDay) || 1)));
     const normalizedLateRentPenaltyAmountKsh =
       input.lateRentPenaltyAmountKsh == null
         ? input.lateRentPenaltyAmountKsh
@@ -313,6 +321,7 @@ export class BuildingConfigurationService {
         defaultCombinedUtilityChargeKsh: normalizedDefaultCombinedUtilityChargeKsh,
         defaultMonthlyRentKsh: normalizedDefaultMonthlyRentKsh,
         defaultRentDueDay: normalizedDefaultRentDueDay,
+        meterReadingDay: normalizedMeterReadingDay,
         lateRentPenaltyAmountKsh: normalizedLateRentPenaltyAmountKsh,
         updatedByRole: actor?.role ?? null,
         updatedByUserId: actor?.userId ?? null,
@@ -329,6 +338,7 @@ export class BuildingConfigurationService {
         defaultCombinedUtilityChargeKsh: normalizedDefaultCombinedUtilityChargeKsh,
         defaultMonthlyRentKsh: normalizedDefaultMonthlyRentKsh,
         defaultRentDueDay: normalizedDefaultRentDueDay,
+        meterReadingDay: normalizedMeterReadingDay,
         lateRentPenaltyAmountKsh: normalizedLateRentPenaltyAmountKsh,
         updatedByRole: actor?.role,
         updatedByUserId: actor?.userId,

@@ -395,7 +395,6 @@ async function main() {
       await tx.tenantApplication.deleteMany({ where: { buildingId: { in: rosaBuildingIds } } });
       await tx.householdMemberRegistry.deleteMany({ where: { buildingId: { in: rosaBuildingIds } } });
       await tx.buildingConfiguration.deleteMany({ where: { buildingId: { in: rosaBuildingIds } } });
-      await tx.buildingWifiPackage.deleteMany({ where: { buildingId: { in: rosaBuildingIds } } });
       await tx.building.deleteMany({ where: { id: { in: rosaBuildingIds } } });
     }
 

@@ -40,3 +40,41 @@ test("syncLegacyPaymentAccess skips orphaned building records", async () => {
 
   assert.deepEqual(upsertCalls, ["CAPTYN-BLDG-00002"]);
 });
+
+test("updateForBuilding clamps meterReadingDay into the 1-31 range, same as defaultRentDueDay", async () => {
+  const updateInputs: Array<Record<string, unknown>> = [];
+  const prisma = {
+    buildingConfiguration: {
+      upsert: (input: { update: Record<string, unknown> }) => {
+        updateInputs.push(input.update);
+        return Promise.resolve({
+          buildingId: "CAPTYN-BLDG-00002",
+          ...input.update,
+          createdAt: new Date("2026-05-10T00:00:00.000Z"),
+          updatedAt: new Date("2026-05-10T00:00:00.000Z")
+        });
+      }
+    }
+  } as unknown as PrismaClient;
+
+  const service = new BuildingConfigurationService(prisma);
+
+  const tooHigh = await service.updateForBuilding("CAPTYN-BLDG-00002", { meterReadingDay: 35 });
+  assert.equal(tooHigh.meterReadingDay, 31);
+
+  const tooLow = await service.updateForBuilding("CAPTYN-BLDG-00002", { meterReadingDay: 0 });
+  assert.equal(tooLow.meterReadingDay, 1);
+
+  const withinRange = await service.updateForBuilding("CAPTYN-BLDG-00002", {
+    meterReadingDay: 15
+  });
+  assert.equal(withinRange.meterReadingDay, 15);
+
+  const cleared = await service.updateForBuilding("CAPTYN-BLDG-00002", { meterReadingDay: null });
+  assert.equal(cleared.meterReadingDay, null);
+
+  assert.deepEqual(
+    updateInputs.map((input) => input.meterReadingDay),
+    [31, 1, 15, null]
+  );
+});

@@ -1,39 +1,6 @@
-export interface CaptynWifiPaymentPackage {
-  id: string;
-  name: string;
-  hours: number;
-  priceKsh: number;
-  profile?: string;
-  rateLimit?: string | null;
-  deviceLimit?: number;
-  enabled?: boolean;
-}
-
-export interface CaptynWifiEntitlement {
-  username: string;
-  password: string;
-  expiresAt: string;
-}
-
-export interface CaptynWifiConfirmedPayment {
-  checkoutReference: string;
-  providerReference?: string;
-  provider: string;
-  building: {
-    id: string;
-    name: string;
-  };
-  package: CaptynWifiPaymentPackage;
-  amountKsh: number;
-  phoneNumber: string;
-  status: string;
-  provisioningStatus: string;
-  updatedAt: string;
-}
-
-export type CaptynWifiForwardResult =
+export type CaptynWifiProxyResult<T> =
   | { status: "disabled"; reason: string }
-  | { status: "forwarded"; responseStatus: number; entitlement?: CaptynWifiEntitlement }
+  | { status: "ok"; data: T }
   | { status: "failed"; responseStatus?: number; error: string };
 
 export interface CaptynWifiIntegrationOptions {
@@ -78,9 +45,19 @@ export class CaptynWifiIntegrationService {
     return Boolean(this.apiUrl && this.token);
   }
 
-  async forwardConfirmedHousingWifiPayment(
-    payment: CaptynWifiConfirmedPayment
-  ): Promise<CaptynWifiForwardResult> {
+  /**
+   * The captyn-wifi WifiSite id for a housing building. `resolveHousingSite`
+   * on the wifi side upserts `WifiSite.id` to whatever `site.id` housing
+   * sends, so this needs no round trip.
+   */
+  siteIdForBuilding(buildingId: string): string {
+    return this.sharedSiteId ?? buildingId;
+  }
+
+  private async proxyRequest<T>(
+    path: string,
+    init?: { method?: string; body?: unknown }
+  ): Promise<CaptynWifiProxyResult<T>> {
     if (!this.apiUrl || !this.token) {
       return {
         status: "disabled",
@@ -92,74 +69,74 @@ export class CaptynWifiIntegrationService {
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
-      const response = await fetch(
-        `${this.apiUrl}/api/integrations/housing/payments/confirmed`,
-        {
-          method: "POST",
-          signal: controller.signal,
-          headers: {
-            "content-type": "application/json",
-            "x-captyn-wifi-token": this.token
-          },
-          body: JSON.stringify({
-            sourceReference: payment.checkoutReference,
-            providerReference: payment.providerReference,
-            site: this.sharedSiteId
-              ? { id: this.sharedSiteId, name: this.sharedSiteName ?? payment.building.name }
-              : { id: payment.building.id, name: payment.building.name },
-            package: {
-              id: payment.package.id,
-              name: payment.package.name,
-              hours: payment.package.hours,
-              priceKsh: payment.package.priceKsh,
-              rateLimit: payment.package.rateLimit ?? undefined,
-              deviceLimit: payment.package.deviceLimit ?? 1,
-              enabled: payment.package.enabled ?? true
-            },
-            customerPhone: payment.phoneNumber,
-            amountKsh: payment.amountKsh,
-            confirmedAt: payment.updatedAt,
-            rawPayload: {
-              provider: payment.provider,
-              status: payment.status,
-              provisioningStatus: payment.provisioningStatus
-            }
-          })
-        }
-      );
+      const response = await fetch(`${this.apiUrl}${path}`, {
+        method: init?.method ?? "GET",
+        signal: controller.signal,
+        headers: {
+          "content-type": "application/json",
+          "x-captyn-wifi-token": this.token
+        },
+        body: init?.body !== undefined ? JSON.stringify(init.body) : undefined
+      });
+
+      const body = (await response.json().catch(() => null)) as { data?: T; error?: string } | null;
 
       if (!response.ok) {
-        const body = await response.text().catch(() => "");
         return {
           status: "failed",
           responseStatus: response.status,
-          error: body || `CAPTYN Wi-Fi returned ${response.status}`
+          error: body?.error || `CAPTYN Wi-Fi returned ${response.status}`
         };
       }
 
-      const body = await response.json().catch(() => null) as {
-        data?: {
-          entitlement?: { username?: string; cleartextSecret?: string; expiresAt?: string };
-        };
-      } | null;
-      const rawEntitlement = body?.data?.entitlement;
-      const entitlement: CaptynWifiEntitlement | undefined =
-        rawEntitlement?.username && rawEntitlement?.cleartextSecret && rawEntitlement?.expiresAt
-          ? {
-              username: rawEntitlement.username,
-              password: rawEntitlement.cleartextSecret,
-              expiresAt: rawEntitlement.expiresAt
-            }
-          : undefined;
-
-      return { status: "forwarded", responseStatus: response.status, entitlement };
+      return { status: "ok", data: (body?.data ?? null) as T };
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "CAPTYN Wi-Fi forwarding failed";
+      const message = error instanceof Error ? error.message : "CAPTYN Wi-Fi request failed";
       return { status: "failed", error: message };
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async listPlans(buildingId: string): Promise<CaptynWifiProxyResult<unknown[]>> {
+    return this.proxyRequest(`/api/integrations/housing/sites/${encodeURIComponent(this.siteIdForBuilding(buildingId))}/plans`);
+  }
+
+  async listEntitlements(
+    buildingId: string,
+    filters?: { phone?: string; status?: string; take?: number }
+  ): Promise<CaptynWifiProxyResult<unknown[]>> {
+    const params = new URLSearchParams();
+    if (filters?.phone) params.set("phone", filters.phone);
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.take) params.set("take", String(filters.take));
+    const query = params.toString();
+    return this.proxyRequest(
+      `/api/integrations/housing/sites/${encodeURIComponent(this.siteIdForBuilding(buildingId))}/entitlements${query ? `?${query}` : ""}`
+    );
+  }
+
+  async listSessions(buildingId: string): Promise<CaptynWifiProxyResult<unknown[]>> {
+    return this.proxyRequest(`/api/integrations/housing/sites/${encodeURIComponent(this.siteIdForBuilding(buildingId))}/sessions`);
+  }
+
+  async revokeEntitlement(
+    entitlementId: string,
+    status: "revoked" | "suspended" = "revoked"
+  ): Promise<CaptynWifiProxyResult<unknown>> {
+    return this.proxyRequest(`/api/integrations/housing/entitlements/${encodeURIComponent(entitlementId)}/revoke`, {
+      method: "POST",
+      body: { status }
+    });
+  }
+
+  async getEntitlementUsage(
+    buildingId: string,
+    entitlementId: string
+  ): Promise<CaptynWifiProxyResult<unknown>> {
+    return this.proxyRequest(
+      `/api/integrations/housing/sites/${encodeURIComponent(this.siteIdForBuilding(buildingId))}/entitlements/${encodeURIComponent(entitlementId)}/usage`
+    );
   }
 }
 

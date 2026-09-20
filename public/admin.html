@@ -328,6 +328,56 @@
 
         <section class="panel wide-panel">
           <div class="panel-head">
+            <h2>Wi-Fi Department</h2>
+            <div class="action-row">
+              <select id="admin-wifi-building-select"></select>
+              <button id="refresh-admin-wifi" type="button">Refresh</button>
+            </div>
+          </div>
+          <p id="admin-wifi-summary" class="panel-note">
+            Select a building with Wi-Fi enabled to view access history and live sessions.
+          </p>
+
+          <h3>Access History</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Phone</th>
+                  <th>Package</th>
+                  <th>Status</th>
+                  <th>Starts</th>
+                  <th>Expires</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="admin-wifi-entitlements-body"></tbody>
+            </table>
+          </div>
+
+          <h3>Live Sessions</h3>
+          <p class="status-text">
+            Reported by MikroTik/FreeRADIUS accounting. Revoke a voucher above to block
+            re-authentication — this does not force-disconnect an already-connected device.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Device</th>
+                  <th>IP</th>
+                  <th>Started</th>
+                  <th>Last Seen</th>
+                </tr>
+              </thead>
+              <tbody id="admin-wifi-sessions-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
             <h2>Owner Access Approvals</h2>
             <button id="refresh-landlord-access" type="button">Refresh</button>
           </div>
@@ -544,6 +594,6 @@
       <section id="admin-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/admin.js?v=20260801a"></script>
+    <script type="module" src="/admin.js?v=20260808a"></script>
   </body>
 </html>

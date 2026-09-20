@@ -108,7 +108,6 @@ const smsUtilityToggleEl = document.getElementById("sms-utility-toggle");
 const rentDueEl = document.getElementById("rent-due");
 
 const paymentsSummaryActionEl = document.getElementById("payments-summary-action");
-const paymentsTotalOutstandingEl = document.getElementById("payments-total-outstanding");
 const paymentsRentOutstandingEl = document.getElementById("payments-rent-outstanding");
 const paymentsUtilityOutstandingEl = document.getElementById("payments-utility-outstanding");
 const paymentsMonthPaidEl = document.getElementById("payments-month-paid");
@@ -160,16 +159,14 @@ const utilityPaymentBalanceEl = document.getElementById("utility-payment-balance
 const utilityPaymentBtnEl = document.getElementById("utility-payment-btn");
 const utilityPaymentsCountEl = document.getElementById("utility-payments-count");
 const utilityPaymentsListEl = document.getElementById("utility-payments-list");
-const wifiPackagesCountEl = document.getElementById("wifi-packages-count");
 const wifiErrorEl = document.getElementById("wifi-error");
 const wifiEmptyEl = document.getElementById("wifi-empty");
-const wifiPackagesEl = document.getElementById("wifi-packages");
-const wifiStatusSectionEl = document.getElementById("wifi-status-section");
-const wifiStatusTextEl = document.getElementById("wifi-status-text");
-const wifiAccessSectionEl = document.getElementById("wifi-access-section");
-const wifiAccessUsernameEl = document.getElementById("wifi-access-username");
-const wifiAccessPasswordEl = document.getElementById("wifi-access-password");
-const wifiAccessExpiresEl = document.getElementById("wifi-access-expires");
+const wifiPlansEl = document.getElementById("wifi-plans");
+const wifiCurrentCardEl = document.getElementById("wifi-current-card");
+const wifiCurrentPlanNameEl = document.getElementById("wifi-current-plan-name");
+const wifiCurrentExpiryEl = document.getElementById("wifi-current-expiry");
+const wifiCurrentUsageEl = document.getElementById("wifi-current-usage");
+const wifiBuyLinkEl = document.getElementById("wifi-buy-link");
 const mpesaStatusModalEl = document.getElementById("mpesa-status-modal");
 const mpesaStatusBackdropEl = document.getElementById("mpesa-status-backdrop");
 const mpesaStatusTitleEl = document.getElementById("mpesa-status-title");
@@ -264,11 +261,8 @@ const state = {
   mpesaStatusModalDismissed: false,
   activeReceipt: null,
   activeResidentView: "payments",
-  wifiPackages: [],
-  wifiPackagesLoaded: false,
-  wifiCheckoutReference: null,
-  wifiPollTimer: null,
-  wifiPollAttempts: 0,
+  wifiStatus: null,
+  wifiStatusLoaded: false,
   utilitySelectedBillMonthByType: {
     water: null,
     electricity: null
@@ -352,7 +346,6 @@ const REQUIRED_DOM_BINDINGS = Object.freeze([
   ["sms-utility-toggle", smsUtilityToggleEl],
   ["rent-due", rentDueEl],
   ["payments-summary-action", paymentsSummaryActionEl],
-  ["payments-total-outstanding", paymentsTotalOutstandingEl],
   ["payments-rent-outstanding", paymentsRentOutstandingEl],
   ["payments-utility-outstanding", paymentsUtilityOutstandingEl],
   ["payments-month-paid", paymentsMonthPaidEl],
@@ -1139,8 +1132,6 @@ function syncPaymentShortcutButtons() {
   const billingEnabled = !state.residentSession || canResidentAccessBilling();
   const rentOutstanding = getRentOutstandingBalance();
   const utilityOutstanding = getTotalUtilityOutstandingBalance();
-  const totalOutstanding = getTotalOutstandingBalance();
-  const suggestedStarter = computeSuggestedStarterAmount(totalOutstanding);
 
   paymentShortcutButtons.forEach((button) => {
     if (!(button instanceof HTMLButtonElement)) {
@@ -1163,15 +1154,6 @@ function syncPaymentShortcutButtons() {
         rentOutstanding > 0
           ? `View rent ${formatCurrency(rentOutstanding)}`
           : "Rent cleared";
-      return;
-    }
-
-    if (shortcut === "suggested-start") {
-      button.disabled = !billingEnabled || totalOutstanding <= 0;
-      button.textContent =
-        totalOutstanding > 0
-          ? `Suggested ${formatCurrency(suggestedStarter)}`
-          : "Nothing due now";
     }
   });
 }
@@ -1182,7 +1164,6 @@ function computeRemainingBalance(balance, amount) {
 
 function updatePaymentsSummaryCard() {
   if (state.residentSession && !canResidentAccessBilling()) {
-    paymentsTotalOutstandingEl.textContent = formatCurrency(0);
     paymentsRentOutstandingEl.textContent = formatCurrency(0);
     paymentsUtilityOutstandingEl.textContent = formatCurrency(0);
     paymentsMonthPaidEl.textContent = formatCurrency(0);
@@ -1197,31 +1178,15 @@ function updatePaymentsSummaryCard() {
   const totalOutstanding = getTotalOutstandingBalance();
   const paidThisMonth = getPaidThisMonthTotal();
 
-  paymentsTotalOutstandingEl.textContent = formatCurrency(totalOutstanding);
   paymentsRentOutstandingEl.textContent = formatCurrency(rentOutstanding);
   paymentsUtilityOutstandingEl.textContent = formatCurrency(utilityOutstanding);
   paymentsMonthPaidEl.textContent = formatCurrency(paidThisMonth);
   syncResidentPaySummary();
 
-  if (totalOutstanding <= 0) {
-    paymentsSummaryActionEl.textContent =
-      "All balances are clear right now. If a new bill is posted, use the payment details on this page.";
-    syncPaymentShortcutButtons();
-    return;
-  }
-
-  const suggestedStarter = computeSuggestedStarterAmount(totalOutstanding);
-  if (suggestedStarter >= totalOutstanding) {
-    paymentsSummaryActionEl.textContent =
-      "Your current balance is manageable. Use the instructions below and management will confirm the receipt.";
-    return;
-  }
-
-  paymentsSummaryActionEl.textContent = `You do not need to pay ${formatCurrency(
-    totalOutstanding
-  )} at once. A good start is ${formatCurrency(
-    suggestedStarter
-  )}; pay using the instructions below and the remainder stays on your account.`;
+  paymentsSummaryActionEl.textContent =
+    totalOutstanding > 0
+      ? "Pay any amount toward your balance using the instructions below."
+      : "All balances are clear right now. If a new bill is posted, use the payment details on this page.";
   syncPaymentShortcutButtons();
 }
 
@@ -2583,167 +2548,106 @@ function setActiveResidentView(nextView, { scroll = false } = {}) {
     });
   }
 
-  if (targetView === "wifi" && !state.wifiPackagesLoaded) {
-    void loadResidentWifiPackages();
+  if (targetView === "wifi" && !state.wifiStatusLoaded) {
+    void loadResidentWifiStatus();
   }
 }
 
-function formatWifiRate(rateLimit) {
-  const match = /^([\d.]+)M\/([\d.]+)M$/i.exec(String(rateLimit ?? "").trim());
-  if (!match) {
-    return "Standard speed";
+function formatDataUsage(octets) {
+  const bytes = Number(octets ?? 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 MB";
   }
-  const [, upload, download] = match;
-  return `${download} Mbps down / ${upload} Mbps up`;
+  const mb = bytes / (1024 * 1024);
+  if (mb < 1024) {
+    return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+  }
+  return `${(mb / 1024).toFixed(1)} GB`;
 }
 
-function renderResidentWifiPackages() {
-  wifiPackagesEl.replaceChildren();
-  const packages = state.wifiPackages;
-  wifiPackagesCountEl.textContent = `${packages.length} package${packages.length === 1 ? "" : "s"}`;
-  wifiEmptyEl.classList.toggle("hidden", packages.length > 0);
+function formatWifiDuration(durationSeconds) {
+  const hours = Math.round(Number(durationSeconds ?? 0) / 3600);
+  if (hours < 1) {
+    return "Short access";
+  }
+  if (hours < 24) {
+    return `${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"}`;
+}
 
-  packages.forEach((pkg) => {
-    const card = document.createElement("button");
-    card.type = "button";
+function renderResidentWifiStatus() {
+  const status = state.wifiStatus;
+  const plans = status?.plans ?? [];
+
+  if (wifiBuyLinkEl instanceof HTMLAnchorElement && status?.buyUrl) {
+    wifiBuyLinkEl.href = status.buyUrl;
+  }
+
+  if (status?.current) {
+    wifiCurrentCardEl.classList.remove("hidden");
+    wifiCurrentPlanNameEl.textContent = status.current.planName;
+    wifiCurrentExpiryEl.textContent = `Expires ${new Date(status.current.expiresAt).toLocaleString()}`;
+    const usedBytes =
+      Number(status.current.totalInputOctets ?? 0) + Number(status.current.totalOutputOctets ?? 0);
+    wifiCurrentUsageEl.textContent = `Data used so far: ${formatDataUsage(usedBytes)}`;
+  } else {
+    wifiCurrentCardEl.classList.add("hidden");
+  }
+
+  wifiEmptyEl.classList.toggle("hidden", Boolean(status?.current) || plans.length > 0);
+
+  wifiPlansEl.replaceChildren();
+  plans.forEach((plan) => {
+    const card = document.createElement("div");
     card.className = "wifi-package-card";
-    card.dataset.wifiPackageId = pkg.id;
+
+    if (plan.isFree) {
+      const badge = document.createElement("span");
+      badge.className = "wifi-package-badge";
+      badge.textContent = "Free access";
+      card.append(badge);
+    } else if (plan.discountPercent > 0) {
+      const badge = document.createElement("span");
+      badge.className = "wifi-package-badge";
+      badge.textContent = `${plan.discountPercent}% off`;
+      card.append(badge);
+    } else if (plan.recommended) {
+      const badge = document.createElement("span");
+      badge.className = "wifi-package-badge";
+      badge.textContent = "Recommended";
+      card.append(badge);
+    }
 
     const name = document.createElement("div");
     name.className = "wifi-package-name";
-    name.textContent = pkg.name;
+    name.textContent = plan.name;
 
     const price = document.createElement("div");
     price.className = "wifi-package-price";
-    price.textContent = formatCurrency(pkg.priceKsh);
+    price.textContent = plan.isFree ? "Free" : formatCurrency(plan.priceKsh);
 
-    const hours = document.createElement("div");
-    hours.className = "wifi-package-meta";
-    hours.textContent = `${pkg.hours} hour${pkg.hours === 1 ? "" : "s"} · ${formatWifiRate(pkg.rateLimit)}`;
+    const duration = document.createElement("div");
+    duration.className = "wifi-package-meta";
+    duration.textContent = formatWifiDuration(plan.durationSeconds);
 
-    const devices = document.createElement("div");
-    devices.className = "wifi-package-meta";
-    devices.textContent = `${pkg.deviceLimit ?? 1} device${(pkg.deviceLimit ?? 1) === 1 ? "" : "s"}`;
-
-    card.append(name, price, hours, devices);
-    card.addEventListener("click", () => {
-      void buyResidentWifiPackage(pkg);
-    });
-    wifiPackagesEl.append(card);
+    card.append(name, price, duration);
+    wifiPlansEl.append(card);
   });
 }
 
-async function loadResidentWifiPackages() {
+async function loadResidentWifiStatus() {
   wifiErrorEl.classList.add("hidden");
   try {
-    const payload = await requestJson("/api/resident/wifi/packages", {}, { auth: true });
-    state.wifiPackages = Array.isArray(payload.data) ? payload.data : [];
-    state.wifiPackagesLoaded = true;
-    renderResidentWifiPackages();
+    const payload = await requestJson("/api/resident/wifi/status", {}, { auth: true });
+    state.wifiStatus = payload.data ?? null;
+    state.wifiStatusLoaded = true;
+    renderResidentWifiStatus();
   } catch (error) {
     wifiErrorEl.textContent =
-      error instanceof Error ? error.message : "Unable to load Wi-Fi packages.";
+      error instanceof Error ? error.message : "Unable to load Wi-Fi status.";
     wifiErrorEl.classList.remove("hidden");
-  }
-}
-
-function setWifiPackageCardsPending(pending) {
-  [...wifiPackagesEl.children].forEach((card) => {
-    card.classList.toggle("pending", pending);
-    if (card instanceof HTMLButtonElement) {
-      card.disabled = pending;
-    }
-  });
-}
-
-function stopWifiPaymentPolling() {
-  if (state.wifiPollTimer) {
-    clearInterval(state.wifiPollTimer);
-    state.wifiPollTimer = null;
-  }
-}
-
-async function pollResidentWifiPayment() {
-  if (!state.wifiCheckoutReference) {
-    return;
-  }
-
-  state.wifiPollAttempts += 1;
-  if (state.wifiPollAttempts > 30) {
-    stopWifiPaymentPolling();
-    wifiStatusTextEl.textContent =
-      "Still waiting on M-PESA confirmation. Check back shortly — no need to pay again.";
-    return;
-  }
-
-  try {
-    const payload = await requestJson(
-      `/api/resident/wifi/payments/${encodeURIComponent(state.wifiCheckoutReference)}`,
-      {},
-      { auth: true }
-    );
-    const payment = payload.data;
-
-    if (payment.status === "active" && payment.voucher) {
-      stopWifiPaymentPolling();
-      setWifiPackageCardsPending(false);
-      wifiStatusTextEl.textContent = "Payment confirmed. Wi-Fi access is ready.";
-      wifiAccessUsernameEl.value = payment.voucher.username;
-      wifiAccessPasswordEl.value = payment.voucher.password;
-      wifiAccessExpiresEl.textContent = `Expires ${new Date(payment.voucher.expiresAt).toLocaleString()}`;
-      wifiAccessSectionEl.classList.remove("hidden");
-      return;
-    }
-
-    if (payment.status === "payment_failed" || payment.status === "provisioning_failed") {
-      stopWifiPaymentPolling();
-      setWifiPackageCardsPending(false);
-      wifiStatusTextEl.textContent = payment.message || "Payment did not go through. Try again.";
-      return;
-    }
-
-    wifiStatusTextEl.textContent = payment.message || "Waiting for M-PESA confirmation...";
-  } catch (error) {
-    // Transient network/API errors during polling shouldn't stop the loop —
-    // the next tick will retry automatically.
-  }
-}
-
-async function buyResidentWifiPackage(pkg) {
-  if (state.wifiPollTimer) {
-    return;
-  }
-
-  wifiErrorEl.classList.add("hidden");
-  wifiAccessSectionEl.classList.add("hidden");
-  setWifiPackageCardsPending(true);
-  wifiStatusSectionEl.classList.remove("hidden");
-  wifiStatusTextEl.textContent = "Sending M-PESA prompt...";
-
-  try {
-    const payload = await requestJson(
-      "/api/resident/wifi/payments",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ packageId: pkg.id })
-      },
-      { auth: true }
-    );
-
-    state.wifiCheckoutReference = payload.data.checkoutReference;
-    state.wifiPollAttempts = 0;
-    wifiStatusTextEl.textContent =
-      payload.customerMessage || "Check your phone to complete payment.";
-
-    state.wifiPollTimer = setInterval(() => {
-      void pollResidentWifiPayment();
-    }, 4000);
-    setTimeout(() => void pollResidentWifiPayment(), 1500);
-  } catch (error) {
-    setWifiPackageCardsPending(false);
-    wifiStatusTextEl.textContent =
-      error instanceof Error ? error.message : "Unable to start M-PESA payment.";
   }
 }
 

@@ -1848,6 +1848,34 @@ export class UtilityBillingService {
     return reminders;
   }
 
+  collectMeterReadingGap(
+    buildingId: string,
+    meteredHouseNumbers: string[],
+    billingMonth: string
+  ): { unreadHouseCount: number; sampleUnreadHouses: string[] } {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const meteredHouses = new Set(
+      meteredHouseNumbers.map((house) => normalizeHouseNumber(house)).filter(Boolean)
+    );
+    if (meteredHouses.size === 0) {
+      return { unreadHouseCount: 0, sampleUnreadHouses: [] };
+    }
+
+    const readHouses = new Set(
+      this.listBills({ buildingId: normalizedBuildingId, billingMonth, limit: 1_000 })
+        .filter(
+          (bill) => Number(bill.currentReading ?? 0) > 0 || Number(bill.previousReading ?? 0) > 0
+        )
+        .map((bill) => bill.houseNumber)
+    );
+
+    const unread = [...meteredHouses]
+      .filter((house) => !readHouses.has(house))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+    return { unreadHouseCount: unread.length, sampleUnreadHouses: unread.slice(0, 5) };
+  }
+
   listPayments(options: ListUtilityPaymentsOptions = {}): UtilityPaymentEvent[] {
     const limit = Number.isFinite(options.limit)
       ? Math.min(Math.max(options.limit ?? 500, 1), 2_000)

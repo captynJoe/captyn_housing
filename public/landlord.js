@@ -186,7 +186,6 @@ const residentsSearchSummaryEl = document.getElementById("residents-search-summa
 const roomLedgerSummaryEl = document.getElementById("room-ledger-summary");
 const roomLedgerTableEl = document.querySelector(".room-ledger-table");
 const roomLedgerSectionEl = document.getElementById("room-ledger-section");
-const overviewRentStatusSectionEl = document.getElementById("overview-rent-status-section");
 const utilityRoomStatusSectionEl = document.getElementById("utility-room-status-section");
 const roomLedgerBodyEl = document.getElementById("room-ledger-body");
 const residentSourceTableEl = document.querySelector(".resident-source-table");
@@ -263,10 +262,6 @@ const overviewDailyIssuesEl = document.getElementById("overview-daily-issues");
 const overviewDailyRequestsEl = document.getElementById("overview-daily-requests");
 const overviewDailyVacantEl = document.getElementById("overview-daily-vacant");
 const dashboardActionButtons = [...document.querySelectorAll("[data-dashboard-action]")];
-const openUtilitySetupBtnEl = document.getElementById("open-utility-setup-btn");
-const utilitySetupBackdropEl = document.getElementById("utility-setup-backdrop");
-const utilitySetupModalEl = document.getElementById("utility-setup-modal");
-const closeUtilitySetupBtnEl = document.getElementById("close-utility-setup-btn");
 const registryBuildingSelectEl = document.getElementById("registry-building-select");
 const registryReadingMonthEl = document.getElementById("registry-reading-month");
 const registryLoadBtnEl = document.getElementById("registry-load-btn");
@@ -685,7 +680,11 @@ function isOwnerAccessRole() {
 function isLandlordViewAvailableForRole(view) {
     const normalizedView = String(view ?? "").trim();
     if (isCaretakerRole()) {
-        return normalizedView === "overview" || normalizedView === "tenants" || normalizedView === "applications";
+        return (normalizedView === "overview" ||
+            normalizedView === "tenants" ||
+            normalizedView === "meters" ||
+            normalizedView === "rent" ||
+            normalizedView === "applications");
     }
     if (isStaffRole()) {
         return normalizedView !== "settings";
@@ -1100,15 +1099,19 @@ function updateLandlordBranding() {
 }
 function setActiveLandlordView(nextView) {
     const requestedView = String(nextView ?? "").trim();
-    const normalizedView = requestedView === "residents" || requestedView === "utilities"
+    const normalizedView = requestedView === "residents"
         ? "tenants"
-        : requestedView;
+        : requestedView === "utilities"
+            ? "meters"
+            : requestedView;
     const requestedTargetView = normalizedView === "overview" ||
         normalizedView === "buildings" ||
         normalizedView === "settings" ||
         normalizedView === "applications" ||
         normalizedView === "messages" ||
         normalizedView === "tenants" ||
+        normalizedView === "meters" ||
+        normalizedView === "rent" ||
         normalizedView === "expenses"
         ? normalizedView
         : "overview";
@@ -1148,9 +1151,9 @@ function scrollToLandlordSection(sectionId) {
 function openMetricTarget(target) {
     switch (target) {
         case "meters":
-            setActiveLandlordView("tenants");
+            setActiveLandlordView("meters");
             scrollToLandlordSection("utilities-registry-section");
-            void openUtilitySetupModal().catch((error) => {
+            void loadMetersView().catch((error) => {
                 handleLandlordError(error, "Unable to open meter setup.");
             });
             break;
@@ -1159,7 +1162,7 @@ function openMetricTarget(target) {
             scrollToLandlordSection("residents-section");
             break;
         case "posted-bills":
-            setActiveLandlordView("tenants");
+            setActiveLandlordView("meters");
             scrollToLandlordSection("utilities-bills-section");
             break;
         case "payments":
@@ -1392,22 +1395,6 @@ function setDirectTenantSubmitting(isSubmitting) {
         directTenantSubmitBtnEl.disabled = Boolean(isSubmitting);
     }
 }
-function closeUtilitySetupModal() {
-    if (utilitySetupModalEl instanceof HTMLElement) {
-        utilitySetupModalEl.classList.add("hidden");
-    }
-    if (utilitySetupBackdropEl instanceof HTMLElement) {
-        utilitySetupBackdropEl.classList.add("hidden");
-    }
-}
-function showUtilitySetupModal() {
-    if (utilitySetupModalEl instanceof HTMLElement) {
-        utilitySetupModalEl.classList.remove("hidden");
-    }
-    if (utilitySetupBackdropEl instanceof HTMLElement) {
-        utilitySetupBackdropEl.classList.remove("hidden");
-    }
-}
 function closeUtilitySheetModal() {
     if (utilitySheetModalEl instanceof HTMLElement) {
         utilitySheetModalEl.classList.add("hidden");
@@ -1415,10 +1402,6 @@ function closeUtilitySheetModal() {
     if (utilitySheetBackdropEl instanceof HTMLElement) {
         utilitySheetBackdropEl.classList.add("hidden");
     }
-}
-function closeUtilitySheetModalAndReturnToSetup() {
-    closeUtilitySheetModal();
-    showUtilitySetupModal();
 }
 function showUtilitySheetModal() {
     if (utilitySheetModalEl instanceof HTMLElement) {
@@ -2324,9 +2307,6 @@ function applyRoomsWorkspaceLayout() {
         return;
     }
     setActiveLandlordView("tenants");
-    if (overviewRentStatusSectionEl instanceof HTMLDetailsElement) {
-        overviewRentStatusSectionEl.open = true;
-    }
     if (utilityRoomStatusSectionEl instanceof HTMLDetailsElement) {
         utilityRoomStatusSectionEl.open = true;
     }
@@ -2362,7 +2342,7 @@ async function openRentSetupDeepLinkIfRequested() {
         state.selectedRentPaymentBuildingId = deepLink.buildingId;
         state.selectedRegistryBuildingId = deepLink.buildingId;
     }
-    setActiveLandlordView("tenants");
+    setActiveLandlordView("rent");
     scrollToLandlordSection("overview-rent-status-section");
     await openRentSheetModal();
     clearRentSetupDeepLink();
@@ -4151,7 +4131,6 @@ async function openUtilitySheetModal() {
         registryBuildingSelectEl.value = buildingId;
     }
     clearError();
-    closeUtilitySetupModal();
     showUtilitySheetModal();
     syncUtilitySheetBuildingOptions();
     if (utilitySheetBuildingSelectEl instanceof HTMLSelectElement) {
@@ -4181,9 +4160,7 @@ async function openUtilitySheetModal() {
         handleLandlordError(error, "Failed to load bulk utility entry.");
     }
 }
-async function openUtilitySetupModal() {
-    setActiveLandlordView("tenants");
-    showUtilitySetupModal();
+async function loadMetersView() {
     clearError();
     await Promise.all([
         loadRegistryRows(),
@@ -9155,7 +9132,7 @@ function prefillRentPaymentFromStatus(action) {
         rentPaymentHelpEl.textContent = `${formatCurrency(amountKsh)} for ${buildingLabel} ${houseNumber}.`;
     }
     clearError();
-    setActiveLandlordView("tenants");
+    setActiveLandlordView("rent");
     scrollToLandlordSection("overview-rent-status-section");
     window.requestAnimationFrame(() => {
         if (rentPaymentAmountEl instanceof HTMLInputElement) {
@@ -9673,6 +9650,11 @@ landlordNavButtons.forEach((button) => {
         if (sectionTarget) {
             scrollToLandlordSection(sectionTarget);
         }
+        if (targetView === "meters") {
+            void loadMetersView().catch((error) => {
+                handleLandlordError(error, "Unable to load meters.");
+            });
+        }
     });
 });
 metricCardButtons.forEach((button) => {
@@ -9696,7 +9678,7 @@ dashboardActionButtons.forEach((button) => {
                 scrollToLandlordSection("residents-section");
                 break;
             case "record-rent":
-                setActiveLandlordView("tenants");
+                setActiveLandlordView("rent");
                 scrollToLandlordSection("rent-payment-details");
                 break;
             case "requests":
@@ -9764,17 +9746,6 @@ closeDirectTenantDrawerBtnEl?.addEventListener("click", () => {
 directTenantDrawerBackdropEl?.addEventListener("click", () => {
     closeDirectTenantDrawer();
 });
-openUtilitySetupBtnEl?.addEventListener("click", () => {
-    void openUtilitySetupModal().catch((error) => {
-        handleLandlordError(error, "Unable to open utility setup.");
-    });
-});
-closeUtilitySetupBtnEl?.addEventListener("click", () => {
-    closeUtilitySetupModal();
-});
-utilitySetupBackdropEl?.addEventListener("click", () => {
-    closeUtilitySetupModal();
-});
 openUtilitySheetBtnEl?.addEventListener("click", () => {
     void openUtilitySheetModal();
 });
@@ -9785,13 +9756,13 @@ residentsOpenRentSheetBtnEl?.addEventListener("click", () => {
     void openRentSheetModal();
 });
 closeUtilitySheetBtnEl?.addEventListener("click", () => {
-    closeUtilitySheetModalAndReturnToSetup();
+    closeUtilitySheetModal();
 });
 closeRentSheetBtnEl?.addEventListener("click", () => {
     closeRentSheetModal();
 });
 utilitySheetBackdropEl?.addEventListener("click", () => {
-    closeUtilitySheetModalAndReturnToSetup();
+    closeUtilitySheetModal();
 });
 rentSheetBackdropEl?.addEventListener("click", () => {
     closeRentSheetModal();
@@ -9808,7 +9779,6 @@ document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
         closeCreateBuildingDrawer();
         closeBuildingDrawer();
-        closeUtilitySetupModal();
         closeUtilitySheetModal();
         closeRentSheetModal();
         closeResidentDrawer();

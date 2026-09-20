@@ -268,7 +268,6 @@ const residentsSearchSummaryEl = document.getElementById("residents-search-summa
 const roomLedgerSummaryEl = document.getElementById("room-ledger-summary");
 const roomLedgerTableEl = document.querySelector(".room-ledger-table");
 const roomLedgerSectionEl = document.getElementById("room-ledger-section");
-const overviewRentStatusSectionEl = document.getElementById("overview-rent-status-section");
 const utilityRoomStatusSectionEl = document.getElementById("utility-room-status-section");
 const roomLedgerBodyEl = document.getElementById("room-ledger-body");
 const residentSourceTableEl = document.querySelector(".resident-source-table");
@@ -375,10 +374,6 @@ const overviewDailyIssuesEl = document.getElementById("overview-daily-issues");
 const overviewDailyRequestsEl = document.getElementById("overview-daily-requests");
 const overviewDailyVacantEl = document.getElementById("overview-daily-vacant");
 const dashboardActionButtons = [...document.querySelectorAll("[data-dashboard-action]")];
-const openUtilitySetupBtnEl = document.getElementById("open-utility-setup-btn");
-const utilitySetupBackdropEl = document.getElementById("utility-setup-backdrop");
-const utilitySetupModalEl = document.getElementById("utility-setup-modal");
-const closeUtilitySetupBtnEl = document.getElementById("close-utility-setup-btn");
 const registryBuildingSelectEl = document.getElementById("registry-building-select");
 const registryReadingMonthEl = document.getElementById("registry-reading-month");
 const registryLoadBtnEl = document.getElementById("registry-load-btn");
@@ -964,7 +959,13 @@ function isLandlordViewAvailableForRole(view) {
   const normalizedView = String(view ?? "").trim();
 
   if (isCaretakerRole()) {
-    return normalizedView === "overview" || normalizedView === "tenants" || normalizedView === "applications";
+    return (
+      normalizedView === "overview" ||
+      normalizedView === "tenants" ||
+      normalizedView === "meters" ||
+      normalizedView === "rent" ||
+      normalizedView === "applications"
+    );
   }
 
   if (isStaffRole()) {
@@ -1493,9 +1494,11 @@ function updateLandlordBranding() {
 function setActiveLandlordView(nextView) {
   const requestedView = String(nextView ?? "").trim();
   const normalizedView =
-    requestedView === "residents" || requestedView === "utilities"
+    requestedView === "residents"
       ? "tenants"
-      : requestedView;
+      : requestedView === "utilities"
+        ? "meters"
+        : requestedView;
   const requestedTargetView =
     normalizedView === "overview" ||
     normalizedView === "buildings" ||
@@ -1503,6 +1506,8 @@ function setActiveLandlordView(nextView) {
     normalizedView === "applications" ||
     normalizedView === "messages" ||
     normalizedView === "tenants" ||
+    normalizedView === "meters" ||
+    normalizedView === "rent" ||
     normalizedView === "expenses"
       ? normalizedView
       : "overview";
@@ -1551,9 +1556,9 @@ function scrollToLandlordSection(sectionId) {
 function openMetricTarget(target) {
   switch (target) {
     case "meters":
-      setActiveLandlordView("tenants");
+      setActiveLandlordView("meters");
       scrollToLandlordSection("utilities-registry-section");
-      void openUtilitySetupModal().catch((error) => {
+      void loadMetersView().catch((error) => {
         handleLandlordError(error, "Unable to open meter setup.");
       });
       break;
@@ -1562,7 +1567,7 @@ function openMetricTarget(target) {
       scrollToLandlordSection("residents-section");
       break;
     case "posted-bills":
-      setActiveLandlordView("tenants");
+      setActiveLandlordView("meters");
       scrollToLandlordSection("utilities-bills-section");
       break;
     case "payments":
@@ -1836,26 +1841,6 @@ function setDirectTenantSubmitting(isSubmitting) {
   }
 }
 
-function closeUtilitySetupModal() {
-  if (utilitySetupModalEl instanceof HTMLElement) {
-    utilitySetupModalEl.classList.add("hidden");
-  }
-
-  if (utilitySetupBackdropEl instanceof HTMLElement) {
-    utilitySetupBackdropEl.classList.add("hidden");
-  }
-}
-
-function showUtilitySetupModal() {
-  if (utilitySetupModalEl instanceof HTMLElement) {
-    utilitySetupModalEl.classList.remove("hidden");
-  }
-
-  if (utilitySetupBackdropEl instanceof HTMLElement) {
-    utilitySetupBackdropEl.classList.remove("hidden");
-  }
-}
-
 function closeUtilitySheetModal() {
   if (utilitySheetModalEl instanceof HTMLElement) {
     utilitySheetModalEl.classList.add("hidden");
@@ -1864,17 +1849,6 @@ function closeUtilitySheetModal() {
   if (utilitySheetBackdropEl instanceof HTMLElement) {
     utilitySheetBackdropEl.classList.add("hidden");
   }
-}
-
-// Bulk Utility Entry is only ever reached from inside the Utility Setup drawer (see
-// openUtilitySheetModal), which closes on the way in. Backing out of the sheet via Close/backdrop
-// used to dump the landlord all the way back to the plain dashboard instead of back to Utility
-// Setup — losing their place after going one level "in". Kept separate from
-// closeUtilitySheetModal() itself so Escape (which closes every drawer at once) and the
-// successful-submit path still just close, without reopening Setup underneath them.
-function closeUtilitySheetModalAndReturnToSetup() {
-  closeUtilitySheetModal();
-  showUtilitySetupModal();
 }
 
 function showUtilitySheetModal() {
@@ -3070,10 +3044,13 @@ function applyRoomsWorkspaceLayout() {
     return;
   }
 
+  // Rent Collection Status (overview-rent-status-section) used to live inside this same
+  // "tenants" view, so opening it here showed rent + utility status together. It's now its own
+  // "rent" sidebar view, so it's no longer part of what's visible under "tenants" — Room Ledger
+  // (still here) already surfaces a per-room rent/utilities/deposit/charges rollup, so this
+  // deep link still lands somewhere useful without needing to force two top-level views open
+  // at once, which the sidebar model no longer supports.
   setActiveLandlordView("tenants");
-  if (overviewRentStatusSectionEl instanceof HTMLDetailsElement) {
-    overviewRentStatusSectionEl.open = true;
-  }
   if (utilityRoomStatusSectionEl instanceof HTMLDetailsElement) {
     utilityRoomStatusSectionEl.open = true;
   }
@@ -3116,7 +3093,7 @@ async function openRentSetupDeepLinkIfRequested() {
     state.selectedRegistryBuildingId = deepLink.buildingId;
   }
 
-  setActiveLandlordView("tenants");
+  setActiveLandlordView("rent");
   scrollToLandlordSection("overview-rent-status-section");
   await openRentSheetModal();
   clearRentSetupDeepLink();
@@ -5464,7 +5441,6 @@ async function openUtilitySheetModal() {
   }
 
   clearError();
-  closeUtilitySetupModal();
   showUtilitySheetModal();
   syncUtilitySheetBuildingOptions();
   if (utilitySheetBuildingSelectEl instanceof HTMLSelectElement) {
@@ -5497,9 +5473,10 @@ async function openUtilitySheetModal() {
   }
 }
 
-async function openUtilitySetupModal() {
-  setActiveLandlordView("tenants");
-  showUtilitySetupModal();
+// Meters is one of the few views whose data isn't already bundled into the shared
+// /api/landlord/startup payload — it was previously only loaded when the Utility Setup drawer
+// opened. Now that Meters is a plain sidebar view, this is called from the nav click instead.
+async function loadMetersView() {
   clearError();
 
   await Promise.all([
@@ -11566,7 +11543,7 @@ function prefillRentPaymentFromStatus(action) {
   }
 
   clearError();
-  setActiveLandlordView("tenants");
+  setActiveLandlordView("rent");
   scrollToLandlordSection("overview-rent-status-section");
   window.requestAnimationFrame(() => {
     if (rentPaymentAmountEl instanceof HTMLInputElement) {
@@ -12223,6 +12200,11 @@ landlordNavButtons.forEach((button) => {
     if (sectionTarget) {
       scrollToLandlordSection(sectionTarget);
     }
+    if (targetView === "meters") {
+      void loadMetersView().catch((error) => {
+        handleLandlordError(error, "Unable to load meters.");
+      });
+    }
   });
 });
 
@@ -12251,7 +12233,7 @@ dashboardActionButtons.forEach((button) => {
         scrollToLandlordSection("residents-section");
         break;
       case "record-rent":
-        setActiveLandlordView("tenants");
+        setActiveLandlordView("rent");
         // Land directly on the payment form itself (scrollToLandlordSection opens it, since
         // it's a <details>, and its ancestor panel) instead of the top of the outer "Rent
         // Setup + Collection" panel, which put "Record Payment" clicks next to the unrelated
@@ -12337,20 +12319,6 @@ directTenantDrawerBackdropEl?.addEventListener("click", () => {
   closeDirectTenantDrawer();
 });
 
-openUtilitySetupBtnEl?.addEventListener("click", () => {
-  void openUtilitySetupModal().catch((error) => {
-    handleLandlordError(error, "Unable to open utility setup.");
-  });
-});
-
-closeUtilitySetupBtnEl?.addEventListener("click", () => {
-  closeUtilitySetupModal();
-});
-
-utilitySetupBackdropEl?.addEventListener("click", () => {
-  closeUtilitySetupModal();
-});
-
 openUtilitySheetBtnEl?.addEventListener("click", () => {
   void openUtilitySheetModal();
 });
@@ -12364,7 +12332,7 @@ residentsOpenRentSheetBtnEl?.addEventListener("click", () => {
 });
 
 closeUtilitySheetBtnEl?.addEventListener("click", () => {
-  closeUtilitySheetModalAndReturnToSetup();
+  closeUtilitySheetModal();
 });
 
 closeRentSheetBtnEl?.addEventListener("click", () => {
@@ -12372,7 +12340,7 @@ closeRentSheetBtnEl?.addEventListener("click", () => {
 });
 
 utilitySheetBackdropEl?.addEventListener("click", () => {
-  closeUtilitySheetModalAndReturnToSetup();
+  closeUtilitySheetModal();
 });
 
 rentSheetBackdropEl?.addEventListener("click", () => {
@@ -12393,7 +12361,6 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeCreateBuildingDrawer();
     closeBuildingDrawer();
-    closeUtilitySetupModal();
     closeUtilitySheetModal();
     closeRentSheetModal();
     closeResidentDrawer();

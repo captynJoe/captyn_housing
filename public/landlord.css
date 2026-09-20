@@ -1073,10 +1073,6 @@ body.landlord-simple-manager-role .landlord-side-panel .metrics-panel {
   background: rgba(244, 250, 250, 0.9);
 }
 
-.utility-setup-modal {
-  inset: 3vh max(2vw, calc((100vw - 1280px) / 2));
-}
-
 .utility-setup-modal-body {
   display: grid;
   align-content: start;

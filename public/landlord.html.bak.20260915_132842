@@ -10,9 +10,9 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/admin.css?v=20260322b" />
-    <link rel="stylesheet" href="/landlord.css?v=20260921a" />
-    <script src="/captyn-theme.js?v=20260806a"></script>
+    <link rel="stylesheet" href="/admin.css?v=20260821b" />
+    <link rel="stylesheet" href="/landlord.css?v=20260831a" />
+    <script src="/captyn-theme.js?v=20260821a"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=20260806c" />
   </head>
   <body>
@@ -117,22 +117,6 @@
               data-landlord-section-target="residents-section"
             >
               Rooms
-            </button>
-            <button
-              type="button"
-              class="landlord-nav-btn"
-              data-landlord-view="meters"
-              data-landlord-section-target="utilities-registry-section"
-            >
-              Meters
-            </button>
-            <button
-              type="button"
-              class="landlord-nav-btn"
-              data-landlord-view="rent"
-              data-landlord-section-target="overview-rent-status-section"
-            >
-              Rent
             </button>
             <button
               type="button"
@@ -692,84 +676,6 @@
             </p>
           </div>
 
-          <div class="package-card">
-            <div class="panel-head">
-              <div>
-                <h3>Building Defaults</h3>
-                <p id="building-defaults-summary" class="status-text">
-                  Rent, utility, and meter-reading defaults for the building selected above.
-                </p>
-              </div>
-            </div>
-            <form id="building-defaults-form" class="inline-fields compact-fields">
-              <label>
-                Utility Billing Mode
-                <select id="building-defaults-utility-billing-mode">
-                  <option value="metered">metered</option>
-                  <option value="fixed_charge">fixed_charge</option>
-                  <option value="combined_charge">combined_charge</option>
-                  <option value="disabled">disabled</option>
-                </select>
-              </label>
-              <label>
-                Default Water Rate (KSh/unit)
-                <input id="building-defaults-water-rate" type="number" min="0" step="0.01" />
-              </label>
-              <label>
-                Default Electricity Rate (KSh/unit)
-                <input id="building-defaults-electricity-rate" type="number" min="0" step="0.01" />
-              </label>
-              <label>
-                Default Water Fixed Charge (KSh)
-                <input id="building-defaults-water-fixed" type="number" min="0" step="1" />
-              </label>
-              <label>
-                Default Electricity Fixed Charge (KSh)
-                <input id="building-defaults-electricity-fixed" type="number" min="0" step="1" />
-              </label>
-              <label>
-                Default Combined Utility Charge (KSh)
-                <input id="building-defaults-combined-charge" type="number" min="0" step="1" />
-              </label>
-              <label>
-                Utility Balance Visible Days
-                <input id="building-defaults-balance-visible-days" type="number" min="0" max="60" step="1" />
-              </label>
-              <label>
-                Default Monthly Rent (KSh)
-                <input id="building-defaults-monthly-rent" type="number" min="0" step="1" />
-              </label>
-              <label>
-                Rent Due Day
-                <input id="building-defaults-rent-due-day" type="number" min="1" max="31" step="1" />
-              </label>
-              <label>
-                Meter Reading Day
-                <input id="building-defaults-meter-reading-day" type="number" min="1" max="31" step="1" placeholder="e.g. 25" />
-              </label>
-              <p class="status-text building-defaults-full-width">
-                Landlord and house manager get a reminder from this day each month until every
-                metered house is read. Entry is never blocked before this day — this only
-                controls when the reminder starts.
-              </p>
-              <label class="checkbox-row building-defaults-full-width">
-                <input id="building-defaults-allow-manual-rent" type="checkbox" /> Allow Manual Rent Posting
-              </label>
-              <label class="checkbox-row building-defaults-full-width">
-                <input id="building-defaults-allow-manual-utility" type="checkbox" /> Allow Manual Utility Posting
-              </label>
-              <label class="checkbox-row building-defaults-full-width">
-                <input id="building-defaults-acknowledge" type="checkbox" required />
-                I understand changing these defaults affects future billing for this building.
-              </label>
-              <label class="building-defaults-full-width">
-                Note (optional)
-                <input id="building-defaults-note" type="text" maxlength="280" />
-              </label>
-              <button id="building-defaults-save-btn" type="submit" class="building-defaults-full-width">Save Building Defaults</button>
-            </form>
-          </div>
-
           <div class="settings-danger-grid">
             <article class="package-card settings-danger-card">
               <div class="panel-head">
@@ -917,19 +823,19 @@
 
         <details
           class="panel wide-panel landlord-view hidden secondary-ledger-panel"
-          data-landlord-view-panel="rent"
+          data-landlord-view-panel="tenants"
           id="overview-rent-status-section"
         >
           <summary>Rent Setup + Collection</summary>
           <div class="panel-head">
-            <h2>Rent Collection Status</h2>
+            <h2>Rent Setup Sheet + Manual Payments</h2>
             <div class="action-row">
-              <button id="open-rent-sheet-btn" type="button">One-Time Rent Setup Sheet</button>
+              <button id="open-rent-sheet-btn" type="button">Rent Setup Sheet</button>
               <button id="refresh-rent-status" type="button">Refresh</button>
             </div>
           </div>
           <details id="rent-payment-details" class="landlord-inline-details">
-            <summary>Record a Payment</summary>
+            <summary>Record offline rent payment</summary>
             <form id="rent-payment-form" class="package-card">
               <div class="inline-fields compact-fields">
                 <label>
@@ -1005,7 +911,7 @@
 
         <details
           class="panel wide-panel landlord-view hidden secondary-ledger-panel"
-          data-landlord-view-panel="rent"
+          data-landlord-view-panel="tenants"
           id="payment-corrections-section"
         >
           <summary>Payment Corrections + Price History</summary>
@@ -1269,108 +1175,22 @@
         </section>
 
         <details
-          class="panel wide-panel landlord-view hidden secondary-ledger-panel"
-          data-landlord-view-panel="meters"
+          class="panel wide-panel landlord-view secondary-ledger-panel"
+          data-landlord-view-panel="tenants"
           id="utilities-registry-section"
-          open
         >
           <summary>Meter Setup Source Tools</summary>
           <div class="panel-head">
             <h2>Meters + Bulk Utility Setup</h2>
-          </div>
-
-          <div class="utility-setup-modal-body">
-            <details class="secondary-ledger-panel utility-setup-panel" open>
-              <summary>Bulk Utility Setup</summary>
-              <div class="utility-setup-controls">
-                <label>
-                  Building
-                  <select id="registry-building-select"></select>
-                </label>
-                <label>
-                  Readings Month
-                  <input id="registry-reading-month" type="month" />
-                </label>
-                <button id="registry-load-btn" type="button">Load</button>
-                <button id="open-utility-sheet-btn" type="button">Bulk Utility Entry</button>
-                <button id="registry-save-btn" type="button">Save All</button>
-              </div>
-              <div id="registry-charge-summary" class="landlord-generator registry-charge-summary">
-                Select a building to review building defaults and room defaults.
-              </div>
-              <div class="table-wrap utility-registry-table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>House</th>
-                      <th>Resident</th>
-                      <th>Phone</th>
-                      <th>Members</th>
-                      <th>Water Meter</th>
-                      <th>Electricity Meter</th>
-                      <th>Water Reading</th>
-                      <th>Electricity Reading</th>
-                      <th>Water Fixed (KSh)</th>
-                      <th>Electric Fixed (KSh)</th>
-                      <th>Room Utility Amount (KSh)</th>
-                      <th>Charge Setup</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody id="registry-body"></tbody>
-                </table>
-              </div>
-            </details>
-
-            <details class="secondary-ledger-panel utility-setup-panel">
-              <summary>Manual Meter Entry</summary>
-              <form id="utility-meter-form" class="package-card utility-meter-modal-form">
-                <div class="inline-fields compact-fields">
-                  <label>
-                    Utility Type
-                    <select id="utility-meter-type" required>
-                      <option value="water">water</option>
-                      <option value="electricity">electricity</option>
-                    </select>
-                  </label>
-                  <label>
-                    House
-                    <input id="utility-meter-house" type="text" placeholder="A-12" required />
-                  </label>
-                </div>
-                <label>
-                  Meter Number
-                  <input id="utility-meter-number" type="text" maxlength="80" placeholder="WTR-10291" required />
-                </label>
-                <button type="submit">Save Meter</button>
-              </form>
-            </details>
-
-            <details class="secondary-ledger-panel utility-setup-panel">
-              <summary>Registered Meters</summary>
-              <div class="utility-setup-section-head">
-                <button id="refresh-meters" type="button" class="ghost-btn">Refresh</button>
-              </div>
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Utility</th>
-                      <th>House</th>
-                      <th>Meter Number</th>
-                      <th>Updated</th>
-                    </tr>
-                  </thead>
-                  <tbody id="meters-body"></tbody>
-                </table>
-              </div>
-            </details>
+            <div class="action-row">
+              <button id="open-utility-setup-btn" type="button">Open Setup</button>
+            </div>
           </div>
         </details>
 
         <details
           class="panel wide-panel landlord-view hidden secondary-ledger-panel"
-          data-landlord-view-panel="meters"
+          data-landlord-view-panel="tenants"
           id="utilities-bills-section"
         >
           <summary>Utility Billing Source Details</summary>
@@ -1455,7 +1275,7 @@
 
         <details
           class="panel wide-panel landlord-view hidden secondary-ledger-panel"
-          data-landlord-view-panel="meters"
+          data-landlord-view-panel="tenants"
           id="utilities-payments-section"
         >
           <summary>Utility Payment Source Details</summary>
@@ -1843,6 +1663,107 @@
       </section>
       </div>
 
+      <div id="utility-setup-backdrop" class="landlord-drawer-backdrop hidden"></div>
+      <aside
+        id="utility-setup-modal"
+        class="landlord-sheet-modal utility-setup-modal hidden"
+        aria-label="Meters and bulk utility setup"
+      >
+        <header class="landlord-drawer-head">
+          <h2>Meters + Bulk Utility Setup</h2>
+          <button id="close-utility-setup-btn" type="button" class="ghost-btn">
+            Close
+          </button>
+        </header>
+
+        <div class="utility-setup-modal-body">
+          <details class="secondary-ledger-panel utility-setup-panel" open>
+            <summary>Bulk Utility Setup</summary>
+            <div class="utility-setup-controls">
+              <label>
+                Building
+                <select id="registry-building-select"></select>
+              </label>
+              <label>
+                Readings Month
+                <input id="registry-reading-month" type="month" />
+              </label>
+              <button id="registry-load-btn" type="button">Load</button>
+              <button id="open-utility-sheet-btn" type="button">Bulk Utility Entry</button>
+              <button id="registry-save-btn" type="button">Save All</button>
+            </div>
+            <div id="registry-charge-summary" class="landlord-generator registry-charge-summary">
+              Select a building to review building defaults and room defaults.
+            </div>
+            <div class="table-wrap utility-registry-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>House</th>
+                    <th>Resident</th>
+                    <th>Phone</th>
+                    <th>Members</th>
+                    <th>Water Meter</th>
+                    <th>Electricity Meter</th>
+                    <th>Water Reading</th>
+                    <th>Electricity Reading</th>
+                    <th>Water Fixed (KSh)</th>
+                    <th>Electric Fixed (KSh)</th>
+                    <th>Room Utility Amount (KSh)</th>
+                    <th>Charge Setup</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="registry-body"></tbody>
+              </table>
+            </div>
+          </details>
+
+          <details class="secondary-ledger-panel utility-setup-panel">
+            <summary>Manual Meter Entry</summary>
+            <form id="utility-meter-form" class="package-card utility-meter-modal-form">
+              <div class="inline-fields compact-fields">
+                <label>
+                  Utility Type
+                  <select id="utility-meter-type" required>
+                    <option value="water">water</option>
+                    <option value="electricity">electricity</option>
+                  </select>
+                </label>
+                <label>
+                  House
+                  <input id="utility-meter-house" type="text" placeholder="A-12" required />
+                </label>
+              </div>
+              <label>
+                Meter Number
+                <input id="utility-meter-number" type="text" maxlength="80" placeholder="WTR-10291" required />
+              </label>
+              <button type="submit">Save Meter</button>
+            </form>
+          </details>
+
+          <details class="secondary-ledger-panel utility-setup-panel">
+            <summary>Registered Meters</summary>
+            <div class="utility-setup-section-head">
+              <button id="refresh-meters" type="button" class="ghost-btn">Refresh</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Utility</th>
+                    <th>House</th>
+                    <th>Meter Number</th>
+                    <th>Updated</th>
+                  </tr>
+                </thead>
+                <tbody id="meters-body"></tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+      </aside>
 
       <div id="utility-sheet-backdrop" class="landlord-drawer-backdrop hidden"></div>
       <aside id="utility-sheet-modal" class="landlord-sheet-modal hidden" aria-label="Bulk utility entry">
@@ -1940,7 +1861,7 @@
           </label>
 
           <div class="table-wrap utility-sheet-table-wrap">
-            <table class="utility-sheet-table" data-mobile-cards="true">
+            <table class="utility-sheet-table">
               <thead>
                 <tr>
                   <th>House</th>
@@ -2461,6 +2382,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=20260921a"></script>
+    <script type="module" src="/landlord.js?v=20260831a"></script>
   </body>
 </html>

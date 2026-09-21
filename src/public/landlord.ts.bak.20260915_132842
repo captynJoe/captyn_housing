@@ -101,39 +101,6 @@ const settingsSummaryEl = document.getElementById("settings-summary");
 const refreshSettingsViewBtnEl = document.getElementById("refresh-settings-view");
 const settingsClearCacheBtnEl = document.getElementById("settings-clear-cache-btn");
 const settingsClearDataBtnEl = document.getElementById("settings-clear-data-btn");
-const buildingDefaultsFormEl = document.getElementById("building-defaults-form");
-const buildingDefaultsSummaryEl = document.getElementById("building-defaults-summary");
-const buildingDefaultsSaveBtnEl = document.getElementById("building-defaults-save-btn");
-const buildingDefaultsUtilityBillingModeEl = document.getElementById(
-  "building-defaults-utility-billing-mode"
-);
-const buildingDefaultsWaterRateEl = document.getElementById("building-defaults-water-rate");
-const buildingDefaultsElectricityRateEl = document.getElementById(
-  "building-defaults-electricity-rate"
-);
-const buildingDefaultsWaterFixedEl = document.getElementById("building-defaults-water-fixed");
-const buildingDefaultsElectricityFixedEl = document.getElementById(
-  "building-defaults-electricity-fixed"
-);
-const buildingDefaultsCombinedChargeEl = document.getElementById(
-  "building-defaults-combined-charge"
-);
-const buildingDefaultsBalanceVisibleDaysEl = document.getElementById(
-  "building-defaults-balance-visible-days"
-);
-const buildingDefaultsMonthlyRentEl = document.getElementById("building-defaults-monthly-rent");
-const buildingDefaultsRentDueDayEl = document.getElementById("building-defaults-rent-due-day");
-const buildingDefaultsMeterReadingDayEl = document.getElementById(
-  "building-defaults-meter-reading-day"
-);
-const buildingDefaultsAllowManualRentEl = document.getElementById(
-  "building-defaults-allow-manual-rent"
-);
-const buildingDefaultsAllowManualUtilityEl = document.getElementById(
-  "building-defaults-allow-manual-utility"
-);
-const buildingDefaultsAcknowledgeEl = document.getElementById("building-defaults-acknowledge");
-const buildingDefaultsNoteEl = document.getElementById("building-defaults-note");
 const landlordFocusUnitsEl = document.getElementById("landlord-focus-units");
 const landlordFocusResidentsEl = document.getElementById("landlord-focus-residents");
 const landlordFocusOpenBillsEl = document.getElementById("landlord-focus-open-bills");
@@ -268,6 +235,7 @@ const residentsSearchSummaryEl = document.getElementById("residents-search-summa
 const roomLedgerSummaryEl = document.getElementById("room-ledger-summary");
 const roomLedgerTableEl = document.querySelector(".room-ledger-table");
 const roomLedgerSectionEl = document.getElementById("room-ledger-section");
+const overviewRentStatusSectionEl = document.getElementById("overview-rent-status-section");
 const utilityRoomStatusSectionEl = document.getElementById("utility-room-status-section");
 const roomLedgerBodyEl = document.getElementById("room-ledger-body");
 const residentSourceTableEl = document.querySelector(".resident-source-table");
@@ -374,6 +342,10 @@ const overviewDailyIssuesEl = document.getElementById("overview-daily-issues");
 const overviewDailyRequestsEl = document.getElementById("overview-daily-requests");
 const overviewDailyVacantEl = document.getElementById("overview-daily-vacant");
 const dashboardActionButtons = [...document.querySelectorAll("[data-dashboard-action]")];
+const openUtilitySetupBtnEl = document.getElementById("open-utility-setup-btn");
+const utilitySetupBackdropEl = document.getElementById("utility-setup-backdrop");
+const utilitySetupModalEl = document.getElementById("utility-setup-modal");
+const closeUtilitySetupBtnEl = document.getElementById("close-utility-setup-btn");
 const registryBuildingSelectEl = document.getElementById("registry-building-select");
 const registryReadingMonthEl = document.getElementById("registry-reading-month");
 const registryLoadBtnEl = document.getElementById("registry-load-btn");
@@ -959,13 +931,7 @@ function isLandlordViewAvailableForRole(view) {
   const normalizedView = String(view ?? "").trim();
 
   if (isCaretakerRole()) {
-    return (
-      normalizedView === "overview" ||
-      normalizedView === "tenants" ||
-      normalizedView === "meters" ||
-      normalizedView === "rent" ||
-      normalizedView === "applications"
-    );
+    return normalizedView === "overview" || normalizedView === "tenants" || normalizedView === "applications";
   }
 
   if (isStaffRole()) {
@@ -1021,12 +987,8 @@ function updateApplicationsIndicator() {
   }
 }
 
-// Gates the notification bell + push-subscribe controls. Caretakers are included because the
-// backend now lets them through /api/landlord/notifications too (filtered server-side to only
-// caretaker-relevant alerts like meter-reading-due) — everywhere else "owner alert" access is
-// checked, caretakers are still excluded on purpose.
 function isOwnerAlertRole() {
-  return isOwnerAccessRole() || isStaffRole() || isCaretakerRole();
+  return isOwnerAccessRole() || isStaffRole();
 }
 
 function updateOwnerNotificationControls() {
@@ -1494,11 +1456,9 @@ function updateLandlordBranding() {
 function setActiveLandlordView(nextView) {
   const requestedView = String(nextView ?? "").trim();
   const normalizedView =
-    requestedView === "residents"
+    requestedView === "residents" || requestedView === "utilities"
       ? "tenants"
-      : requestedView === "utilities"
-        ? "meters"
-        : requestedView;
+      : requestedView;
   const requestedTargetView =
     normalizedView === "overview" ||
     normalizedView === "buildings" ||
@@ -1506,8 +1466,6 @@ function setActiveLandlordView(nextView) {
     normalizedView === "applications" ||
     normalizedView === "messages" ||
     normalizedView === "tenants" ||
-    normalizedView === "meters" ||
-    normalizedView === "rent" ||
     normalizedView === "expenses"
       ? normalizedView
       : "overview";
@@ -1556,9 +1514,9 @@ function scrollToLandlordSection(sectionId) {
 function openMetricTarget(target) {
   switch (target) {
     case "meters":
-      setActiveLandlordView("meters");
+      setActiveLandlordView("tenants");
       scrollToLandlordSection("utilities-registry-section");
-      void loadMetersView().catch((error) => {
+      void openUtilitySetupModal().catch((error) => {
         handleLandlordError(error, "Unable to open meter setup.");
       });
       break;
@@ -1567,7 +1525,7 @@ function openMetricTarget(target) {
       scrollToLandlordSection("residents-section");
       break;
     case "posted-bills":
-      setActiveLandlordView("meters");
+      setActiveLandlordView("tenants");
       scrollToLandlordSection("utilities-bills-section");
       break;
     case "payments":
@@ -1838,6 +1796,26 @@ function closeDirectTenantDrawer() {
 function setDirectTenantSubmitting(isSubmitting) {
   if (directTenantSubmitBtnEl instanceof HTMLButtonElement) {
     directTenantSubmitBtnEl.disabled = Boolean(isSubmitting);
+  }
+}
+
+function closeUtilitySetupModal() {
+  if (utilitySetupModalEl instanceof HTMLElement) {
+    utilitySetupModalEl.classList.add("hidden");
+  }
+
+  if (utilitySetupBackdropEl instanceof HTMLElement) {
+    utilitySetupBackdropEl.classList.add("hidden");
+  }
+}
+
+function showUtilitySetupModal() {
+  if (utilitySetupModalEl instanceof HTMLElement) {
+    utilitySetupModalEl.classList.remove("hidden");
+  }
+
+  if (utilitySetupBackdropEl instanceof HTMLElement) {
+    utilitySetupBackdropEl.classList.remove("hidden");
   }
 }
 
@@ -3044,13 +3022,10 @@ function applyRoomsWorkspaceLayout() {
     return;
   }
 
-  // Rent Collection Status (overview-rent-status-section) used to live inside this same
-  // "tenants" view, so opening it here showed rent + utility status together. It's now its own
-  // "rent" sidebar view, so it's no longer part of what's visible under "tenants" — Room Ledger
-  // (still here) already surfaces a per-room rent/utilities/deposit/charges rollup, so this
-  // deep link still lands somewhere useful without needing to force two top-level views open
-  // at once, which the sidebar model no longer supports.
   setActiveLandlordView("tenants");
+  if (overviewRentStatusSectionEl instanceof HTMLDetailsElement) {
+    overviewRentStatusSectionEl.open = true;
+  }
   if (utilityRoomStatusSectionEl instanceof HTMLDetailsElement) {
     utilityRoomStatusSectionEl.open = true;
   }
@@ -3093,7 +3068,7 @@ async function openRentSetupDeepLinkIfRequested() {
     state.selectedRegistryBuildingId = deepLink.buildingId;
   }
 
-  setActiveLandlordView("rent");
+  setActiveLandlordView("tenants");
   scrollToLandlordSection("overview-rent-status-section");
   await openRentSheetModal();
   clearRentSetupDeepLink();
@@ -4830,8 +4805,7 @@ function renderUtilitySheetRows(rows) {
   utilitySheetBodyEl.replaceChildren();
   if (!Array.isArray(rows) || rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML =
-      '<td colspan="9" class="table-cell-full">No houses found for this building.</td>';
+    row.innerHTML = '<td colspan="9">No houses found for this building.</td>';
     utilitySheetBodyEl.append(row);
     return;
   }
@@ -4940,15 +4914,15 @@ function renderUtilitySheetRows(rows) {
     row.dataset.autoWaterFixedCharge = numberToInputString(autoWaterFixedCharge);
     row.dataset.autoElectricityFixedCharge = numberToInputString(autoElectricityFixedCharge);
     row.innerHTML = `
-      <td data-label="House"><strong>${escapeHtml(houseNumber)}</strong></td>
-      <td data-label="Water Meter"><input class="registry-table-input utility-sheet-input" data-field="waterMeterNumber" type="text" maxlength="80" placeholder="WTR-0001" value="${escapeHtml(waterMeterNumber)}" /></td>
-      <td data-label="Water Prev"><input class="registry-table-input utility-sheet-input" data-field="waterPreviousReading" type="number" min="0" step="0.001" placeholder="auto" value="${escapeHtml(numberToInputString(waterPrev))}" /></td>
-      <td data-label="Water Current"><input class="registry-table-input utility-sheet-input" data-field="waterCurrentReading" type="number" min="0" step="0.001" placeholder="e.g. 358.5" value="${escapeHtml(numberToInputString(transferredWaterReading))}" /></td>
-      <td data-label="Water Fixed"><input class="registry-table-input utility-sheet-input" data-field="waterFixedChargeKsh" type="number" min="0" step="0.01" value="${escapeHtml(numberToInputString(resolvedWaterFixedDefault))}" /></td>
-      <td data-label="Electric Meter"><input class="registry-table-input utility-sheet-input" data-field="electricityMeterNumber" type="text" maxlength="80" placeholder="ELEC-0001" value="${escapeHtml(electricityMeterNumber)}" /></td>
-      <td data-label="Electric Prev"><input class="registry-table-input utility-sheet-input" data-field="electricityPreviousReading" type="number" min="0" step="0.001" placeholder="auto" value="${escapeHtml(numberToInputString(electricityPrev))}" /></td>
-      <td data-label="Electric Current"><input class="registry-table-input utility-sheet-input" data-field="electricityCurrentReading" type="number" min="0" step="0.001" placeholder="e.g. 911.2" value="${escapeHtml(numberToInputString(transferredElectricityReading))}" /></td>
-      <td data-label="Electric Fixed"><input class="registry-table-input utility-sheet-input" data-field="electricityFixedChargeKsh" type="number" min="0" step="0.01" value="${escapeHtml(numberToInputString(resolvedElectricityFixedDefault))}" /></td>
+      <td><strong>${escapeHtml(houseNumber)}</strong></td>
+      <td><input class="registry-table-input utility-sheet-input" data-field="waterMeterNumber" type="text" maxlength="80" placeholder="WTR-0001" value="${escapeHtml(waterMeterNumber)}" /></td>
+      <td><input class="registry-table-input utility-sheet-input" data-field="waterPreviousReading" type="number" min="0" step="0.001" placeholder="auto" value="${escapeHtml(numberToInputString(waterPrev))}" /></td>
+      <td><input class="registry-table-input utility-sheet-input" data-field="waterCurrentReading" type="number" min="0" step="0.001" placeholder="e.g. 358.5" value="${escapeHtml(numberToInputString(transferredWaterReading))}" /></td>
+      <td><input class="registry-table-input utility-sheet-input" data-field="waterFixedChargeKsh" type="number" min="0" step="0.01" value="${escapeHtml(numberToInputString(resolvedWaterFixedDefault))}" /></td>
+      <td><input class="registry-table-input utility-sheet-input" data-field="electricityMeterNumber" type="text" maxlength="80" placeholder="ELEC-0001" value="${escapeHtml(electricityMeterNumber)}" /></td>
+      <td><input class="registry-table-input utility-sheet-input" data-field="electricityPreviousReading" type="number" min="0" step="0.001" placeholder="auto" value="${escapeHtml(numberToInputString(electricityPrev))}" /></td>
+      <td><input class="registry-table-input utility-sheet-input" data-field="electricityCurrentReading" type="number" min="0" step="0.001" placeholder="e.g. 911.2" value="${escapeHtml(numberToInputString(transferredElectricityReading))}" /></td>
+      <td><input class="registry-table-input utility-sheet-input" data-field="electricityFixedChargeKsh" type="number" min="0" step="0.01" value="${escapeHtml(numberToInputString(resolvedElectricityFixedDefault))}" /></td>
     `;
     utilitySheetBodyEl.append(row);
   });
@@ -5441,6 +5415,7 @@ async function openUtilitySheetModal() {
   }
 
   clearError();
+  closeUtilitySetupModal();
   showUtilitySheetModal();
   syncUtilitySheetBuildingOptions();
   if (utilitySheetBuildingSelectEl instanceof HTMLSelectElement) {
@@ -5473,10 +5448,9 @@ async function openUtilitySheetModal() {
   }
 }
 
-// Meters is one of the few views whose data isn't already bundled into the shared
-// /api/landlord/startup payload — it was previously only loaded when the Utility Setup drawer
-// opened. Now that Meters is a plain sidebar view, this is called from the nav click instead.
-async function loadMetersView() {
+async function openUtilitySetupModal() {
+  setActiveLandlordView("tenants");
+  showUtilitySetupModal();
   clearError();
 
   await Promise.all([
@@ -6791,162 +6765,7 @@ function syncSettingsBuildingOptions() {
 
   settingsBuildingSelectEl.value = selected;
   renderSettingsPanel();
-  void loadBuildingDefaults(selected);
 }
-
-function setBuildingDefaultsFormDisabled(disabled) {
-  if (!(buildingDefaultsFormEl instanceof HTMLFormElement)) {
-    return;
-  }
-
-  [...buildingDefaultsFormEl.elements].forEach((element) => {
-    if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element instanceof HTMLButtonElement) {
-      element.disabled = disabled;
-    }
-  });
-}
-
-async function loadBuildingDefaults(buildingId) {
-  if (!(buildingDefaultsFormEl instanceof HTMLFormElement)) {
-    return;
-  }
-
-  if (!buildingId) {
-    setBuildingDefaultsFormDisabled(true);
-    if (buildingDefaultsSummaryEl instanceof HTMLElement) {
-      buildingDefaultsSummaryEl.textContent = "Select a building above to manage its defaults.";
-    }
-    return;
-  }
-
-  if (isCaretakerRole()) {
-    setBuildingDefaultsFormDisabled(true);
-    if (buildingDefaultsSummaryEl instanceof HTMLElement) {
-      buildingDefaultsSummaryEl.textContent =
-        "House manager accounts can view building defaults but cannot change them.";
-    }
-  }
-
-  try {
-    const payload = await requestJson(
-      `/api/landlord/buildings/${encodeURIComponent(buildingId)}/configuration`
-    );
-    const data = payload.data ?? {};
-
-    if (buildingDefaultsUtilityBillingModeEl instanceof HTMLSelectElement) {
-      buildingDefaultsUtilityBillingModeEl.value = data.utilityBillingMode ?? "metered";
-    }
-    if (buildingDefaultsWaterRateEl instanceof HTMLInputElement) {
-      buildingDefaultsWaterRateEl.value = data.defaultWaterRatePerUnitKsh ?? "";
-    }
-    if (buildingDefaultsElectricityRateEl instanceof HTMLInputElement) {
-      buildingDefaultsElectricityRateEl.value = data.defaultElectricityRatePerUnitKsh ?? "";
-    }
-    if (buildingDefaultsWaterFixedEl instanceof HTMLInputElement) {
-      buildingDefaultsWaterFixedEl.value = data.defaultWaterFixedChargeKsh ?? "";
-    }
-    if (buildingDefaultsElectricityFixedEl instanceof HTMLInputElement) {
-      buildingDefaultsElectricityFixedEl.value = data.defaultElectricityFixedChargeKsh ?? "";
-    }
-    if (buildingDefaultsCombinedChargeEl instanceof HTMLInputElement) {
-      buildingDefaultsCombinedChargeEl.value = data.defaultCombinedUtilityChargeKsh ?? "";
-    }
-    if (buildingDefaultsBalanceVisibleDaysEl instanceof HTMLInputElement) {
-      buildingDefaultsBalanceVisibleDaysEl.value = data.utilityBalanceVisibleDays ?? 7;
-    }
-    if (buildingDefaultsMonthlyRentEl instanceof HTMLInputElement) {
-      buildingDefaultsMonthlyRentEl.value = data.defaultMonthlyRentKsh ?? "";
-    }
-    if (buildingDefaultsRentDueDayEl instanceof HTMLInputElement) {
-      buildingDefaultsRentDueDayEl.value = data.defaultRentDueDay ?? "";
-    }
-    if (buildingDefaultsMeterReadingDayEl instanceof HTMLInputElement) {
-      buildingDefaultsMeterReadingDayEl.value = data.meterReadingDay ?? "";
-    }
-    if (buildingDefaultsAllowManualRentEl instanceof HTMLInputElement) {
-      buildingDefaultsAllowManualRentEl.checked = data.allowManualRentPosting !== false;
-    }
-    if (buildingDefaultsAllowManualUtilityEl instanceof HTMLInputElement) {
-      buildingDefaultsAllowManualUtilityEl.checked = data.allowManualUtilityPosting !== false;
-    }
-    if (buildingDefaultsAcknowledgeEl instanceof HTMLInputElement) {
-      buildingDefaultsAcknowledgeEl.checked = false;
-    }
-    if (buildingDefaultsNoteEl instanceof HTMLInputElement) {
-      buildingDefaultsNoteEl.value = "";
-    }
-
-    setBuildingDefaultsFormDisabled(isCaretakerRole());
-    if (buildingDefaultsSummaryEl instanceof HTMLElement && !isCaretakerRole()) {
-      buildingDefaultsSummaryEl.textContent = `Editing defaults for ${getBuildingDisplayNameById(
-        buildingId,
-        "the selected building"
-      )}. Last updated ${formatDateTime(data.updatedAt)}.`;
-    }
-  } catch (error) {
-    setBuildingDefaultsFormDisabled(true);
-    handleLandlordError(error, "Failed to load building defaults.");
-  }
-}
-
-buildingDefaultsFormEl?.addEventListener("submit", (event) => {
-  event.preventDefault();
-
-  const buildingId = getSelectedSettingsBuildingId();
-  if (!buildingId) {
-    return;
-  }
-
-  if (!(buildingDefaultsAcknowledgeEl instanceof HTMLInputElement) || !buildingDefaultsAcknowledgeEl.checked) {
-    handleLandlordError(
-      new Error("Confirm the acknowledgement checkbox before saving building defaults."),
-      "Failed to update building defaults."
-    );
-    return;
-  }
-
-  const body = {
-    utilityBillingMode: buildingDefaultsUtilityBillingModeEl?.value || undefined,
-    defaultWaterRatePerUnitKsh: toOptionalNumber(buildingDefaultsWaterRateEl?.value),
-    defaultElectricityRatePerUnitKsh: toOptionalNumber(buildingDefaultsElectricityRateEl?.value),
-    defaultWaterFixedChargeKsh: toOptionalNumber(buildingDefaultsWaterFixedEl?.value),
-    defaultElectricityFixedChargeKsh: toOptionalNumber(buildingDefaultsElectricityFixedEl?.value),
-    defaultCombinedUtilityChargeKsh: toOptionalNumber(buildingDefaultsCombinedChargeEl?.value),
-    utilityBalanceVisibleDays: toOptionalNumber(buildingDefaultsBalanceVisibleDaysEl?.value),
-    defaultMonthlyRentKsh: toOptionalNumber(buildingDefaultsMonthlyRentEl?.value),
-    defaultRentDueDay: toOptionalNumber(buildingDefaultsRentDueDayEl?.value),
-    meterReadingDay: toOptionalNumber(buildingDefaultsMeterReadingDayEl?.value),
-    allowManualRentPosting: Boolean(buildingDefaultsAllowManualRentEl?.checked),
-    allowManualUtilityPosting: Boolean(buildingDefaultsAllowManualUtilityEl?.checked),
-    acknowledgeImpact: true,
-    note: buildingDefaultsNoteEl?.value?.trim() || undefined
-  };
-
-  if (buildingDefaultsSaveBtnEl instanceof HTMLButtonElement) {
-    buildingDefaultsSaveBtnEl.disabled = true;
-  }
-
-  void (async () => {
-    try {
-      await requestJson(`/api/landlord/buildings/${encodeURIComponent(buildingId)}/configuration`, {
-        method: "PATCH",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify(body)
-      });
-
-      setStatus(`Building defaults updated for ${getBuildingDisplayNameById(buildingId, buildingId)}.`);
-      await loadBuildingDefaults(buildingId);
-    } catch (error) {
-      handleLandlordError(error, "Failed to update building defaults.");
-    } finally {
-      if (buildingDefaultsSaveBtnEl instanceof HTMLButtonElement) {
-        buildingDefaultsSaveBtnEl.disabled = false;
-      }
-    }
-  })();
-});
 
 function renderRoomBuildingOptions() {
   if (!(roomTargetBuildingEl instanceof HTMLSelectElement)) {
@@ -11543,7 +11362,7 @@ function prefillRentPaymentFromStatus(action) {
   }
 
   clearError();
-  setActiveLandlordView("rent");
+  setActiveLandlordView("tenants");
   scrollToLandlordSection("overview-rent-status-section");
   window.requestAnimationFrame(() => {
     if (rentPaymentAmountEl instanceof HTMLInputElement) {
@@ -12200,11 +12019,6 @@ landlordNavButtons.forEach((button) => {
     if (sectionTarget) {
       scrollToLandlordSection(sectionTarget);
     }
-    if (targetView === "meters") {
-      void loadMetersView().catch((error) => {
-        handleLandlordError(error, "Unable to load meters.");
-      });
-    }
   });
 });
 
@@ -12233,12 +12047,11 @@ dashboardActionButtons.forEach((button) => {
         scrollToLandlordSection("residents-section");
         break;
       case "record-rent":
-        setActiveLandlordView("rent");
-        // Land directly on the payment form itself (scrollToLandlordSection opens it, since
-        // it's a <details>, and its ancestor panel) instead of the top of the outer "Rent
-        // Setup + Collection" panel, which put "Record Payment" clicks next to the unrelated
-        // rent setup sheet button rather than the form the click asked for.
-        scrollToLandlordSection("rent-payment-details");
+        setActiveLandlordView("tenants");
+        if (rentPaymentDetailsEl instanceof HTMLDetailsElement) {
+          rentPaymentDetailsEl.open = true;
+        }
+        scrollToLandlordSection("overview-rent-status-section");
         break;
       case "requests":
         setActiveLandlordView("applications");
@@ -12319,6 +12132,20 @@ directTenantDrawerBackdropEl?.addEventListener("click", () => {
   closeDirectTenantDrawer();
 });
 
+openUtilitySetupBtnEl?.addEventListener("click", () => {
+  void openUtilitySetupModal().catch((error) => {
+    handleLandlordError(error, "Unable to open utility setup.");
+  });
+});
+
+closeUtilitySetupBtnEl?.addEventListener("click", () => {
+  closeUtilitySetupModal();
+});
+
+utilitySetupBackdropEl?.addEventListener("click", () => {
+  closeUtilitySetupModal();
+});
+
 openUtilitySheetBtnEl?.addEventListener("click", () => {
   void openUtilitySheetModal();
 });
@@ -12361,6 +12188,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeCreateBuildingDrawer();
     closeBuildingDrawer();
+    closeUtilitySetupModal();
     closeUtilitySheetModal();
     closeRentSheetModal();
     closeResidentDrawer();
@@ -15233,42 +15061,6 @@ refreshPaymentInstructionsBtnEl?.addEventListener("click", () => {
   void loadPaymentInstructions().catch((error) => {
     handleLandlordError(error, "Unable to refresh payment instructions.");
   });
-});
-
-settingsBuildingSelectEl?.addEventListener("change", () => {
-  const buildingId = getSelectedSettingsBuildingId();
-  state.selectedRegistryBuildingId = buildingId;
-  renderSettingsPanel();
-  void loadBuildingDefaults(buildingId);
-});
-
-refreshSettingsViewBtnEl?.addEventListener("click", () => {
-  renderSettingsPanel();
-  void Promise.all([
-    loadPaymentAccess(),
-    loadPaymentProfiles(),
-    loadPaymentInstructions(),
-    loadBuildings(),
-    loadBuildingDefaults(getSelectedSettingsBuildingId())
-  ]).catch((error) => {
-    handleLandlordError(error, "Unable to refresh workspace settings.");
-  });
-});
-
-settingsClearCacheBtnEl?.addEventListener("click", handleSettingsClearCacheClick);
-
-settingsClearDataBtnEl?.addEventListener("click", () => {
-  const buildingId = getSelectedSettingsBuildingId();
-  if (!buildingId) {
-    showError("Select a building first.");
-    return;
-  }
-
-  handleDeleteBuildingClick(
-    settingsClearDataBtnEl,
-    buildingId,
-    getBuildingDisplayNameById(buildingId, buildingId)
-  );
 });
 
 refreshMetersBtnEl.addEventListener("click", () => {

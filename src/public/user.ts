@@ -12,7 +12,7 @@ import {
   validateImageFiles
 } from "./media-upload.js";
 
-const RESIDENT_SW_URL = "/resident-sw.js?v=20260717d";
+const RESIDENT_SW_URL = "/resident-sw.js?v=20260821a";
 
 const apiStatusEl = document.getElementById("api-status");
 const authStateEl = document.getElementById("auth-state");

@@ -983,7 +983,14 @@ export class RentLedgerService {
 
     this.refreshRecordForBilling(record, new Date(paidAt));
     const currentBillingMonth = billingMonthFromDateTime(record.dueDate);
-    if (billingMonth > currentBillingMonth) {
+    // Hold a payment for a later cycle only when it is a real advance: it is marked for a
+    // month after the one it was paid in, or nothing is owed now. A payment labelled with
+    // its own payment month (rent due 30 Sept, paid 1 Oct -> "2026-10") clears the debt.
+    const isAdvanceForLaterMonth = billingMonth > billingMonthFromDateTime(paidAt);
+    const isPrepayment =
+      billingMonth > currentBillingMonth &&
+      (isAdvanceForLaterMonth || Math.max(0, Number(record.balanceKsh ?? 0)) <= 0);
+    if (isPrepayment) {
       this.addPendingPayment(event);
       this.emitStateChange();
 

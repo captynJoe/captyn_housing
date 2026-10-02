@@ -18329,7 +18329,7 @@ async function bootstrap() {
                       dueDate,
                       note:
                         billingMode === "combined_charge"
-                          ? `Combined utility fee (water+electricity) for ${usageMonth}.`
+                          ? `Combined utility fee (water, electricity & trash) for ${usageMonth}.`
                           : undefined
                     }
                   : undefined

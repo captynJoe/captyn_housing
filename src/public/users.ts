@@ -540,7 +540,18 @@ function toIsoFromDateTimeLocal(value) {
   return date.toISOString();
 }
 
+// Buildings on one flat utilities fee (water, electricity and trash together) post it
+// on the water account; residents should see it as "Utilities", not "Water".
+function isCombinedUtilitiesFee() {
+  return (state.utilityBills ?? []).some((bill) =>
+    String(bill?.note ?? "").trim().startsWith("Combined utility fee")
+  );
+}
+
 function utilityLabel(utilityType) {
+  if (utilityType === "water" && isCombinedUtilitiesFee()) {
+    return "Utilities";
+  }
   return utilityType === "water" ? "Water" : "Electricity";
 }
 

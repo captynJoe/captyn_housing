@@ -635,3 +635,57 @@ test("keeps legacy house-only rent records visible after building scoping", () =
   assert.equal(fetched.buildingId, RENT_LEGACY_BUILDING_ID);
   assert.equal(fetched.balanceKsh, 3000);
 });
+
+test("a payment made just after the month turns clears last month's overdue rent", () => {
+  const service = new RentLedgerService();
+  service.upsertRentDue(BUILDING_A, "MT-1", {
+    monthlyRentKsh: 5000,
+    balanceKsh: 5000,
+    dueDate: "2026-09-30T09:00:00.000Z"
+  });
+
+  const result = service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "MT-1",
+    amountKsh: 5000,
+    provider: "cash",
+    providerReference: "mt-clear-1",
+    paidAt: "2026-10-01T08:00:00.000Z"
+  });
+
+  assert.equal(result.applied, true);
+  assert.equal(result.snapshot?.balanceKsh, 0);
+});
+
+test("a payment labelled with its own month pays what is owed first, and is held once nothing is owed", () => {
+  const service = new RentLedgerService();
+  service.upsertRentDue(BUILDING_A, "MT-2", {
+    monthlyRentKsh: 5000,
+    balanceKsh: 5000,
+    dueDate: "2026-09-30T09:00:00.000Z"
+  });
+
+  const owed = service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "MT-2",
+    amountKsh: 5000,
+    provider: "cash",
+    providerReference: "mt-prepay-1",
+    billingMonth: "2026-10",
+    paidAt: "2026-10-01T08:00:00.000Z"
+  });
+  assert.equal(owed.applied, true);
+  assert.equal(owed.snapshot?.balanceKsh, 0);
+
+  const prepaid = service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "MT-2",
+    amountKsh: 5000,
+    provider: "cash",
+    providerReference: "mt-prepay-2",
+    billingMonth: "2026-10",
+    paidAt: "2026-10-01T09:00:00.000Z"
+  });
+  assert.equal(prepaid.applied, false);
+  assert.equal(service.getRentDue(BUILDING_A, "MT-2")?.balanceKsh, 0);
+});

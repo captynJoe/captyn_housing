@@ -2774,7 +2774,7 @@ export class UtilityBillingService {
       target.unitsConsumed = 0;
       target.ratePerUnitKsh = 0;
       target.meterNumber = "NO-METER";
-      target.note = `Combined utility fee (water+electricity) for ${target.billingMonth}.`;
+      target.note = `Combined utility fee (water, electricity & trash) for ${target.billingMonth}.`;
       target.updatedAt = nowIso();
     }
   }
@@ -2876,7 +2876,7 @@ export class UtilityBillingService {
       target.unitsConsumed = 0;
       target.ratePerUnitKsh = 0;
       target.meterNumber = "NO-METER";
-      target.note = `Combined utility fee (water+electricity) for ${target.billingMonth}.`;
+      target.note = `Combined utility fee (water, electricity & trash) for ${target.billingMonth}.`;
       target.payments = mergedPayments;
       target.updatedAt = nowIso();
 

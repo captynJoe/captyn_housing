@@ -187,7 +187,7 @@ function formatCurrency(value: number): string {
 }
 
 function buildCombinedUtilityNote(billingMonth: string): string {
-  return `Combined utility fee (water+electricity) for ${billingMonth}.`;
+  return `Combined utility fee (water, electricity & trash) for ${billingMonth}.`;
 }
 
 function memberKey(buildingId: string, houseNumber: string): string {

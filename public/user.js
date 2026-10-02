@@ -1,7 +1,7 @@
 import { applyDocumentBranding, getResidentProfileTitle, getResidentShellBrand } from "./portal-branding.js?v=9b283694b2";
 import { notifyError, notifyStatus } from "./notifications.js?v=62acc56b74";
 import { createUploadedImageGallery, renderSelectedImagePreviews, uploadImageFiles, validateImageFiles } from "./media-upload.js?v=549f6d7675";
-const RESIDENT_SW_URL = "/resident-sw.js?v=20260821a";
+const RESIDENT_SW_URL = "/resident-sw.js?v=b3d227fafe";
 const apiStatusEl = document.getElementById("api-status");
 const authStateEl = document.getElementById("auth-state");
 const feedbackBoxEl = document.getElementById("feedback-box");

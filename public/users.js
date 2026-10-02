@@ -4,7 +4,7 @@ import { applyDocumentBranding, getResidentPortalTitle, getResidentShellBrand } 
 const RESIDENT_TOKEN_KEY = "estatedesk_resident_session_token";
 const RESIDENT_SESSION_TOKEN_KEY = "estatedesk_resident_session_token_session";
 const RESIDENT_REMEMBER_DEVICE_KEY = "estatedesk_resident_remember_device";
-const RESIDENT_SW_URL = "/resident-sw.js?v=20260821a";
+const RESIDENT_SW_URL = "/resident-sw.js?v=b3d227fafe";
 let deferredInstallPrompt = null;
 let residentSwRegistrationPromise = null;
 const apiStatusEl = document.getElementById("api-status");
@@ -32,6 +32,7 @@ const overviewBuildingEl = document.getElementById("overview-building");
 const overviewHouseNumberEl = document.getElementById("overview-house-number");
 const overviewSessionExpiryEl = document.getElementById("overview-session-expiry");
 const residentHomeBalanceEl = document.getElementById("resident-home-balance");
+const residentBalanceAdjustedEl = document.getElementById("resident-balance-adjusted");
 const residentHomeSummaryEl = document.getElementById("resident-home-summary");
 const overviewRentBalanceEl = document.getElementById("overview-rent-balance");
 const overviewUtilityBalanceEl = document.getElementById("overview-utility-balance");
@@ -197,6 +198,7 @@ const state = {
     buildings: [],
     residentSession: null,
     rentDue: null,
+    balanceAdjustment: null,
     reports: [],
     notifications: [],
     pushConfig: null,
@@ -1183,6 +1185,18 @@ function syncResidentPaySummary() {
     }
     if (residentHomeBalanceEl instanceof HTMLElement) {
         residentHomeBalanceEl.textContent = totalOutstanding > 0 ? `${formatCurrency(totalOutstanding)} due` : "Nothing due";
+    }
+    if (residentBalanceAdjustedEl instanceof HTMLElement) {
+        const adjustment = pendingReview ? null : state.balanceAdjustment;
+        residentBalanceAdjustedEl.classList.toggle("hidden", !adjustment);
+        if (adjustment) {
+            const adjustedOn = new Date(adjustment.adjustedAt).toLocaleDateString("en-GB", {
+                day: "numeric",
+                month: "short"
+            });
+            const what = adjustment.kind === "utility" ? "Utility balance" : "Rent balance";
+            residentBalanceAdjustedEl.textContent = `${what} manually adjusted · ${adjustedOn}${adjustment.reason ? ` · ${adjustment.reason}` : ""}`;
+        }
     }
     if (overviewRentBalanceEl instanceof HTMLElement) {
         overviewRentBalanceEl.textContent = formatCurrency(rentOutstanding);
@@ -3456,6 +3470,7 @@ async function loadTenantData() {
         state.notifications = data.notifications ?? [];
         state.paymentInstructions = data.paymentInstructions ?? null;
         state.rentDue = data.rentDue ?? null;
+        state.balanceAdjustment = data.balanceAdjustment ?? null;
         state.identityRequirement =
             data.identityRequirement ?? state.residentSession?.identityRequirement ?? null;
         renderReports(state.reports);

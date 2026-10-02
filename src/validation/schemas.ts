@@ -1052,7 +1052,18 @@ export const landlordUtilityRegistryUpsertSchema = z.object({
   rateDefaults: utilityRateDefaultsSchema
 });
 
-export const landlordMeterReadingsSaveSchema = z.object({
+export const landlordMeterReadingsSaveSchema = z
+  .object({
+  rooms: z
+    .array(
+      z.object({
+        houseNumber: nonEmptyString.max(24),
+        householdMembers: householdMembersSchema.optional(),
+        resetRoomCharges: z.boolean().optional()
+      })
+    )
+    .max(2_000)
+    .default([]),
   entries: z
     .array(
       z
@@ -1068,9 +1079,13 @@ export const landlordMeterReadingsSaveSchema = z.object({
           "Each entry needs a reading or a meter number."
         )
     )
-    .min(1)
     .max(2_000)
-});
+    .default([])
+  })
+  .refine(
+    (value) => value.rooms.length > 0 || value.entries.length > 0,
+    "Nothing to save."
+  );
 
 export const landlordMonthlyCombinedUtilityChargeSchema = z.object({
   billingMonth: billingMonthSchema,

@@ -17800,6 +17800,12 @@ async function bootstrap() {
       houseNumber: row.houseNumber,
       residentName: row.residentName ?? "",
       hasActiveResident: Boolean(row.hasActiveResident),
+      householdMembers: Number(row.householdMembers ?? 0),
+      roomChargesKsh: {
+        water: Number(row.waterFixedChargeKsh ?? 0),
+        electricity: Number(row.electricityFixedChargeKsh ?? 0),
+        combined: Number(row.combinedUtilityChargeKsh ?? 0)
+      },
       water: describeMeter("water", row.houseNumber, row.waterMeterNumber),
       electricity: describeMeter("electricity", row.houseNumber, row.electricityMeterNumber)
     }));
@@ -17855,6 +17861,11 @@ async function bootstrap() {
         data: await buildMeterReadingRows(building),
         building: { id: building.id, name: building.name },
         billingMode: configuration?.utilityBillingMode ?? "metered",
+        buildingCharges: {
+          water: configuration?.defaultWaterFixedChargeKsh ?? null,
+          electricity: configuration?.defaultElectricityFixedChargeKsh ?? null,
+          combined: configuration?.defaultCombinedUtilityChargeKsh ?? null
+        },
         rates: getMeterReadingRates(building.id),
         remindDaysBefore: METER_READING_REMIND_DAYS_BEFORE,
         role: context.role
@@ -17896,6 +17907,38 @@ async function bootstrap() {
       }> = [];
       const failures: Array<{ houseNumber: string; utilityType: string; error: string }> = [];
       let meterNumbersUpdated = 0;
+
+      const roomUpdates = parsed.rooms
+        .map((room) => ({ ...room, houseNumber: normalizeHouseNumber(room.houseNumber) }))
+        .filter((room) => {
+          if (allowedHouses.has(room.houseNumber)) {
+            return true;
+          }
+          failures.push({
+            houseNumber: room.houseNumber,
+            utilityType: "room",
+            error: `House ${room.houseNumber} is not in ${building.name}.`
+          });
+          return false;
+        });
+      await upsertHouseholdMembersForBuilding(
+        building.id,
+        roomUpdates
+          .filter((room) => room.householdMembers != null)
+          .map((room) => ({ houseNumber: room.houseNumber, members: room.householdMembers! }))
+      );
+      // Fixed amounts are set per building in Setup; saving a room drops its own override.
+      upsertUtilityChargeDefaultsForBuilding(
+        building.id,
+        roomUpdates
+          .filter((room) => room.resetRoomCharges)
+          .map((room) => ({
+            houseNumber: room.houseNumber,
+            waterFixedChargeKsh: 0,
+            electricityFixedChargeKsh: 0,
+            combinedUtilityChargeKsh: 0
+          }))
+      );
 
       for (const entry of parsed.entries) {
         const houseNumber = normalizeHouseNumber(entry.houseNumber);
@@ -18003,6 +18046,7 @@ async function bootstrap() {
         saved,
         failures,
         meterNumbersUpdated,
+        roomsUpdated: roomUpdates.length,
         rates: getMeterReadingRates(building.id),
         role: context.role
       });

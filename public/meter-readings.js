@@ -1,12 +1,10 @@
+export const METER_UTILITIES = ["water", "electricity"];
 const STATUS_ORDER = {
     overdue: 0,
     due_soon: 1,
     no_reading: 2,
     ok: 3
 };
-export function draftKey(utility, houseNumber) {
-    return `${utility}:${houseNumber}`;
-}
 function parseFigure(value) {
     const trimmed = String(value ?? "").trim();
     if (!trimmed) {
@@ -15,9 +13,19 @@ function parseFigure(value) {
     const parsed = Number(trimmed);
     return Number.isFinite(parsed) ? parsed : Number.NaN;
 }
-export function sortRowsForUtility(rows, utility) {
+export function hasRoomCharges(row) {
+    const charges = row.roomChargesKsh;
+    return Boolean(charges && (charges.water > 0 || charges.electricity > 0 || charges.combined > 0));
+}
+export function roomStatus(row, metered) {
+    if (!metered) {
+        return "ok";
+    }
+    return METER_UTILITIES.map((utility) => row[utility].status).sort((left, right) => STATUS_ORDER[left] - STATUS_ORDER[right])[0];
+}
+export function sortRooms(rows, metered) {
     return [...rows].sort((left, right) => {
-        const byStatus = STATUS_ORDER[left[utility].status] - STATUS_ORDER[right[utility].status];
+        const byStatus = STATUS_ORDER[roomStatus(left, metered)] - STATUS_ORDER[roomStatus(right, metered)];
         if (byStatus !== 0) {
             return byStatus;
         }
@@ -51,41 +59,59 @@ export function previewDraft(info, draft, rate) {
     }
     return { hasReading: true, units, amountKsh: Math.round(units * rate) };
 }
-export function buildSaveEntries(rows, drafts, rates) {
+export function buildRoomSavePayload(row, draft, rates) {
+    const errors = [];
     const entries = [];
-    const invalidKeys = [];
-    for (const row of rows) {
-        for (const utility of ["water", "electricity"]) {
-            const key = draftKey(utility, row.houseNumber);
-            const draft = drafts.get(key);
-            if (!draft) {
-                continue;
-            }
-            const info = row[utility];
-            const meterNumber = String(draft.meterNumber ?? "").trim();
-            const meterChanged = meterNumber !== "" && meterNumber !== info.meterNumber;
-            const preview = previewDraft(info, draft, rates[utility]);
-            if (preview.hasReading && preview.error) {
-                invalidKeys.push(key);
-                continue;
-            }
-            if (!preview.hasReading && !meterChanged) {
-                continue;
-            }
-            const entry = { houseNumber: row.houseNumber, utilityType: utility };
-            if (meterChanged) {
-                entry.meterNumber = meterNumber;
-            }
-            if (preview.hasReading) {
-                entry.reading = parseFigure(draft.reading);
-                if (info.lastReading == null) {
-                    entry.previousReading = parseFigure(draft.previousReading);
-                }
-            }
-            entries.push(entry);
+    const room = { houseNumber: row.houseNumber };
+    const membersText = String(draft?.members ?? "").trim();
+    if (membersText !== "") {
+        const members = Number(membersText);
+        if (!Number.isInteger(members) || members < 0 || members > 20) {
+            errors.push("Members must be a whole number from 0 to 20.");
+        }
+        else if (members !== Number(row.householdMembers ?? 0)) {
+            room.householdMembers = members;
         }
     }
-    return { entries, invalidKeys };
+    for (const utility of METER_UTILITIES) {
+        const meterDraft = draft?.[utility];
+        if (!meterDraft) {
+            continue;
+        }
+        const info = row[utility];
+        const meterNumber = String(meterDraft.meterNumber ?? "").trim();
+        const meterChanged = meterNumber !== "" && meterNumber !== info.meterNumber;
+        const preview = previewDraft(info, meterDraft, rates[utility]);
+        if (preview.hasReading && preview.error) {
+            errors.push(`${utility === "water" ? "Water" : "Electricity"}: ${preview.error}`);
+            continue;
+        }
+        if (!preview.hasReading && !meterChanged) {
+            continue;
+        }
+        const entry = { houseNumber: row.houseNumber, utilityType: utility };
+        if (meterChanged) {
+            entry.meterNumber = meterNumber;
+        }
+        if (preview.hasReading) {
+            entry.reading = parseFigure(meterDraft.reading);
+            if (info.lastReading == null) {
+                entry.previousReading = parseFigure(meterDraft.previousReading);
+            }
+        }
+        entries.push(entry);
+    }
+    if (hasRoomCharges(row)) {
+        room.resetRoomCharges = true;
+    }
+    const roomChanged = room.householdMembers != null || Boolean(room.resetRoomCharges);
+    const hasEdits = room.householdMembers != null || entries.length > 0;
+    return {
+        rooms: roomChanged ? [room] : [],
+        entries,
+        errors,
+        hasChanges: hasEdits || Boolean(room.resetRoomCharges)
+    };
 }
 function formatShortDate(value) {
     if (!value) {
@@ -121,118 +147,157 @@ function escapeHtml(value) {
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
 }
+const UTILITY_LABEL = {
+    water: "Water",
+    electricity: "Electricity"
+};
 export function createMeterReadingsView(deps) {
     const listEl = deps.root.querySelector("#meter-readings-list");
     const summaryEl = deps.root.querySelector("#meter-readings-summary");
-    const pendingEl = deps.root.querySelector("#meter-readings-pending");
-    const saveBtnEl = deps.root.querySelector("#meter-readings-save-btn");
-    const toggleButtons = [
-        ...deps.root.querySelectorAll("[data-meter-utility]")
-    ];
-    let utility = "water";
     let buildingId = "";
     let billingMode = "metered";
+    let buildingCharges = undefined;
     let rows = [];
     let rates = { water: null, electricity: null };
     const drafts = new Map();
-    const rowErrors = new Map();
+    const serverErrors = new Map();
     const editingMeters = new Set();
-    let saving = false;
-    const rowByKey = (key) => rows.find((row) => draftKey(utility, row.houseNumber) === key);
-    function updateDraft(key, field, value) {
-        const draft = { ...(drafts.get(key) ?? {}) };
-        draft[field] = value;
-        if (!draft.reading && !draft.previousReading && !draft.meterNumber) {
-            drafts.delete(key);
+    const savingRooms = new Set();
+    const isMetered = () => billingMode === "metered";
+    const rowFor = (houseNumber) => rows.find((row) => row.houseNumber === houseNumber);
+    const cardFor = (houseNumber) => listEl?.querySelector(`[data-house="${CSS.escape(houseNumber)}"]`) ?? null;
+    function updateDraft(houseNumber, path, value) {
+        const draft = { ...(drafts.get(houseNumber) ?? {}) };
+        if (path === "members") {
+            draft.members = value;
         }
         else {
-            drafts.set(key, draft);
+            const [utility, field] = path.split(".");
+            draft[utility] = { ...(draft[utility] ?? {}), [field]: value };
         }
-        rowErrors.delete(key);
+        drafts.set(houseNumber, draft);
+        serverErrors.delete(houseNumber);
     }
-    function renderPreview(key) {
-        const row = rowByKey(key);
-        const rowEl = listEl?.querySelector(`[data-key="${CSS.escape(key)}"]`);
-        const previewEl = rowEl?.querySelector(".mr-preview");
-        if (!row || !rowEl || !previewEl) {
+    function renderCardState(houseNumber) {
+        const row = rowFor(houseNumber);
+        const card = cardFor(houseNumber);
+        if (!row || !card) {
             return;
         }
-        const serverError = rowErrors.get(key);
-        const preview = previewDraft(row[utility], drafts.get(key), rates[utility]);
-        const error = serverError ?? preview.error;
-        rowEl.classList.toggle("has-error", Boolean(error));
-        rowEl.classList.toggle("has-draft", preview.hasReading && !error);
-        if (error) {
-            previewEl.textContent = error;
+        const draft = drafts.get(houseNumber);
+        for (const utility of METER_UTILITIES) {
+            const previewEl = card.querySelector(`[data-preview="${utility}"]`);
+            if (!previewEl) {
+                continue;
+            }
+            const preview = previewDraft(row[utility], draft?.[utility], rates[utility]);
+            previewEl.classList.toggle("is-error", Boolean(preview.error));
+            previewEl.textContent = preview.error
+                ? preview.error
+                : preview.hasReading && preview.units != null
+                    ? `${formatFigure(preview.units)} units · ${deps.formatCurrency(preview.amountKsh ?? 0)}`
+                    : "";
         }
-        else if (preview.hasReading && preview.units != null) {
-            previewEl.textContent = `${formatFigure(preview.units)} units · ${deps.formatCurrency(preview.amountKsh ?? 0)}`;
+        const payload = buildRoomSavePayload(row, draft, rates);
+        const serverError = serverErrors.get(houseNumber);
+        const errorEl = card.querySelector(".mr-card-error");
+        if (errorEl) {
+            errorEl.textContent = serverError ?? "";
         }
-        else {
-            previewEl.textContent = "";
+        const saving = savingRooms.has(houseNumber);
+        const editing = payload.entries.length > 0 || payload.rooms.some((room) => room.householdMembers != null);
+        card.classList.toggle("has-draft", editing && payload.errors.length === 0);
+        card.classList.toggle("has-error", payload.errors.length > 0 || Boolean(serverError));
+        const saveBtn = card.querySelector("[data-action='save-room']");
+        if (saveBtn) {
+            saveBtn.disabled = saving || !payload.hasChanges || payload.errors.length > 0;
+            saveBtn.textContent = saving ? "Saving..." : "Save";
         }
-    }
-    function renderSaveBar() {
-        const { entries, invalidKeys } = buildSaveEntries(rows, drafts, rates);
-        const readingCount = entries.filter((item) => item.reading != null).length;
-        const meterCount = entries.filter((item) => item.meterNumber).length;
-        const parts = [];
-        if (readingCount > 0) {
-            parts.push(`${readingCount} reading${readingCount === 1 ? "" : "s"}`);
-        }
-        if (meterCount > 0) {
-            parts.push(`${meterCount} meter number${meterCount === 1 ? "" : "s"}`);
-        }
-        if (pendingEl) {
-            pendingEl.textContent =
-                invalidKeys.length > 0
-                    ? `Fix ${invalidKeys.length} row${invalidKeys.length === 1 ? "" : "s"} before saving`
-                    : parts.length > 0
-                        ? `${parts.join(" and ")} to save`
-                        : "";
-        }
-        if (saveBtnEl) {
-            saveBtnEl.disabled = saving || entries.length === 0 || invalidKeys.length > 0;
-            saveBtnEl.textContent = saving
-                ? "Saving..."
-                : readingCount > 0
-                    ? `Save ${readingCount} reading${readingCount === 1 ? "" : "s"}`
-                    : "Save";
-        }
-        deps.root.classList.toggle("has-pending", entries.length > 0);
     }
     function renderSummary() {
         if (!summaryEl) {
             return;
         }
-        const counts = { overdue: 0, due_soon: 0, no_reading: 0, ok: 0 };
-        rows.forEach((row) => {
-            counts[row[utility].status] += 1;
-        });
-        const due = counts.overdue + counts.due_soon;
-        const chips = [
-            due > 0 ? `<span class="mr-chip is-due">${due} due</span>` : "",
-            counts.no_reading > 0
-                ? `<span class="mr-chip">${counts.no_reading} not started</span>`
-                : "",
-            counts.ok > 0 ? `<span class="mr-chip is-ok">${counts.ok} up to date</span>` : "",
-            rates[utility] != null
-                ? `<span class="mr-chip is-rate">${escapeHtml(deps.formatCurrency(Number(rates[utility])))} / unit</span>`
-                : `<span class="mr-chip is-due">No ${utility} rate set</span>`
-        ];
+        const chips = [];
+        if (isMetered()) {
+            const counts = { overdue: 0, due_soon: 0, no_reading: 0, ok: 0 };
+            rows.forEach((row) => {
+                counts[roomStatus(row, true)] += 1;
+            });
+            const due = counts.overdue + counts.due_soon;
+            if (due > 0) {
+                chips.push(`<span class="mr-chip is-due">${due} due</span>`);
+            }
+            if (counts.no_reading > 0) {
+                chips.push(`<span class="mr-chip">${counts.no_reading} not started</span>`);
+            }
+            if (counts.ok > 0) {
+                chips.push(`<span class="mr-chip is-ok">${counts.ok} up to date</span>`);
+            }
+            for (const utility of METER_UTILITIES) {
+                const rate = rates[utility];
+                chips.push(rate != null
+                    ? `<span class="mr-chip is-rate">${UTILITY_LABEL[utility]} ${escapeHtml(deps.formatCurrency(rate))} / unit</span>`
+                    : `<span class="mr-chip is-due">No ${utility} rate in Setup</span>`);
+            }
+        }
+        else if (billingMode === "combined_charge") {
+            const combined = buildingCharges?.combined;
+            chips.push(`<span class="mr-chip is-rate">Utilities ${combined != null ? escapeHtml(deps.formatCurrency(combined)) : "not set"} per room · set in Setup</span>`);
+        }
+        else if (billingMode === "fixed_charge") {
+            const parts = METER_UTILITIES.map((utility) => {
+                const amount = buildingCharges?.[utility];
+                return `${UTILITY_LABEL[utility]} ${amount != null ? escapeHtml(deps.formatCurrency(amount)) : "not set"}`;
+            });
+            chips.push(`<span class="mr-chip is-rate">${parts.join(" · ")} per room · set in Setup</span>`);
+        }
         summaryEl.innerHTML = chips.join("");
     }
-    function renderMeterCell(key, info, draft) {
-        const editing = editingMeters.has(key) || !info.meterNumber;
-        if (!editing) {
+    function renderMeterNumber(houseNumber, utility, info) {
+        const key = `${utility}:${houseNumber}`;
+        const draft = drafts.get(houseNumber)?.[utility];
+        if (info.meterNumber && !editingMeters.has(key)) {
             return `<span class="mr-meter-label">Meter ${escapeHtml(info.meterNumber)}</span>
-        <button type="button" class="mr-link" data-action="edit-meter">Edit</button>`;
+        <button type="button" class="mr-link" data-action="edit-meter" data-utility="${utility}">Edit</button>`;
         }
-        return `<input class="mr-meter-input" data-field="meterNumber" type="text" maxlength="80"
-      placeholder="Meter no. (optional)" aria-label="Meter number"
+        return `<input class="mr-meter-input" data-path="${utility}.meterNumber" type="text"
+      maxlength="80" placeholder="Meter no. (optional)" aria-label="${UTILITY_LABEL[utility]} meter number"
       value="${escapeHtml(draft?.meterNumber ?? info.meterNumber)}" />`;
     }
-    function renderRows() {
+    function renderUtilityBlock(row, utility) {
+        const info = row[utility];
+        const draft = drafts.get(row.houseNumber)?.[utility];
+        const last = info.lastReading != null
+            ? `Last <b>${escapeHtml(formatFigure(info.lastReading))}</b> · ${escapeHtml(formatShortDate(info.lastReadAt))}`
+            : "First reading";
+        const startInput = info.lastReading == null
+            ? `<input class="mr-input mr-input-start" data-path="${utility}.previousReading"
+            type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" autocomplete="off"
+            placeholder="Start" aria-label="${UTILITY_LABEL[utility]} starting reading for ${escapeHtml(row.houseNumber)}"
+            value="${escapeHtml(draft?.previousReading ?? "")}" />`
+            : "";
+        return `<div class="mr-utility is-${info.status}">
+      <div class="mr-utility-head">
+        <span class="mr-utility-name">${UTILITY_LABEL[utility]}</span>
+        <span class="mr-last">${last}</span>
+        <span class="mr-badge">${escapeHtml(describeDue(info))}</span>
+      </div>
+      <div class="mr-inputs">
+        ${startInput}
+        <input class="mr-input" data-path="${utility}.reading" type="text" inputmode="decimal"
+          pattern="[0-9]*[.]?[0-9]*" autocomplete="off"
+          placeholder="${info.lastReading == null ? "Today" : "Reading"}"
+          aria-label="${UTILITY_LABEL[utility]} reading for ${escapeHtml(row.houseNumber)}"
+          value="${escapeHtml(draft?.reading ?? "")}" />
+      </div>
+      <div class="mr-utility-foot">
+        <span class="mr-preview" data-preview="${utility}" aria-live="polite"></span>
+        <span class="mr-meter">${renderMeterNumber(row.houseNumber, utility, info)}</span>
+      </div>
+    </div>`;
+    }
+    function renderCards() {
         if (!listEl) {
             return;
         }
@@ -240,64 +305,51 @@ export function createMeterReadingsView(deps) {
             listEl.innerHTML = `<p class="mr-empty">Choose a building at the top.</p>`;
             return;
         }
-        if (billingMode !== "metered") {
-            listEl.innerHTML = `<p class="mr-empty">This building isn't on metered billing, so utilities are charged automatically. You can change the billing mode in Setup.</p>`;
-            return;
-        }
         if (rows.length === 0) {
             listEl.innerHTML = `<p class="mr-empty">No rooms in this building yet.</p>`;
             return;
         }
-        listEl.innerHTML = sortRowsForUtility(rows, utility)
+        const metered = isMetered();
+        listEl.innerHTML = sortRooms(rows, metered)
             .map((row) => {
-            const key = draftKey(utility, row.houseNumber);
-            const info = row[utility];
-            const draft = drafts.get(key);
-            const last = info.lastReading != null
-                ? `Last <b>${escapeHtml(formatFigure(info.lastReading))}</b> · ${escapeHtml(formatShortDate(info.lastReadAt))}`
-                : "First reading";
-            const startInput = info.lastReading == null
-                ? `<input class="mr-input mr-input-start" data-field="previousReading" type="number"
-                inputmode="decimal" min="0" step="0.001" placeholder="Start"
-                aria-label="Starting reading for ${escapeHtml(row.houseNumber)}"
-                value="${escapeHtml(draft?.previousReading ?? "")}" />`
+            const status = roomStatus(row, metered);
+            const draft = drafts.get(row.houseNumber);
+            const membersValue = draft?.members ?? String(row.householdMembers ?? 0);
+            const chargesNote = hasRoomCharges(row)
+                ? `<p class="mr-card-note">This room has its own fixed amount. Saving switches it to the building default from Setup.</p>`
                 : "";
-            return `<article class="mr-row is-${info.status}" data-key="${escapeHtml(key)}">
-          <div class="mr-room">
-            <strong>${escapeHtml(row.houseNumber)}</strong>
-            <span>${escapeHtml(row.residentName || (row.hasActiveResident ? "" : "Vacant"))}</span>
-          </div>
-          <span class="mr-badge">${escapeHtml(describeDue(info))}</span>
-          <div class="mr-last">${last}</div>
-          <div class="mr-inputs">
-            ${startInput}
-            <input class="mr-input" data-field="reading" type="number" inputmode="decimal"
-              min="0" step="0.001" placeholder="${info.lastReading == null ? "Today" : "New reading"}"
-              aria-label="New ${utility} reading for ${escapeHtml(row.houseNumber)}"
-              value="${escapeHtml(draft?.reading ?? "")}" />
-          </div>
-          <div class="mr-preview" aria-live="polite"></div>
-          <div class="mr-meter">${renderMeterCell(key, info, draft)}</div>
+            return `<article class="mr-card is-${status}" data-house="${escapeHtml(row.houseNumber)}">
+          <header class="mr-card-head">
+            <div class="mr-room">
+              <strong>${escapeHtml(row.houseNumber)}</strong>
+              <span>${escapeHtml(row.residentName || (row.hasActiveResident ? "" : "Vacant"))}</span>
+            </div>
+            <label class="mr-members">
+              Members
+              <input class="mr-input mr-members-input" data-path="members" type="text"
+                inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off"
+                aria-label="Members in ${escapeHtml(row.houseNumber)}"
+                value="${escapeHtml(membersValue)}" />
+            </label>
+          </header>
+          ${metered ? METER_UTILITIES.map((utility) => renderUtilityBlock(row, utility)).join("") : ""}
+          ${chargesNote}
+          <p class="mr-card-error" role="alert"></p>
+          <button type="button" class="mr-save" data-action="save-room">Save</button>
         </article>`;
         })
             .join("");
-        rows.forEach((row) => renderPreview(draftKey(utility, row.houseNumber)));
+        rows.forEach((row) => renderCardState(row.houseNumber));
     }
     function render() {
-        toggleButtons.forEach((button) => {
-            const active = button.dataset.meterUtility === utility;
-            button.classList.toggle("active", active);
-            button.setAttribute("aria-pressed", String(active));
-        });
         renderSummary();
-        renderRows();
-        renderSaveBar();
+        renderCards();
     }
     async function load() {
         const nextBuildingId = String(deps.getBuildingId() ?? "").trim();
         if (nextBuildingId !== buildingId) {
             drafts.clear();
-            rowErrors.clear();
+            serverErrors.clear();
             editingMeters.clear();
         }
         buildingId = nextBuildingId;
@@ -313,86 +365,100 @@ export function createMeterReadingsView(deps) {
         rows = Array.isArray(payload.data) ? payload.data : [];
         rates = payload.rates ?? { water: null, electricity: null };
         billingMode = String(payload.billingMode ?? "metered");
+        buildingCharges = payload.buildingCharges;
         render();
     }
-    async function save() {
-        const { entries, invalidKeys } = buildSaveEntries(rows, drafts, rates);
-        if (entries.length === 0 || invalidKeys.length > 0 || saving) {
+    async function saveRoom(houseNumber) {
+        const row = rowFor(houseNumber);
+        if (!row || savingRooms.has(houseNumber)) {
             return;
         }
-        saving = true;
-        renderSaveBar();
+        const payload = buildRoomSavePayload(row, drafts.get(houseNumber), rates);
+        if (!payload.hasChanges || payload.errors.length > 0) {
+            return;
+        }
+        savingRooms.add(houseNumber);
+        renderCardState(houseNumber);
         const savingBuildingId = buildingId;
         try {
-            const payload = await deps.requestJson(`/api/landlord/buildings/${encodeURIComponent(savingBuildingId)}/meter-readings`, {
+            const response = await deps.requestJson(`/api/landlord/buildings/${encodeURIComponent(savingBuildingId)}/meter-readings`, {
                 method: "POST",
                 headers: { "content-type": "application/json" },
-                body: JSON.stringify({ entries })
+                body: JSON.stringify({ rooms: payload.rooms, entries: payload.entries })
             });
-            const failures = Array.isArray(payload.failures) ? payload.failures : [];
-            const failedKeys = new Set(failures.map((item) => draftKey(item.utilityType, item.houseNumber)));
-            entries.forEach((entry) => {
-                const key = draftKey(entry.utilityType, entry.houseNumber);
-                if (!failedKeys.has(key)) {
-                    drafts.delete(key);
-                    editingMeters.delete(key);
+            const failures = Array.isArray(response.failures) ? response.failures : [];
+            const failedUtilities = new Set(failures.map((item) => item.utilityType));
+            const remaining = {};
+            const current = drafts.get(houseNumber);
+            for (const utility of METER_UTILITIES) {
+                if (failedUtilities.has(utility) && current?.[utility]) {
+                    remaining[utility] = current[utility];
                 }
-            });
-            rowErrors.clear();
-            failures.forEach((item) => {
-                rowErrors.set(draftKey(item.utilityType, item.houseNumber), item.error);
-            });
-            if (savingBuildingId === buildingId) {
-                rows = Array.isArray(payload.data) ? payload.data : rows;
-                rates = payload.rates ?? rates;
+                else {
+                    editingMeters.delete(`${utility}:${houseNumber}`);
+                }
             }
-            const savedCount = Array.isArray(payload.saved) ? payload.saved.length : 0;
-            const totalKsh = (payload.saved ?? []).reduce((sum, item) => sum + item.amountKsh, 0);
-            const parts = [];
-            if (savedCount > 0) {
-                parts.push(`Saved ${savedCount} reading${savedCount === 1 ? "" : "s"} (${deps.formatCurrency(totalKsh)} billed)`);
+            if (failedUtilities.has("room") && current?.members != null) {
+                remaining.members = current.members;
             }
-            if (payload.meterNumbersUpdated) {
-                parts.push(`updated ${payload.meterNumbersUpdated} meter number${payload.meterNumbersUpdated === 1 ? "" : "s"}`);
+            if (Object.keys(remaining).length > 0) {
+                drafts.set(houseNumber, remaining);
             }
+            else {
+                drafts.delete(houseNumber);
+            }
+            serverErrors.delete(houseNumber);
             if (failures.length > 0) {
-                parts.push(`${failures.length} need${failures.length === 1 ? "s" : ""} attention`);
+                serverErrors.set(houseNumber, failures
+                    .map((item) => item.utilityType === "room"
+                    ? item.error
+                    : `${UTILITY_LABEL[item.utilityType] ?? item.utilityType}: ${item.error}`)
+                    .join(" "));
             }
-            deps.onStatus(parts.join(", ") + ".");
-            if (savedCount > 0 || payload.meterNumbersUpdated) {
-                deps.onSaved?.();
+            if (savingBuildingId === buildingId && Array.isArray(response.data)) {
+                rows = response.data;
+                rates = response.rates ?? rates;
             }
+            const saved = Array.isArray(response.saved) ? response.saved : [];
+            const totalKsh = saved.reduce((sum, item) => sum + item.amountKsh, 0);
+            deps.onStatus(failures.length > 0
+                ? `Room ${houseNumber}: ${failures.length} item${failures.length === 1 ? "" : "s"} need attention.`
+                : saved.length > 0
+                    ? `Saved room ${houseNumber} (${deps.formatCurrency(totalKsh)} billed).`
+                    : `Saved room ${houseNumber}.`);
+            deps.onSaved?.();
         }
         catch (error) {
-            deps.onError(error, "Unable to save meter readings.");
+            deps.onError(error, `Unable to save room ${houseNumber}.`);
         }
         finally {
-            saving = false;
+            savingRooms.delete(houseNumber);
             render();
         }
     }
-    toggleButtons.forEach((button) => {
-        button.addEventListener("click", () => {
-            const next = button.dataset.meterUtility === "electricity" ? "electricity" : "water";
-            if (next !== utility) {
-                utility = next;
-                render();
-            }
-        });
-    });
     listEl?.addEventListener("input", (event) => {
         const input = event.target;
-        if (!(input instanceof HTMLInputElement)) {
+        if (!(input instanceof HTMLInputElement) || !input.dataset.path) {
             return;
         }
-        const key = input.closest("[data-key]")?.dataset.key;
-        const field = input.dataset.field;
-        if (!key || !field) {
+        const isMeterNumber = input.dataset.path.endsWith(".meterNumber");
+        if (!isMeterNumber) {
+            const allowDecimal = input.dataset.path !== "members";
+            let cleaned = input.value.replace(allowDecimal ? /[^0-9.]/g : /[^0-9]/g, "");
+            if (allowDecimal) {
+                const [whole, ...rest] = cleaned.split(".");
+                cleaned = rest.length > 0 ? `${whole}.${rest.join("")}` : whole;
+            }
+            if (cleaned !== input.value) {
+                input.value = cleaned;
+            }
+        }
+        const houseNumber = input.closest("[data-house]")?.dataset.house;
+        if (!houseNumber) {
             return;
         }
-        updateDraft(key, field, input.value);
-        renderPreview(key);
-        renderSaveBar();
+        updateDraft(houseNumber, input.dataset.path, input.value);
+        renderCardState(houseNumber);
     });
     listEl?.addEventListener("keydown", (event) => {
         const input = event.target;
@@ -400,33 +466,41 @@ export function createMeterReadingsView(deps) {
             return;
         }
         event.preventDefault();
-        const inputs = [...(listEl.querySelectorAll("input.mr-input") ?? [])];
+        const card = input.closest("[data-house]");
+        const inputs = [...(card?.querySelectorAll("input.mr-input") ?? [])];
         const next = inputs[inputs.indexOf(input) + 1];
         if (next) {
             next.focus();
         }
         else {
-            saveBtnEl?.focus();
+            card?.querySelector("[data-action='save-room']")?.focus();
         }
     });
     listEl?.addEventListener("click", (event) => {
         const target = event.target;
-        if (!(target instanceof HTMLElement) || target.dataset.action !== "edit-meter") {
+        if (!(target instanceof HTMLElement)) {
             return;
         }
-        const rowEl = target.closest("[data-key]");
-        const key = rowEl?.dataset.key;
-        const row = key ? rowByKey(key) : undefined;
-        const meterEl = rowEl?.querySelector(".mr-meter");
-        if (!key || !row || !meterEl) {
+        const card = target.closest("[data-house]");
+        const houseNumber = card?.dataset.house;
+        if (!card || !houseNumber) {
             return;
         }
-        editingMeters.add(key);
-        meterEl.innerHTML = renderMeterCell(key, row[utility], drafts.get(key));
-        meterEl.querySelector("input")?.focus();
-    });
-    saveBtnEl?.addEventListener("click", () => {
-        void save();
+        if (target.dataset.action === "save-room") {
+            void saveRoom(houseNumber);
+            return;
+        }
+        if (target.dataset.action === "edit-meter") {
+            const utility = target.dataset.utility === "electricity" ? "electricity" : "water";
+            const row = rowFor(houseNumber);
+            const meterEl = target.closest(".mr-meter");
+            if (!row || !meterEl) {
+                return;
+            }
+            editingMeters.add(`${utility}:${houseNumber}`);
+            meterEl.innerHTML = renderMeterNumber(houseNumber, utility, row[utility]);
+            meterEl.querySelector("input")?.focus();
+        }
     });
     return {
         load,

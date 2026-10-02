@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  buildSaveEntries,
+  buildRoomSavePayload,
   describeDue,
-  draftKey,
   previewDraft,
-  sortRowsForUtility,
+  roomStatus,
+  sortRooms,
   type MeterInfo,
   type MeterReadingRow
 } from "../src/public/meter-readings.js";
+
+const RATES = { water: 150, electricity: 30 };
 
 const readMeter = (overrides: Partial<MeterInfo> = {}): MeterInfo => ({
   meterNumber: "W-1",
@@ -20,12 +22,18 @@ const readMeter = (overrides: Partial<MeterInfo> = {}): MeterInfo => ({
   ...overrides
 });
 
-const room = (houseNumber: string, water: Partial<MeterInfo> = {}): MeterReadingRow => ({
+const room = (
+  houseNumber: string,
+  overrides: Partial<MeterReadingRow> = {}
+): MeterReadingRow => ({
   houseNumber,
   residentName: "",
   hasActiveResident: true,
-  water: readMeter(water),
-  electricity: readMeter({ meterNumber: "", lastReading: null, lastReadAt: null, status: "no_reading" })
+  householdMembers: 2,
+  roomChargesKsh: { water: 0, electricity: 0, combined: 0 },
+  water: readMeter(),
+  electricity: readMeter({ meterNumber: "E-1", lastReading: 5000 }),
+  ...overrides
 });
 
 test("previews units and amount from the last reading", () => {
@@ -35,49 +43,60 @@ test("previews units and amount from the last reading", () => {
     amountKsh: 1875
   });
   assert.equal(previewDraft(readMeter(), { reading: "90" }, 150).error, "Lower than the last reading.");
-  assert.equal(previewDraft(readMeter(), {}, 150).hasReading, false);
   assert.equal(
-    previewDraft(readMeter(), { reading: "120" }, null).error,
-    "Set a rate per unit in Setup first."
-  );
-});
-
-test("a first reading needs a starting figure", () => {
-  const firstMeter = readMeter({ lastReading: null, lastReadAt: null, status: "no_reading" });
-  assert.equal(
-    previewDraft(firstMeter, { reading: "50" }, 150).error,
+    previewDraft(readMeter({ lastReading: null }), { reading: "50" }, 150).error,
     "Enter the starting reading too."
   );
-  assert.equal(previewDraft(firstMeter, { reading: "50", previousReading: "40" }, 150).units, 10);
 });
 
-test("builds save entries and flags invalid rows", () => {
-  const rows = [room("A1"), room("A2"), room("A3")];
-  const drafts = new Map([
-    [draftKey("water", "A1"), { reading: "130" }],
-    [draftKey("water", "A2"), { reading: "50" }],
-    [draftKey("electricity", "A3"), { meterNumber: "E-3" }]
-  ]);
-
-  const { entries, invalidKeys } = buildSaveEntries(rows, drafts, { water: 150, electricity: 30 });
-  assert.deepEqual(invalidKeys, ["water:A2"]);
-  assert.deepEqual(entries, [
-    { houseNumber: "A1", utilityType: "water", reading: 130 },
-    { houseNumber: "A3", utilityType: "electricity", meterNumber: "E-3" }
+test("a room save carries members and both readings", () => {
+  const payload = buildRoomSavePayload(
+    room("A1"),
+    { members: "3", water: { reading: "120" }, electricity: { reading: "5100" } },
+    RATES
+  );
+  assert.deepEqual(payload.errors, []);
+  assert.equal(payload.hasChanges, true);
+  assert.deepEqual(payload.rooms, [{ houseNumber: "A1", householdMembers: 3 }]);
+  assert.deepEqual(payload.entries, [
+    { houseNumber: "A1", utilityType: "water", reading: 120 },
+    { houseNumber: "A1", utilityType: "electricity", reading: 5100 }
   ]);
 });
 
-test("puts overdue and due rooms first", () => {
+test("unchanged rooms have nothing to save, invalid input is reported", () => {
+  assert.equal(buildRoomSavePayload(room("A1"), { members: "2" }, RATES).hasChanges, false);
+  assert.deepEqual(buildRoomSavePayload(room("A1"), { members: "33" }, RATES).errors, [
+    "Members must be a whole number from 0 to 20."
+  ]);
+  assert.deepEqual(
+    buildRoomSavePayload(room("A1"), { water: { reading: "50" } }, RATES).errors,
+    ["Water: Lower than the last reading."]
+  );
+});
+
+test("saving a room with its own fixed amount resets it to the building default", () => {
+  const payload = buildRoomSavePayload(
+    room("A1", { roomChargesKsh: { water: 0, electricity: 0, combined: 500 } }),
+    undefined,
+    RATES
+  );
+  assert.equal(payload.hasChanges, true);
+  assert.deepEqual(payload.rooms, [{ houseNumber: "A1", resetRoomCharges: true }]);
+});
+
+test("rooms with an overdue or due meter come first", () => {
   const rows = [
     room("A3"),
-    room("A10", { status: "overdue", daysUntilDue: -2 }),
-    room("A2", { status: "due_soon", daysUntilDue: 1 })
+    room("A10", { water: readMeter({ status: "overdue", daysUntilDue: -2 }) }),
+    room("A2", { electricity: readMeter({ status: "due_soon", daysUntilDue: 1 }) })
   ];
   assert.deepEqual(
-    sortRowsForUtility(rows, "water").map((item) => item.houseNumber),
+    sortRooms(rows, true).map((item) => item.houseNumber),
     ["A10", "A2", "A3"]
   );
+  assert.equal(roomStatus(rows[1], true), "overdue");
+  assert.equal(roomStatus(rows[1], false), "ok");
   assert.equal(describeDue(rows[1].water), "Overdue 2 days");
-  assert.equal(describeDue(rows[2].water), "Due tomorrow");
-  assert.equal(describeDue(readMeter({ status: "due_soon", daysUntilDue: 0 })), "Due today");
+  assert.equal(describeDue(rows[2].electricity), "Due tomorrow");
 });

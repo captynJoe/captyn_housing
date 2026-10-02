@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="/landlord.css?v=20260921a" />
     <script src="/captyn-theme.js?v=20260806a"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=20260806c" />
-    <link rel="stylesheet" href="/landlord-shell.css?v=20261002b" />
+    <link rel="stylesheet" href="/landlord-shell.css?v=20261002d" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -1112,49 +1112,13 @@
           id="utilities-registry-section"
         >
           <div class="panel-head mr-head">
-            <h2>Meter Readings</h2>
-            <div class="mr-toggle" role="group" aria-label="Utility">
-              <button type="button" data-meter-utility="water" aria-pressed="true">Water</button>
-              <button type="button" data-meter-utility="electricity" aria-pressed="false">Electricity</button>
-            </div>
+            <h2>Meters</h2>
           </div>
+          <select id="registry-building-select" class="hidden" aria-hidden="true" tabindex="-1"></select>
           <div id="meter-readings-summary" class="mr-summary"></div>
           <div id="meter-readings-list" class="mr-list"></div>
-          <div class="mr-savebar">
-            <span id="meter-readings-pending" class="mr-pending"></span>
-            <button id="meter-readings-save-btn" type="button" disabled>Save</button>
-          </div>
         </section>
 
-        <details
-          class="panel wide-panel landlord-view hidden secondary-ledger-panel"
-          data-landlord-view-panel="meters"
-          id="utilities-room-charges-section"
-        >
-          <summary>Room Charges</summary>
-          <select id="registry-building-select" class="hidden" aria-hidden="true" tabindex="-1"></select>
-          <div id="registry-charge-summary" class="landlord-generator registry-charge-summary"></div>
-          <div class="table-wrap utility-registry-table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>House</th>
-                  <th>Resident</th>
-                  <th>Members</th>
-                  <th>Water Fixed (KSh)</th>
-                  <th>Electric Fixed (KSh)</th>
-                  <th>Room Utility Amount (KSh)</th>
-                  <th>Charge Setup</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody id="registry-body"></tbody>
-            </table>
-          </div>
-          <div class="action-row">
-            <button id="registry-save-btn" type="button">Save Room Charges</button>
-          </div>
-        </details>
 
         <details
           class="panel wide-panel landlord-view hidden secondary-ledger-panel"
@@ -2070,6 +2034,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=20261002b"></script>
+    <script type="module" src="/landlord.js?v=20261002d"></script>
   </body>
 </html>

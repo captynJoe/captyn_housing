@@ -29,6 +29,8 @@ export type BuildingConfigurationRecord = {
   defaultMonthlyRentKsh: number | null;
   defaultRentDueDay: number | null;
   meterReadingDay: number | null;
+  includedWaterUnits: number | null;
+  includedElectricityUnits: number | null;
   utilityBalanceVisibleDays: number;
   rentGraceDays: number;
   lateRentPenaltyEnabled: boolean;
@@ -67,6 +69,8 @@ export interface UpdateBuildingConfigurationInput {
   defaultMonthlyRentKsh?: number | null;
   defaultRentDueDay?: number | null;
   meterReadingDay?: number | null;
+  includedWaterUnits?: number | null;
+  includedElectricityUnits?: number | null;
   utilityBalanceVisibleDays?: number;
   rentGraceDays?: number;
   lateRentPenaltyEnabled?: boolean;
@@ -103,6 +107,8 @@ const DEFAULT_CONFIG = {
   defaultMonthlyRentKsh: null as number | null,
   defaultRentDueDay: null as number | null,
   meterReadingDay: null as number | null,
+  includedWaterUnits: null as number | null,
+  includedElectricityUnits: null as number | null,
   utilityBalanceVisibleDays: 7,
   rentGraceDays: 0,
   lateRentPenaltyEnabled: false,
@@ -134,6 +140,8 @@ function mapConfig(value: BuildingConfiguration): BuildingConfigurationRecord {
     defaultMonthlyRentKsh: value.defaultMonthlyRentKsh,
     defaultRentDueDay: value.defaultRentDueDay,
     meterReadingDay: value.meterReadingDay,
+    includedWaterUnits: value.includedWaterUnits ?? null,
+    includedElectricityUnits: value.includedElectricityUnits ?? null,
     utilityBalanceVisibleDays: value.utilityBalanceVisibleDays,
     rentGraceDays: value.rentGraceDays,
     lateRentPenaltyEnabled: value.lateRentPenaltyEnabled,
@@ -305,6 +313,12 @@ export class BuildingConfigurationService {
       input.meterReadingDay == null
         ? input.meterReadingDay
         : Math.min(31, Math.max(1, Math.round(Number(input.meterReadingDay) || 1)));
+    const normalizeIncludedUnits = (value: number | null | undefined) =>
+      value == null ? value : Math.min(100_000, Math.max(0, Number(value) || 0));
+    const normalizedIncludedWaterUnits = normalizeIncludedUnits(input.includedWaterUnits);
+    const normalizedIncludedElectricityUnits = normalizeIncludedUnits(
+      input.includedElectricityUnits
+    );
     const normalizedLateRentPenaltyAmountKsh =
       input.lateRentPenaltyAmountKsh == null
         ? input.lateRentPenaltyAmountKsh
@@ -322,6 +336,8 @@ export class BuildingConfigurationService {
         defaultMonthlyRentKsh: normalizedDefaultMonthlyRentKsh,
         defaultRentDueDay: normalizedDefaultRentDueDay,
         meterReadingDay: normalizedMeterReadingDay,
+        includedWaterUnits: normalizedIncludedWaterUnits,
+        includedElectricityUnits: normalizedIncludedElectricityUnits,
         lateRentPenaltyAmountKsh: normalizedLateRentPenaltyAmountKsh,
         updatedByRole: actor?.role ?? null,
         updatedByUserId: actor?.userId ?? null,
@@ -339,6 +355,8 @@ export class BuildingConfigurationService {
         defaultMonthlyRentKsh: normalizedDefaultMonthlyRentKsh,
         defaultRentDueDay: normalizedDefaultRentDueDay,
         meterReadingDay: normalizedMeterReadingDay,
+        includedWaterUnits: normalizedIncludedWaterUnits,
+        includedElectricityUnits: normalizedIncludedElectricityUnits,
         lateRentPenaltyAmountKsh: normalizedLateRentPenaltyAmountKsh,
         updatedByRole: actor?.role,
         updatedByUserId: actor?.userId,

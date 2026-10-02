@@ -11356,6 +11356,8 @@ async function bootstrap() {
             defaultMonthlyRentKsh: parsed.defaultMonthlyRentKsh,
             defaultRentDueDay: parsed.defaultRentDueDay,
             meterReadingDay: parsed.meterReadingDay,
+            includedWaterUnits: parsed.includedWaterUnits,
+            includedElectricityUnits: parsed.includedElectricityUnits,
             utilityBalanceVisibleDays: parsed.utilityBalanceVisibleDays,
             rentGraceDays: parsed.rentGraceDays,
             lateRentPenaltyEnabled: parsed.lateRentPenaltyEnabled,
@@ -17801,11 +17803,7 @@ async function bootstrap() {
       residentName: row.residentName ?? "",
       hasActiveResident: Boolean(row.hasActiveResident),
       householdMembers: Number(row.householdMembers ?? 0),
-      roomChargesKsh: {
-        water: Number(row.waterFixedChargeKsh ?? 0),
-        electricity: Number(row.electricityFixedChargeKsh ?? 0),
-        combined: Number(row.combinedUtilityChargeKsh ?? 0)
-      },
+      flatAmountKsh: Math.max(0, Number(row.combinedUtilityChargeKsh ?? 0)),
       water: describeMeter("water", row.houseNumber, row.waterMeterNumber),
       electricity: describeMeter("electricity", row.houseNumber, row.electricityMeterNumber)
     }));
@@ -17865,6 +17863,10 @@ async function bootstrap() {
           water: configuration?.defaultWaterFixedChargeKsh ?? null,
           electricity: configuration?.defaultElectricityFixedChargeKsh ?? null,
           combined: configuration?.defaultCombinedUtilityChargeKsh ?? null
+        },
+        includedUnits: {
+          water: configuration?.includedWaterUnits ?? null,
+          electricity: configuration?.includedElectricityUnits ?? null
         },
         rates: getMeterReadingRates(building.id),
         remindDaysBefore: METER_READING_REMIND_DAYS_BEFORE,
@@ -17927,18 +17929,30 @@ async function bootstrap() {
           .filter((room) => room.householdMembers != null)
           .map((room) => ({ houseNumber: room.houseNumber, members: room.householdMembers! }))
       );
-      // Fixed amounts are set per building in Setup; saving a room drops its own override.
+      // A room's own flat amount; 0 means it follows the building default from Setup.
       upsertUtilityChargeDefaultsForBuilding(
         building.id,
         roomUpdates
-          .filter((room) => room.resetRoomCharges)
+          .filter((room) => room.flatAmountKsh !== undefined)
           .map((room) => ({
             houseNumber: room.houseNumber,
-            waterFixedChargeKsh: 0,
-            electricityFixedChargeKsh: 0,
-            combinedUtilityChargeKsh: 0
+            combinedUtilityChargeKsh: Math.max(0, Math.round(room.flatAmountKsh ?? 0))
           }))
       );
+
+      const configuration = buildingConfigurationService
+        ? await buildingConfigurationService.getForBuilding(building.id)
+        : null;
+      const billingMode = configuration?.utilityBillingMode ?? "metered";
+      const rates = getMeterReadingRates(building.id);
+      const occupiedHouses =
+        billingMode === "metered" || parsed.entries.length === 0
+          ? new Set<string>()
+          : new Set(
+              (await buildLandlordUtilityRegistryRows(building.id, building.houseNumbers ?? []))
+                .filter((row) => row.hasActiveResident)
+                .map((row) => normalizeHouseNumber(row.houseNumber))
+            );
 
       for (const entry of parsed.entries) {
         const houseNumber = normalizeHouseNumber(entry.houseNumber);
@@ -17966,6 +17980,90 @@ async function bootstrap() {
           const previous = latestByKey.get(`${utilityType}:${houseNumber}`);
           if (!previous && entry.previousReading == null) {
             fail("First reading for this meter needs the starting reading.");
+            continue;
+          }
+
+          if (billingMode !== "metered") {
+            if (billingMode === "disabled") {
+              fail("Utilities are switched off for this building in Setup.");
+              continue;
+            }
+
+            const includedUnits =
+              utilityType === "water"
+                ? configuration?.includedWaterUnits
+                : configuration?.includedElectricityUnits;
+            if (includedUnits == null) {
+              fail(`Set the ${utilityType} units included in the flat amount in Setup first.`);
+              continue;
+            }
+
+            const usageMonth = billingMonthFromDate(now);
+            const billUtilityType = billingMode === "combined_charge" ? "water" : utilityType;
+            if (
+              isRoomBillingHeld({
+                buildingId: building.id,
+                houseNumber,
+                kind: "utility",
+                utilityType: billUtilityType,
+                billingMonth: usageMonth
+              })
+            ) {
+              fail("Utility billing is paused for this room.");
+              continue;
+            }
+
+            // Re-saving within the same month corrects that month's reading.
+            const startReading = previous
+              ? previous.billingMonth === usageMonth
+                ? previous.previousReading
+                : previous.currentReading
+              : Number(entry.previousReading);
+
+            await ensureRecurringUtilityBillsCurrent("meter-reading", {
+              buildingId: building.id,
+              houseNumber,
+              utilityType: billUtilityType
+            });
+            const flatAmountKsh =
+              billingMode === "combined_charge"
+                ? utilityBillingService.resolveCombinedChargeAmount(
+                    building.id,
+                    houseNumber,
+                    usageMonth
+                  )
+                : getUtilityFixedChargeDefaultForHouse(utilityType, building.id, houseNumber);
+
+            const { charge } = utilityBillingService.recordUsageReading({
+              utilityType,
+              billUtilityType,
+              buildingId: building.id,
+              houseNumber,
+              billingMonth: usageMonth,
+              previousReading: startReading,
+              currentReading: entry.reading,
+              includedUnits,
+              ratePerUnitKsh: rates[utilityType] ?? 0,
+              recordedAt: now.toISOString(),
+              createBillIfMissing:
+                occupiedHouses.has(houseNumber) && flatAmountKsh && flatAmountKsh > 0
+                  ? {
+                      fixedChargeKsh: flatAmountKsh,
+                      dueDate,
+                      note:
+                        billingMode === "combined_charge"
+                          ? `Combined utility fee (water+electricity) for ${usageMonth}.`
+                          : undefined
+                    }
+                  : undefined
+            });
+            saved.push({
+              houseNumber,
+              utilityType,
+              billingMonth: usageMonth,
+              unitsConsumed: charge.unitsConsumed,
+              amountKsh: charge.amountKsh
+            });
             continue;
           }
 

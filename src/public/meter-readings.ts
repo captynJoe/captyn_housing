@@ -20,7 +20,7 @@ export interface MeterReadingRow {
   residentName: string;
   hasActiveResident: boolean;
   householdMembers?: number;
-  roomChargesKsh?: { water: number; electricity: number; combined: number };
+  flatAmountKsh?: number;
   water: MeterInfo;
   electricity: MeterInfo;
 }
@@ -33,12 +33,14 @@ export interface MeterDraft {
 
 export interface RoomDraft {
   members?: string;
+  flatAmount?: string;
   water?: MeterDraft;
   electricity?: MeterDraft;
 }
 
 export interface MeterDraftPreview {
   units?: number;
+  extraUnits?: number;
   amountKsh?: number;
   error?: string;
   hasReading: boolean;
@@ -55,7 +57,7 @@ export interface MeterSaveEntry {
 export interface RoomSaveUpdate {
   houseNumber: string;
   householdMembers?: number;
-  resetRoomCharges?: boolean;
+  flatAmountKsh?: number;
 }
 
 export interface RoomSavePayload {
@@ -81,13 +83,6 @@ function parseFigure(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) ? parsed : Number.NaN;
 }
 
-export function hasRoomCharges(row: MeterReadingRow): boolean {
-  const charges = row.roomChargesKsh;
-  return Boolean(
-    charges && (charges.water > 0 || charges.electricity > 0 || charges.combined > 0)
-  );
-}
-
 // Worst status across the meters that are actually in use for this room.
 export function roomStatus(row: MeterReadingRow, metered: boolean): MeterDueStatus {
   if (!metered) {
@@ -109,10 +104,13 @@ export function sortRooms(rows: MeterReadingRow[], metered: boolean): MeterReadi
   });
 }
 
+// includedUnits: undefined on metered buildings (every unit is billed); a number on
+// flat-fee buildings (only units above it are charged); null when it isn't set yet.
 export function previewDraft(
   info: MeterInfo,
   draft: MeterDraft | undefined,
-  rate: number | null
+  rate: number | null,
+  includedUnits?: number | null
 ): MeterDraftPreview {
   const reading = parseFigure(draft?.reading);
   if (reading === undefined) {
@@ -138,6 +136,18 @@ export function previewDraft(
   }
 
   const units = Number((reading - start).toFixed(3));
+  if (includedUnits !== undefined) {
+    if (includedUnits == null) {
+      return { hasReading: true, units, error: "Set the included units in Setup first." };
+    }
+    const extraUnits = Number(Math.max(0, units - includedUnits).toFixed(3));
+    return {
+      hasReading: true,
+      units,
+      extraUnits,
+      amountKsh: Math.round(extraUnits * (rate ?? 0))
+    };
+  }
   if (rate == null) {
     return { hasReading: true, units, error: "Set a rate per unit in Setup first." };
   }
@@ -148,7 +158,8 @@ export function previewDraft(
 export function buildRoomSavePayload(
   row: MeterReadingRow,
   draft: RoomDraft | undefined,
-  rates: Record<MeterUtility, number | null>
+  rates: Record<MeterUtility, number | null>,
+  includedUnits?: Record<MeterUtility, number | null>
 ): RoomSavePayload {
   const errors: string[] = [];
   const entries: MeterSaveEntry[] = [];
@@ -164,6 +175,16 @@ export function buildRoomSavePayload(
     }
   }
 
+  if (draft?.flatAmount !== undefined) {
+    const text = String(draft.flatAmount).trim();
+    const amount = text === "" ? 0 : Number(text);
+    if (!Number.isInteger(amount) || amount < 0 || amount > 200_000) {
+      errors.push("Monthly amount must be a whole number of KSh.");
+    } else if (amount !== Number(row.flatAmountKsh ?? 0)) {
+      room.flatAmountKsh = amount;
+    }
+  }
+
   for (const utility of METER_UTILITIES) {
     const meterDraft = draft?.[utility];
     if (!meterDraft) {
@@ -172,7 +193,12 @@ export function buildRoomSavePayload(
     const info = row[utility];
     const meterNumber = String(meterDraft.meterNumber ?? "").trim();
     const meterChanged = meterNumber !== "" && meterNumber !== info.meterNumber;
-    const preview = previewDraft(info, meterDraft, rates[utility]);
+    const preview = previewDraft(
+      info,
+      meterDraft,
+      rates[utility],
+      includedUnits ? includedUnits[utility] : undefined
+    );
 
     if (preview.hasReading && preview.error) {
       errors.push(`${utility === "water" ? "Water" : "Electricity"}: ${preview.error}`);
@@ -195,17 +221,12 @@ export function buildRoomSavePayload(
     entries.push(entry);
   }
 
-  if (hasRoomCharges(row)) {
-    room.resetRoomCharges = true;
-  }
-
-  const roomChanged = room.householdMembers != null || Boolean(room.resetRoomCharges);
-  const hasEdits = room.householdMembers != null || entries.length > 0;
+  const roomChanged = room.householdMembers != null || room.flatAmountKsh != null;
   return {
     rooms: roomChanged ? [room] : [],
     entries,
     errors,
-    hasChanges: hasEdits || Boolean(room.resetRoomCharges)
+    hasChanges: roomChanged || entries.length > 0
   };
 }
 
@@ -252,6 +273,7 @@ interface MeterReadingsResponse {
   billingMode?: string;
   buildingCharges?: { water: number | null; electricity: number | null; combined: number | null };
   rates?: Record<MeterUtility, number | null>;
+  includedUnits?: Record<MeterUtility, number | null>;
   saved?: Array<{ houseNumber: string; utilityType: MeterUtility; amountKsh: number }>;
   failures?: Array<{ houseNumber: string; utilityType: string; error: string }>;
 }
@@ -280,12 +302,19 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
   let buildingCharges: MeterReadingsResponse["buildingCharges"] = undefined;
   let rows: MeterReadingRow[] = [];
   let rates: Record<MeterUtility, number | null> = { water: null, electricity: null };
+  let includedUnits: Record<MeterUtility, number | null> = { water: null, electricity: null };
   const drafts = new Map<string, RoomDraft>();
   const serverErrors = new Map<string, string>();
   const editingMeters = new Set<string>();
   const savingRooms = new Set<string>();
 
   const isMetered = () => billingMode === "metered";
+  const readsMeters = () => billingMode !== "disabled";
+  const hasFlatAmount = () => billingMode === "combined_charge";
+  // undefined on metered buildings (no allowance); the Setup values otherwise.
+  const allowanceFor = (utility: MeterUtility) =>
+    isMetered() ? undefined : includedUnits[utility];
+  const allowances = () => (isMetered() ? undefined : includedUnits);
   const rowFor = (houseNumber: string) => rows.find((row) => row.houseNumber === houseNumber);
   const cardFor = (houseNumber: string) =>
     listEl?.querySelector<HTMLElement>(`[data-house="${CSS.escape(houseNumber)}"]`) ?? null;
@@ -294,6 +323,8 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
     const draft: RoomDraft = { ...(drafts.get(houseNumber) ?? {}) };
     if (path === "members") {
       draft.members = value;
+    } else if (path === "flatAmount") {
+      draft.flatAmount = value;
     } else {
       const [utility, field] = path.split(".") as [MeterUtility, keyof MeterDraft];
       draft[utility] = { ...(draft[utility] ?? {}), [field]: value };
@@ -315,23 +346,38 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
       if (!previewEl) {
         continue;
       }
-      const preview = previewDraft(row[utility], draft?.[utility], rates[utility]);
+      const preview = previewDraft(
+        row[utility],
+        draft?.[utility],
+        rates[utility],
+        allowanceFor(utility)
+      );
       previewEl.classList.toggle("is-error", Boolean(preview.error));
-      previewEl.textContent = preview.error
-        ? preview.error
-        : preview.hasReading && preview.units != null
-          ? `${formatFigure(preview.units)} units · ${deps.formatCurrency(preview.amountKsh ?? 0)}`
-          : "";
+      let text = "";
+      if (preview.error) {
+        text = preview.error;
+      } else if (preview.hasReading && preview.units != null) {
+        if (preview.extraUnits === undefined) {
+          text = `${formatFigure(preview.units)} units · ${deps.formatCurrency(preview.amountKsh ?? 0)}`;
+        } else if (preview.extraUnits > 0) {
+          text = `${formatFigure(preview.units)} units · ${formatFigure(
+            preview.extraUnits
+          )} extra · +${deps.formatCurrency(preview.amountKsh ?? 0)}`;
+        } else {
+          text = `${formatFigure(preview.units)} units · within allowance`;
+        }
+      }
+      previewEl.textContent = text;
     }
 
-    const payload = buildRoomSavePayload(row, draft, rates);
+    const payload = buildRoomSavePayload(row, draft, rates, allowances());
     const serverError = serverErrors.get(houseNumber);
     const errorEl = card.querySelector<HTMLElement>(".mr-card-error");
     if (errorEl) {
       errorEl.textContent = serverError ?? "";
     }
     const saving = savingRooms.has(houseNumber);
-    const editing = payload.entries.length > 0 || payload.rooms.some((room) => room.householdMembers != null);
+    const editing = payload.hasChanges;
     card.classList.toggle("has-draft", editing && payload.errors.length === 0);
     card.classList.toggle("has-error", payload.errors.length > 0 || Boolean(serverError));
 
@@ -347,7 +393,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
       return;
     }
     const chips: string[] = [];
-    if (isMetered()) {
+    if (readsMeters()) {
       const counts = { overdue: 0, due_soon: 0, no_reading: 0, ok: 0 };
       rows.forEach((row) => {
         counts[roomStatus(row, true)] += 1;
@@ -362,6 +408,8 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
       if (counts.ok > 0) {
         chips.push(`<span class="mr-chip is-ok">${counts.ok} up to date</span>`);
       }
+    }
+    if (isMetered()) {
       for (const utility of METER_UTILITIES) {
         const rate = rates[utility];
         chips.push(
@@ -372,21 +420,34 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
             : `<span class="mr-chip is-due">No ${utility} rate in Setup</span>`
         );
       }
-    } else if (billingMode === "combined_charge") {
-      const combined = buildingCharges?.combined;
-      chips.push(
-        `<span class="mr-chip is-rate">Utilities ${
-          combined != null ? escapeHtml(deps.formatCurrency(combined)) : "not set"
-        } per room · set in Setup</span>`
-      );
-    } else if (billingMode === "fixed_charge") {
-      const parts = METER_UTILITIES.map((utility) => {
-        const amount = buildingCharges?.[utility];
-        return `${UTILITY_LABEL[utility]} ${
-          amount != null ? escapeHtml(deps.formatCurrency(amount)) : "not set"
-        }`;
-      });
-      chips.push(`<span class="mr-chip is-rate">${parts.join(" · ")} per room · set in Setup</span>`);
+    } else if (readsMeters()) {
+      if (billingMode === "combined_charge") {
+        const combined = buildingCharges?.combined;
+        chips.push(
+          `<span class="mr-chip is-rate">Default ${
+            combined != null ? escapeHtml(deps.formatCurrency(combined)) : "not set"
+          } / room</span>`
+        );
+      } else {
+        const parts = METER_UTILITIES.map((utility) => {
+          const amount = buildingCharges?.[utility];
+          return `${UTILITY_LABEL[utility]} ${
+            amount != null ? escapeHtml(deps.formatCurrency(amount)) : "not set"
+          }`;
+        });
+        chips.push(`<span class="mr-chip is-rate">${parts.join(" · ")} / room</span>`);
+      }
+      for (const utility of METER_UTILITIES) {
+        const included = includedUnits[utility];
+        const rate = rates[utility];
+        chips.push(
+          included == null
+            ? `<span class="mr-chip is-due">${UTILITY_LABEL[utility]}: set included units in Setup</span>`
+            : `<span class="mr-chip">${UTILITY_LABEL[utility]} ${escapeHtml(
+                formatFigure(included)
+              )} units included · extra ${escapeHtml(deps.formatCurrency(rate ?? 0))}/unit</span>`
+        );
+      }
     }
     summaryEl.innerHTML = chips.join("");
   }
@@ -453,14 +514,24 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
       return;
     }
 
-    const metered = isMetered();
+    const metered = readsMeters();
     listEl.innerHTML = sortRooms(rows, metered)
       .map((row) => {
         const status = roomStatus(row, metered);
         const draft = drafts.get(row.houseNumber);
         const membersValue = draft?.members ?? String(row.householdMembers ?? 0);
-        const chargesNote = hasRoomCharges(row)
-          ? `<p class="mr-card-note">This room has its own fixed amount. Saving switches it to the building default from Setup.</p>`
+        const defaultAmount = buildingCharges?.combined;
+        const flatValue =
+          draft?.flatAmount ?? (Number(row.flatAmountKsh ?? 0) > 0 ? String(row.flatAmountKsh) : "");
+        const flatField = hasFlatAmount()
+          ? `<label class="mr-flat">
+              Monthly amount (KSh)
+              <input class="mr-input mr-flat-input" data-path="flatAmount" type="text"
+                inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off"
+                placeholder="${defaultAmount != null ? `Default ${escapeHtml(formatFigure(defaultAmount))}` : "Building default"}"
+                aria-label="Monthly utility amount for ${escapeHtml(row.houseNumber)}"
+                value="${escapeHtml(flatValue)}" />
+            </label>`
           : "";
         return `<article class="mr-card is-${status}" data-house="${escapeHtml(row.houseNumber)}">
           <header class="mr-card-head">
@@ -476,8 +547,8 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
                 value="${escapeHtml(membersValue)}" />
             </label>
           </header>
+          ${flatField}
           ${metered ? METER_UTILITIES.map((utility) => renderUtilityBlock(row, utility)).join("") : ""}
-          ${chargesNote}
           <p class="mr-card-error" role="alert"></p>
           <button type="button" class="mr-save" data-action="save-room">Save</button>
         </article>`;
@@ -515,6 +586,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
     );
     rows = Array.isArray(payload.data) ? payload.data : [];
     rates = payload.rates ?? { water: null, electricity: null };
+    includedUnits = payload.includedUnits ?? { water: null, electricity: null };
     billingMode = String(payload.billingMode ?? "metered");
     buildingCharges = payload.buildingCharges;
     render();
@@ -525,7 +597,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
     if (!row || savingRooms.has(houseNumber)) {
       return;
     }
-    const payload = buildRoomSavePayload(row, drafts.get(houseNumber), rates);
+    const payload = buildRoomSavePayload(row, drafts.get(houseNumber), rates, allowances());
     if (!payload.hasChanges || payload.errors.length > 0) {
       return;
     }
@@ -554,8 +626,13 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
           editingMeters.delete(`${utility}:${houseNumber}`);
         }
       }
-      if (failedUtilities.has("room") && current?.members != null) {
-        remaining.members = current.members;
+      if (failedUtilities.has("room")) {
+        if (current?.members != null) {
+          remaining.members = current.members;
+        }
+        if (current?.flatAmount != null) {
+          remaining.flatAmount = current.flatAmount;
+        }
       }
       if (Object.keys(remaining).length > 0) {
         drafts.set(houseNumber, remaining);
@@ -606,8 +683,8 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
     }
     const isMeterNumber = input.dataset.path.endsWith(".meterNumber");
     if (!isMeterNumber) {
-      // Digits only (members: whole numbers; readings: one decimal point).
-      const allowDecimal = input.dataset.path !== "members";
+      // Digits only (members, amounts: whole numbers; readings: one decimal point).
+      const allowDecimal = input.dataset.path !== "members" && input.dataset.path !== "flatAmount";
       let cleaned = input.value.replace(allowDecimal ? /[^0-9.]/g : /[^0-9]/g, "");
       if (allowDecimal) {
         const [whole, ...rest] = cleaned.split(".");

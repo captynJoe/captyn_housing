@@ -30,7 +30,7 @@ const room = (
   residentName: "",
   hasActiveResident: true,
   householdMembers: 2,
-  roomChargesKsh: { water: 0, electricity: 0, combined: 0 },
+  flatAmountKsh: 0,
   water: readMeter(),
   electricity: readMeter({ meterNumber: "E-1", lastReading: 5000 }),
   ...overrides
@@ -75,14 +75,34 @@ test("unchanged rooms have nothing to save, invalid input is reported", () => {
   );
 });
 
-test("saving a room with its own fixed amount resets it to the building default", () => {
-  const payload = buildRoomSavePayload(
-    room("A1", { roomChargesKsh: { water: 0, electricity: 0, combined: 500 } }),
-    undefined,
-    RATES
+test("a room can set its own monthly amount, blank goes back to the default", () => {
+  assert.deepEqual(buildRoomSavePayload(room("A1"), { flatAmount: "800" }, RATES).rooms, [
+    { houseNumber: "A1", flatAmountKsh: 800 }
+  ]);
+  assert.deepEqual(
+    buildRoomSavePayload(room("A1", { flatAmountKsh: 800 }), { flatAmount: "" }, RATES).rooms,
+    [{ houseNumber: "A1", flatAmountKsh: 0 }]
   );
-  assert.equal(payload.hasChanges, true);
-  assert.deepEqual(payload.rooms, [{ houseNumber: "A1", resetRoomCharges: true }]);
+  assert.equal(buildRoomSavePayload(room("A1"), { flatAmount: "" }, RATES).hasChanges, false);
+});
+
+test("flat-fee buildings preview only the units above the allowance", () => {
+  const included = { water: 2.5, electricity: 10 };
+  assert.deepEqual(previewDraft(readMeter(), { reading: "104" }, 150, 2.5), {
+    hasReading: true,
+    units: 4,
+    extraUnits: 1.5,
+    amountKsh: 225
+  });
+  assert.equal(previewDraft(readMeter(), { reading: "102" }, 150, 2.5).amountKsh, 0);
+  assert.equal(
+    previewDraft(readMeter(), { reading: "102" }, 150, null).error,
+    "Set the included units in Setup first."
+  );
+  assert.deepEqual(
+    buildRoomSavePayload(room("A1"), { water: { reading: "104" } }, RATES, included).entries,
+    [{ houseNumber: "A1", utilityType: "water", reading: 104 }]
+  );
 });
 
 test("rooms with an overdue or due meter come first", () => {

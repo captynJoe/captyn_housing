@@ -980,6 +980,8 @@ export const landlordBuildingConfigurationUpdateSchema = z
     defaultMonthlyRentKsh: z.number().int().min(0).max(10_000_000).nullable().optional(),
     defaultRentDueDay: z.number().int().min(1).max(31).nullable().optional(),
     meterReadingDay: z.number().int().min(1).max(31).nullable().optional(),
+    includedWaterUnits: z.number().min(0).max(100_000).nullable().optional(),
+    includedElectricityUnits: z.number().min(0).max(100_000).nullable().optional(),
     utilityBalanceVisibleDays: z.number().int().min(0).max(60).optional(),
     rentGraceDays: z.number().int().min(0).max(31).optional(),
     lateRentPenaltyEnabled: z.boolean().optional(),
@@ -1011,6 +1013,8 @@ export const landlordBuildingConfigurationUpdateSchema = z
       value.defaultMonthlyRentKsh !== undefined ||
       value.defaultRentDueDay !== undefined ||
       value.meterReadingDay !== undefined ||
+      value.includedWaterUnits !== undefined ||
+      value.includedElectricityUnits !== undefined ||
       typeof value.rentGraceDays === "number" ||
       typeof value.lateRentPenaltyEnabled === "boolean" ||
       typeof value.lateRentPenaltyAmountKsh === "number" ||
@@ -1059,7 +1063,7 @@ export const landlordMeterReadingsSaveSchema = z
       z.object({
         houseNumber: nonEmptyString.max(24),
         householdMembers: householdMembersSchema.optional(),
-        resetRoomCharges: z.boolean().optional()
+        flatAmountKsh: z.number().int().min(0).max(200_000).nullable().optional()
       })
     )
     .max(2_000)

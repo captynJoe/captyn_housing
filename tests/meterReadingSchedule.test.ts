@@ -121,3 +121,120 @@ test("a new reading bills the current month, or the next free month", () => {
   });
   assert.equal(service.resolveReadingBillMonth("water", BUILDING_A, "A-1", now), "2026-11");
 });
+
+test("usage above the allowance is charged on top of the flat bill", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+  service.createBill("water", BUILDING_A, "A-1", {
+    billingMonth: "2026-10",
+    fixedChargeKsh: 500,
+    dueDate,
+    note: "Combined utility fee (water+electricity) for 2026-10."
+  });
+
+  const { bill, charge } = service.recordUsageReading({
+    utilityType: "water",
+    billUtilityType: "water",
+    buildingId: BUILDING_A,
+    houseNumber: "A-1",
+    billingMonth: "2026-10",
+    previousReading: 100,
+    currentReading: 104,
+    includedUnits: 2.5,
+    ratePerUnitKsh: 150
+  });
+  assert.equal(charge.extraUnits, 1.5);
+  assert.equal(charge.amountKsh, 225);
+  assert.equal(bill.fixedChargeKsh, 500);
+  assert.equal(bill.amountKsh, 725);
+  assert.equal(bill.balanceKsh, 725);
+
+  // Electricity within its allowance adds nothing; correcting water replaces the line.
+  service.recordUsageReading({
+    utilityType: "electricity",
+    billUtilityType: "water",
+    buildingId: BUILDING_A,
+    houseNumber: "A-1",
+    billingMonth: "2026-10",
+    previousReading: 10,
+    currentReading: 15,
+    includedUnits: 10,
+    ratePerUnitKsh: 30
+  });
+  const corrected = service.recordUsageReading({
+    utilityType: "water",
+    billUtilityType: "water",
+    buildingId: BUILDING_A,
+    houseNumber: "A-1",
+    billingMonth: "2026-10",
+    previousReading: 100,
+    currentReading: 102,
+    includedUnits: 2.5,
+    ratePerUnitKsh: 150
+  });
+  assert.equal(corrected.bill.amountKsh, 500);
+  assert.equal(corrected.bill.usageCharges?.length, 2);
+
+  const readings = service.listLatestMeterReadings(BUILDING_A);
+  assert.deepEqual(
+    readings.map((item) => [item.utilityType, item.currentReading]).sort(),
+    [["electricity", 15], ["water", 102]]
+  );
+});
+
+test("usage charges survive export/import and combined normalisation", () => {
+  const service = new UtilityBillingService();
+  const dueDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+  service.createBill("water", BUILDING_A, "A-1", {
+    billingMonth: "2026-10",
+    fixedChargeKsh: 500,
+    dueDate,
+    note: "Combined utility fee (water+electricity) for 2026-10."
+  });
+  service.recordUsageReading({
+    utilityType: "water",
+    billUtilityType: "water",
+    buildingId: BUILDING_A,
+    houseNumber: "A-1",
+    billingMonth: "2026-10",
+    previousReading: 0,
+    currentReading: 5,
+    includedUnits: 2.5,
+    ratePerUnitKsh: 150
+  });
+
+  const restored = new UtilityBillingService();
+  restored.importState(service.exportState());
+  restored.setCombinedChargeBuildingIds([BUILDING_A]);
+  restored.setCombinedChargeBuildingAmounts([{ buildingId: BUILDING_A, amountKsh: 500 }]);
+  const bill = restored.listBills({ buildingId: BUILDING_A })[0];
+  assert.equal(bill.amountKsh, 875);
+  assert.equal(bill.usageCharges?.[0].amountKsh, 375);
+});
+
+test("next month's flat bill uses the room amount, else the building default", () => {
+  const service = new UtilityBillingService();
+  service.setCombinedChargeBuildingIds([BUILDING_A]);
+  service.setCombinedChargeBuildingAmounts([{ buildingId: BUILDING_A, amountKsh: 500 }]);
+  service.setCombinedChargeRoomAmounts([
+    { buildingId: BUILDING_A, houseNumber: "A-2", amountKsh: 800 }
+  ]);
+  const lastMonthDue = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000);
+  const month = `${lastMonthDue.getUTCFullYear()}-${String(lastMonthDue.getUTCMonth() + 1).padStart(2, "0")}`;
+  for (const house of ["A-1", "A-2"]) {
+    service.createBill("water", BUILDING_A, house, {
+      billingMonth: month,
+      fixedChargeKsh: 350,
+      dueDate: lastMonthDue.toISOString(),
+      note: `Combined utility fee (water+electricity) for ${month}.`
+    });
+  }
+
+  const created = service.backfillRecurringBills({
+    buildingId: BUILDING_A,
+    visibleThroughDate: new Date(Date.now() + 40 * 24 * 60 * 60 * 1000)
+  });
+  const byHouse = new Map(created.map((item) => [item.houseNumber, item.amountKsh]));
+  assert.equal(byHouse.get("A-1"), 500);
+  assert.equal(byHouse.get("A-2"), 800);
+});

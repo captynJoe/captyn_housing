@@ -470,7 +470,13 @@ function toIsoFromDateTimeLocal(value) {
     }
     return date.toISOString();
 }
+function isCombinedUtilitiesFee() {
+    return (state.utilityBills ?? []).some((bill) => String(bill?.note ?? "").trim().startsWith("Combined utility fee"));
+}
 function utilityLabel(utilityType) {
+    if (utilityType === "water" && isCombinedUtilitiesFee()) {
+        return "Utilities";
+    }
     return utilityType === "water" ? "Water" : "Electricity";
 }
 function formatReadingValue(value) {

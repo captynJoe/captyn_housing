@@ -50,7 +50,15 @@ cd "$repo"
 # Compiled output under public/ is rebuilt by the container; it is deterministic, so
 # discarding local copies before pulling loses nothing.
 git checkout -- public/ 2>/dev/null || true
-git pull -q --ff-only origin main
+git fetch -q origin main
+# New compiled files the container already generated would block the pull; they are
+# rebuilt from source anyway, so drop untracked copies the incoming commit adds.
+for added in $(git diff --name-only --diff-filter=A HEAD FETCH_HEAD -- public/); do
+  if [ -f "$added" ] && ! git ls-files --error-unmatch "$added" >/dev/null 2>&1; then
+    rm -f "$added"
+  fi
+done
+git merge -q --ff-only FETCH_HEAD
 [ "$(git rev-parse HEAD)" = "$expected" ] || { echo "VPS2 is at $(git rev-parse HEAD), expected $expected"; exit 1; }
 if ! git diff --quiet HEAD@{1} HEAD -- package.json package-lock.json 2>/dev/null; then
   echo "Dependencies changed: npm ci"

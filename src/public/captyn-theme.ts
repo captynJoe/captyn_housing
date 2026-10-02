@@ -1,11 +1,12 @@
-interface Window {
-  captynTheme: {
+type CaptynThemeWindow = Window & {
+  captynTheme?: {
     current: () => string;
     toggle: () => string;
   };
-}
+};
 
 (function () {
+  const themeWindow = window as CaptynThemeWindow;
   const KEY = "captyn_housing_theme";
 
   function preferred() {
@@ -28,12 +29,12 @@ interface Window {
 
   apply(stored() || preferred());
 
-  window.captynTheme = {
+  const captynTheme = {
     current() {
       return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
     },
     toggle() {
-      const next = window.captynTheme.current() === "dark" ? "light" : "dark";
+      const next = captynTheme.current() === "dark" ? "light" : "dark";
       apply(next);
       try {
         localStorage.setItem(KEY, next);
@@ -41,17 +42,18 @@ interface Window {
       return next;
     }
   };
+  themeWindow.captynTheme = captynTheme;
 
   function wireToggleButtons() {
     document.querySelectorAll<HTMLElement>("[data-theme-toggle]").forEach((btn) => {
       if (btn.dataset.themeWired) return;
       btn.dataset.themeWired = "1";
       const sync = () => {
-        btn.textContent = window.captynTheme.current() === "dark" ? "Light" : "Dark";
+        btn.textContent = captynTheme.current() === "dark" ? "Light" : "Dark";
       };
       sync();
       btn.addEventListener("click", () => {
-        window.captynTheme.toggle();
+        captynTheme.toggle();
         sync();
       });
     });

@@ -1,4 +1,5 @@
 (function () {
+    const themeWindow = window;
     const KEY = "captyn_housing_theme";
     function preferred() {
         return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
@@ -17,12 +18,12 @@
         document.documentElement.setAttribute("data-theme", theme === "dark" ? "dark" : "light");
     }
     apply(stored() || preferred());
-    window.captynTheme = {
+    const captynTheme = {
         current() {
             return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
         },
         toggle() {
-            const next = window.captynTheme.current() === "dark" ? "light" : "dark";
+            const next = captynTheme.current() === "dark" ? "light" : "dark";
             apply(next);
             try {
                 localStorage.setItem(KEY, next);
@@ -31,17 +32,18 @@
             return next;
         }
     };
+    themeWindow.captynTheme = captynTheme;
     function wireToggleButtons() {
         document.querySelectorAll("[data-theme-toggle]").forEach((btn) => {
             if (btn.dataset.themeWired)
                 return;
             btn.dataset.themeWired = "1";
             const sync = () => {
-                btn.textContent = window.captynTheme.current() === "dark" ? "Light" : "Dark";
+                btn.textContent = captynTheme.current() === "dark" ? "Light" : "Dark";
             };
             sync();
             btn.addEventListener("click", () => {
-                window.captynTheme.toggle();
+                captynTheme.toggle();
                 sync();
             });
         });

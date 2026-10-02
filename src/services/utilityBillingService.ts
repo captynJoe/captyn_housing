@@ -1269,6 +1269,80 @@ export class UtilityBillingService {
       .filter((item): item is UtilityReadingSnapshot => Boolean(item));
   }
 
+  listLatestMeterReadings(buildingId: string): UtilityReadingSnapshot[] {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const ownLatest = new Map<string, UtilityBillRecord>();
+    const legacyLatest = new Map<string, UtilityBillRecord>();
+
+    for (const records of this.billsByLedger.values()) {
+      for (const item of records) {
+        if (String(item.meterNumber ?? "").trim() === "NO-METER") {
+          continue;
+        }
+
+        const itemBuildingId = normalizeBuildingId(item.buildingId);
+        const target =
+          itemBuildingId === normalizedBuildingId
+            ? ownLatest
+            : itemBuildingId === UTILITY_LEGACY_BUILDING_ID
+              ? legacyLatest
+              : null;
+        if (!target) {
+          continue;
+        }
+
+        const key = `${item.utilityType}:${item.houseNumber}`;
+        const current = target.get(key);
+        if (!current || item.billingMonth > current.billingMonth) {
+          target.set(key, item);
+        }
+      }
+    }
+
+    for (const [key, item] of legacyLatest) {
+      if (!ownLatest.has(key)) {
+        ownLatest.set(key, item);
+      }
+    }
+
+    return [...ownLatest.values()].map((item) => ({
+      utilityType: item.utilityType,
+      buildingId: normalizedBuildingId,
+      houseNumber: item.houseNumber,
+      billingMonth: item.billingMonth,
+      meterNumber: item.meterNumber,
+      previousReading: item.previousReading,
+      currentReading: item.currentReading,
+      unitsConsumed: item.unitsConsumed,
+      recordedAt: item.createdAt
+    }));
+  }
+
+  // A reading recorded today bills the current month, unless that month (or a
+  // later one) is already billed, in which case it takes the next free month.
+  resolveReadingBillMonth(
+    utilityType: UtilityType,
+    buildingId: string,
+    houseNumber: string,
+    now: Date = new Date()
+  ): string {
+    const records =
+      this.billsByLedger.get(ledgerKey(utilityType, buildingId, houseNumber)) ?? [];
+    const existingMonths = new Set(records.map((item) => item.billingMonth));
+    const currentMonth = billingMonthFromDate(now);
+    const latestMonth = [...existingMonths].sort(monthSortDesc)[0];
+
+    let candidate =
+      latestMonth && latestMonth >= currentMonth
+        ? shiftBillingMonthLabel(latestMonth, 1) ?? currentMonth
+        : currentMonth;
+    for (let guard = 0; existingMonths.has(candidate) && guard < 240; guard += 1) {
+      candidate = shiftBillingMonthLabel(candidate, 1) ?? candidate;
+    }
+
+    return candidate;
+  }
+
   hasHiddenUpcomingBalancesForHouse(
     buildingId: string,
     houseNumber: string,

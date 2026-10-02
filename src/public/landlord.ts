@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { initResponsiveTables } from "./mobile-table.js";
 import { notifyError, notifyStatus } from "./notifications.js";
+import { createMeterReadingsView } from "./meter-readings.js";
 import {
   createUploadedImageGallery,
   renderSelectedImagePreviews,
@@ -123,9 +124,6 @@ const buildingDefaultsBalanceVisibleDaysEl = document.getElementById(
 );
 const buildingDefaultsMonthlyRentEl = document.getElementById("building-defaults-monthly-rent");
 const buildingDefaultsRentDueDayEl = document.getElementById("building-defaults-rent-due-day");
-const buildingDefaultsMeterReadingDayEl = document.getElementById(
-  "building-defaults-meter-reading-day"
-);
 const buildingDefaultsAllowManualRentEl = document.getElementById(
   "building-defaults-allow-manual-rent"
 );
@@ -143,6 +141,20 @@ const metricCardButtons = [...document.querySelectorAll("[data-metric-target]")]
 const landlordNavButtons = [
   ...document.querySelectorAll("[data-landlord-view]")
 ];
+const meterReadingsRootEl = document.getElementById("utilities-registry-section");
+const meterReadingsView = createMeterReadingsView({
+  root: meterReadingsRootEl,
+  requestJson: (url, options) => requestJson(url, options),
+  getBuildingId: () => getFocusedBuildingId() || state.selectedRegistryBuildingId || "",
+  formatCurrency: (value) => formatCurrency(value),
+  onStatus: (message) => setStatus(message),
+  onError: (error, fallback) => handleLandlordError(error, fallback),
+  onSaved: () => {
+    void Promise.all([loadBills(), loadRegistryRows(), loadMeters()]).catch((error) => {
+      handleLandlordError(error, "Unable to refresh utility bills.");
+    });
+  }
+});
 const landlordViewPanels = [
   ...document.querySelectorAll("[data-landlord-view-panel]")
 ];
@@ -366,7 +378,6 @@ const overviewRoomBuildingSelectEl = document.getElementById("overview-room-buil
 const overviewRoomSearchInputEl = document.getElementById("overview-room-search-input");
 const overviewOpenRoomBtnEl = document.getElementById("overview-open-room-btn");
 const overviewDailyHeadingEl = document.getElementById("overview-daily-heading");
-const overviewDailySubtitleEl = document.getElementById("overview-daily-subtitle");
 const overviewDailyCollectedEl = document.getElementById("overview-daily-collected");
 const overviewDailyOutstandingEl = document.getElementById("overview-daily-outstanding");
 const overviewDailyUnpaidEl = document.getElementById("overview-daily-unpaid");
@@ -375,41 +386,9 @@ const overviewDailyRequestsEl = document.getElementById("overview-daily-requests
 const overviewDailyVacantEl = document.getElementById("overview-daily-vacant");
 const dashboardActionButtons = [...document.querySelectorAll("[data-dashboard-action]")];
 const registryBuildingSelectEl = document.getElementById("registry-building-select");
-const registryReadingMonthEl = document.getElementById("registry-reading-month");
-const registryLoadBtnEl = document.getElementById("registry-load-btn");
 const registrySaveBtnEl = document.getElementById("registry-save-btn");
-const openUtilitySheetBtnEl = document.getElementById("open-utility-sheet-btn");
 const registryChargeSummaryEl = document.getElementById("registry-charge-summary");
 const registryBodyEl = document.getElementById("registry-body");
-const utilitySheetBackdropEl = document.getElementById("utility-sheet-backdrop");
-const utilitySheetModalEl = document.getElementById("utility-sheet-modal");
-const closeUtilitySheetBtnEl = document.getElementById("close-utility-sheet-btn");
-const utilitySheetFormEl = document.getElementById("utility-sheet-form");
-const utilitySheetBuildingSelectEl = document.getElementById(
-  "utility-sheet-building-select"
-);
-const utilitySheetBillingMonthEl = document.getElementById(
-  "utility-sheet-billing-month"
-);
-const utilitySheetDueDateEl = document.getElementById("utility-sheet-due-date");
-const utilitySheetWaterRateEl = document.getElementById("utility-sheet-water-rate");
-const utilitySheetElectricRateEl = document.getElementById("utility-sheet-electric-rate");
-const utilitySheetWaterFixedDefaultEl = document.getElementById(
-  "utility-sheet-water-fixed-default"
-);
-const utilitySheetElectricFixedDefaultEl = document.getElementById(
-  "utility-sheet-electric-fixed-default"
-);
-const utilitySheetBuildingCombinedChargeEl = document.getElementById(
-  "utility-sheet-building-combined-charge"
-);
-const utilitySheetCombinedChargeEl = document.getElementById(
-  "utility-sheet-combined-charge"
-);
-const utilitySheetNoteEl = document.getElementById("utility-sheet-note");
-const utilitySheetBodyEl = document.getElementById("utility-sheet-body");
-const utilitySheetSubmitBtnEl = document.getElementById("utility-sheet-submit-btn");
-const utilitySheetReloadBtnEl = document.getElementById("utility-sheet-reload-btn");
 const overviewUtilityPaymentBackdropEl = document.getElementById(
   "overview-utility-payment-backdrop"
 );
@@ -472,36 +451,11 @@ const moveOutSettlementSubmitBtnEl = document.getElementById(
   "move-out-settlement-submit-btn"
 );
 
-const utilityMeterFormEl = document.getElementById("utility-meter-form");
-const utilityMeterTypeEl = document.getElementById("utility-meter-type");
-const utilityMeterHouseEl = document.getElementById("utility-meter-house");
-const utilityMeterNumberEl = document.getElementById("utility-meter-number");
-const metersBodyEl = document.getElementById("meters-body");
-const refreshMetersBtnEl = document.getElementById("refresh-meters");
 
-const utilityBillFormEl = document.getElementById("utility-bill-form");
-const utilityBillTypeEl = document.getElementById("utility-bill-type");
-const utilityBillHouseEl = document.getElementById("utility-bill-house");
-const utilityBillMonthEl = document.getElementById("utility-bill-month");
-const utilityBillAutoMonthEl = document.getElementById("utility-bill-auto-month");
-const utilityBillPreviousReadingEl = document.getElementById(
-  "utility-bill-previous-reading"
-);
-const utilityBillCurrentReadingEl = document.getElementById(
-  "utility-bill-current-reading"
-);
-const utilityBillRateEl = document.getElementById("utility-bill-rate");
-const utilityBillFixedEl = document.getElementById("utility-bill-fixed");
-const utilityBillInputGuidanceEl = document.getElementById(
-  "utility-bill-input-guidance"
-);
-const utilityBillDueDateEl = document.getElementById("utility-bill-due-date");
-const utilityBillNoteEl = document.getElementById("utility-bill-note");
 const utilityRoomSummaryBodyEls = [
   ...document.querySelectorAll("[data-utility-room-summary-body]")
 ];
 const utilityBillsBodyEl = document.getElementById("utility-bills-body");
-const refreshBillsBtnEl = document.getElementById("refresh-bills");
 
 const utilityPaymentFormEl = document.getElementById("utility-payment-form");
 const utilityPaymentTypeEl = document.getElementById("utility-payment-type");
@@ -867,48 +821,6 @@ function getIndexedRoom(index, buildingId, houseNumber) {
   }
 
   return index.get(exactKey) ?? index.get(buildingHouseLookupKey("", houseNumber)) ?? null;
-}
-
-function getLatestUtilityBill(utilityType, buildingId, houseNumber) {
-  const exactKey = utilityBuildingHouseLookupKey(utilityType, buildingId, houseNumber);
-  if (!exactKey) {
-    return null;
-  }
-
-  return (
-    state.latestUtilityBillByKey.get(exactKey) ??
-    state.latestUtilityBillByKey.get(
-      utilityBuildingHouseLookupKey(utilityType, "", houseNumber)
-    ) ??
-    null
-  );
-}
-
-function getUtilityBillForMonth(utilityType, buildingId, houseNumber, billingMonth) {
-  const exactKey = utilityBuildingHouseMonthLookupKey(
-    utilityType,
-    buildingId,
-    houseNumber,
-    billingMonth
-  );
-  if (!exactKey) {
-    return null;
-  }
-
-  const legacyKey = utilityBuildingHouseMonthLookupKey(
-    utilityType,
-    "",
-    houseNumber,
-    billingMonth
-  );
-
-  return (
-    state.registryReadingBillByKey.get(exactKey) ??
-    state.registryReadingBillByKey.get(legacyKey) ??
-    state.utilityBillByMonthKey.get(exactKey) ??
-    state.utilityBillByMonthKey.get(legacyKey) ??
-    null
-  );
 }
 
 function setStatus(message) {
@@ -1491,7 +1403,8 @@ function updateLandlordBranding() {
   applyDocumentBranding(portalTitle, shellBrand);
 }
 
-function setActiveLandlordView(nextView) {
+function setActiveLandlordView(nextView, options = {}) {
+  const previousView = state.activeLandlordView;
   const requestedView = String(nextView ?? "").trim();
   const normalizedView =
     requestedView === "residents"
@@ -1532,6 +1445,22 @@ function setActiveLandlordView(nextView) {
     }
     panel.classList.toggle("hidden", panel.dataset.landlordViewPanel !== targetView);
   });
+
+  document.body.dataset.landlordView = targetView;
+  const activeNavButton = landlordNavButtons.find((button) => button.classList.contains("active"));
+  const navStrip = activeNavButton?.parentElement;
+  if (activeNavButton instanceof HTMLElement && navStrip && navStrip.scrollWidth > navStrip.clientWidth) {
+    navStrip.scrollTo({
+      left: activeNavButton.offsetLeft - (navStrip.clientWidth - activeNavButton.offsetWidth) / 2,
+      behavior: "smooth"
+    });
+  }
+
+  if (targetView === "meters" && (previousView !== "meters" || options.forceLoad) && !options.skipLoad) {
+    void loadMetersView().catch((error) => {
+      handleLandlordError(error, "Unable to load meters.");
+    });
+  }
 }
 
 function scrollToLandlordSection(sectionId) {
@@ -1838,26 +1767,6 @@ function closeDirectTenantDrawer() {
 function setDirectTenantSubmitting(isSubmitting) {
   if (directTenantSubmitBtnEl instanceof HTMLButtonElement) {
     directTenantSubmitBtnEl.disabled = Boolean(isSubmitting);
-  }
-}
-
-function closeUtilitySheetModal() {
-  if (utilitySheetModalEl instanceof HTMLElement) {
-    utilitySheetModalEl.classList.add("hidden");
-  }
-
-  if (utilitySheetBackdropEl instanceof HTMLElement) {
-    utilitySheetBackdropEl.classList.add("hidden");
-  }
-}
-
-function showUtilitySheetModal() {
-  if (utilitySheetModalEl instanceof HTMLElement) {
-    utilitySheetModalEl.classList.remove("hidden");
-  }
-
-  if (utilitySheetBackdropEl instanceof HTMLElement) {
-    utilitySheetBackdropEl.classList.remove("hidden");
   }
 }
 
@@ -4181,15 +4090,6 @@ function numberToInputString(value) {
   return String(numeric);
 }
 
-function numericValueFromString(value) {
-  const raw = String(value ?? "").trim();
-  if (!raw) {
-    return undefined;
-  }
-  const numeric = Number(raw);
-  return Number.isFinite(numeric) ? numeric : undefined;
-}
-
 function normalizeUtilityRateDefaults(rateDefaults, fallbackBuildingId = "") {
   const buildingId = String(rateDefaults?.buildingId || fallbackBuildingId || "").trim();
   if (!rateDefaults && !buildingId) {
@@ -4234,113 +4134,6 @@ function setUtilityPricingState(buildingConfiguration, rateDefaults, fallbackBui
     normalizeUtilityRateDefaults(rateDefaults, normalizedBuildingId);
 }
 
-function getUtilityRateDefault(utilityType, buildingId) {
-  const defaults = state.utilityRateDefaults;
-  if (!defaults) {
-    return utilityType === "water" ? DEFAULT_WATER_RATE_PER_UNIT_KSH : undefined;
-  }
-
-  const selectedBuildingId = String(buildingId ?? "").trim();
-  const defaultsBuildingId = String(defaults.buildingId ?? "").trim();
-  if (selectedBuildingId && defaultsBuildingId && selectedBuildingId !== defaultsBuildingId) {
-    return utilityType === "water" ? DEFAULT_WATER_RATE_PER_UNIT_KSH : undefined;
-  }
-
-  const candidate =
-    utilityType === "water"
-      ? defaults.waterRatePerUnitKsh
-      : defaults.electricityRatePerUnitKsh;
-  if (Number.isFinite(Number(candidate))) {
-    return Number(candidate);
-  }
-
-  return utilityType === "water" ? DEFAULT_WATER_RATE_PER_UNIT_KSH : undefined;
-}
-
-function syncUtilitySheetRateDefaults() {
-  if (!(utilitySheetWaterRateEl instanceof HTMLInputElement)) {
-    return;
-  }
-  if (!(utilitySheetElectricRateEl instanceof HTMLInputElement)) {
-    return;
-  }
-
-  const defaults = state.utilityRateDefaults;
-  const waterValue = numberToInputString(
-    defaults?.waterRatePerUnitKsh ?? DEFAULT_WATER_RATE_PER_UNIT_KSH
-  );
-  const electricityValue = numberToInputString(defaults?.electricityRatePerUnitKsh);
-
-  utilitySheetWaterRateEl.value = waterValue;
-  utilitySheetElectricRateEl.value = electricityValue;
-}
-
-function syncUtilitySheetBuildingFixedDefaults() {
-  if (!(utilitySheetWaterFixedDefaultEl instanceof HTMLInputElement)) {
-    return;
-  }
-  if (!(utilitySheetElectricFixedDefaultEl instanceof HTMLInputElement)) {
-    return;
-  }
-
-  utilitySheetWaterFixedDefaultEl.value = numberToInputString(
-    state.utilitySheetBuildingConfiguration?.defaultWaterFixedChargeKsh
-  );
-  utilitySheetElectricFixedDefaultEl.value = numberToInputString(
-    state.utilitySheetBuildingConfiguration?.defaultElectricityFixedChargeKsh
-  );
-}
-
-function syncUtilitySheetCombinedCharge() {
-  if (!(utilitySheetCombinedChargeEl instanceof HTMLInputElement)) {
-    return;
-  }
-
-  utilitySheetCombinedChargeEl.value = numberToInputString(
-    state.utilitySheetMonthlyCombinedCharge?.amountKsh
-  );
-}
-
-function syncUtilitySheetBuildingCombinedCharge() {
-  if (!(utilitySheetBuildingCombinedChargeEl instanceof HTMLInputElement)) {
-    return;
-  }
-
-  utilitySheetBuildingCombinedChargeEl.value = numberToInputString(
-    state.utilitySheetBuildingConfiguration?.defaultCombinedUtilityChargeKsh
-  );
-}
-
-async function loadUtilitySheetBuildingConfiguration() {
-  const buildingId = String(
-    utilitySheetBuildingSelectEl?.value || state.selectedRegistryBuildingId || ""
-  ).trim();
-
-  setUtilityPricingState(null, null, buildingId);
-  syncUtilitySheetRateDefaults();
-  syncUtilitySheetBuildingFixedDefaults();
-  syncUtilitySheetBuildingCombinedCharge();
-
-  if (!buildingId) {
-    return;
-  }
-
-  const payload = await requestJson(
-    `/api/landlord/buildings/${encodeURIComponent(buildingId)}/configuration`
-  );
-  setUtilityPricingState(payload.data ?? null, null, buildingId);
-  syncUtilitySheetRateDefaults();
-  syncUtilitySheetBuildingFixedDefaults();
-  syncUtilitySheetBuildingCombinedCharge();
-
-  if (
-    utilitySheetModalEl instanceof HTMLElement &&
-    !utilitySheetModalEl.classList.contains("hidden")
-  ) {
-    renderUtilitySheetRows(state.registryRows);
-  }
-}
-
 function getBuildingUtilityFixedChargeDefault(utilityType, buildingId) {
   const normalizedBuildingId = String(buildingId ?? "").trim();
   const configuration = state.utilitySheetBuildingConfiguration;
@@ -4373,14 +4166,6 @@ function getRoomUtilityFixedChargeDefault(utilityType, buildingId, houseNumber) 
   return getBuildingUtilityFixedChargeDefault(utilityType, buildingId);
 }
 
-function utilityPricingNumbersEqual(left, right) {
-  if (left == null || right == null) {
-    return left == null && right == null;
-  }
-
-  return Math.abs(Number(left) - Number(right)) < 0.000001;
-}
-
 function getLatestAvailableUtilityBillingMonth(buildingId) {
   const normalizedBuildingId = String(buildingId ?? "").trim();
   let latestMonth = "";
@@ -4401,11 +4186,6 @@ function getLatestAvailableUtilityBillingMonth(buildingId) {
 }
 
 function getSelectedRegistryReadingMonth() {
-  const inputMonth = toBillingMonth(registryReadingMonthEl?.value);
-  if (inputMonth) {
-    return inputMonth;
-  }
-
   const stateMonth = toBillingMonth(state.registryReadingMonth);
   if (stateMonth) {
     return stateMonth;
@@ -4418,12 +4198,7 @@ function getSelectedRegistryReadingMonth() {
 }
 
 function syncRegistryReadingMonthInput() {
-  const billingMonth = getSelectedRegistryReadingMonth();
-  state.registryReadingMonth = billingMonth;
-
-  if (registryReadingMonthEl instanceof HTMLInputElement) {
-    registryReadingMonthEl.value = toMonthInputValue(billingMonth);
-  }
+  state.registryReadingMonth = getSelectedRegistryReadingMonth();
 }
 
 function getRegistryBuildingConfiguration(buildingId) {
@@ -4687,86 +4462,6 @@ function renderRegistryChargeSummary(rows) {
   `;
 }
 
-function formatRegistryReadingMarkup(item, billingMonth) {
-  const emptyDetail = billingMonth ? `${billingMonth} unread` : "No reading";
-  if (!item) {
-    return `
-      <div class="registry-reading-cell is-empty">
-        <strong>-</strong>
-        <small>${escapeHtml(emptyDetail)}</small>
-      </div>
-    `;
-  }
-
-  const previousReading = Number(item.previousReading);
-  const currentReading = Number(item.currentReading);
-  const hasPreviousReading = Number.isFinite(previousReading) && previousReading > 0;
-  const hasCurrentReading = Number.isFinite(currentReading) && currentReading > 0;
-  const note = String(item.note ?? "").trim();
-  const noteLower = note.toLowerCase();
-  const isRestoredBaseline = noteLower.includes("restored");
-
-  if (!hasPreviousReading && !hasCurrentReading) {
-    return `
-      <div class="registry-reading-cell is-empty">
-        <strong>-</strong>
-        <small>${escapeHtml(
-          utilityAmount(item.amountKsh) > 0 ? "Combined charge" : "No reading"
-        )}</small>
-      </div>
-    `;
-  }
-
-  const resolvedReading = hasCurrentReading ? currentReading : previousReading;
-  let detail = "Saved";
-  if (
-    hasPreviousReading &&
-    hasCurrentReading &&
-    !utilityPricingNumbersEqual(previousReading, currentReading)
-  ) {
-    detail = `${numberToInputString(previousReading)} -> ${numberToInputString(
-      currentReading
-    )}`;
-  } else if (isRestoredBaseline) {
-    detail = "Restored baseline";
-  } else if (noteLower.includes("baseline")) {
-    detail = "Baseline";
-  } else if (hasCurrentReading || hasPreviousReading) {
-    detail = "Recorded";
-  }
-
-  return `
-    <div class="registry-reading-cell${isRestoredBaseline ? " is-restored" : ""}" title="${escapeHtml(
-      note || `${billingMonth || "Selected month"} reading`
-    )}">
-      <strong>${escapeHtml(numberToInputString(resolvedReading))}</strong>
-      <small>${escapeHtml(detail)}</small>
-    </div>
-  `;
-}
-
-async function loadUtilitySheetMonthlyCombinedCharge() {
-  const buildingId = String(
-    utilitySheetBuildingSelectEl?.value || state.selectedRegistryBuildingId || ""
-  ).trim();
-  const billingMonth = toBillingMonth(utilitySheetBillingMonthEl?.value);
-
-  state.utilitySheetMonthlyCombinedCharge = null;
-  syncUtilitySheetCombinedCharge();
-
-  if (!buildingId || !billingMonth) {
-    return;
-  }
-
-  const payload = await requestJson(
-    `/api/landlord/buildings/${encodeURIComponent(buildingId)}/monthly-combined-utility-charge?billingMonth=${encodeURIComponent(
-      billingMonth
-    )}`
-  );
-  state.utilitySheetMonthlyCombinedCharge = payload.data ?? null;
-  syncUtilitySheetCombinedCharge();
-}
-
 async function loadRegistryMonthlyCombinedCharge() {
   const buildingId = getSelectedUtilityBuildingId();
   const billingMonth = getSelectedRegistryReadingMonth();
@@ -4785,707 +4480,16 @@ async function loadRegistryMonthlyCombinedCharge() {
   state.registryMonthlyCombinedCharge = payload.data ?? null;
 }
 
-function meterNumberForHouse(utilityType, buildingId, houseNumber, fallbackValue) {
-  const configured = findConfiguredMeter(utilityType, buildingId, houseNumber);
-  const configuredMeter = String(configured?.meterNumber ?? "").trim();
-  if (configuredMeter) {
-    return configuredMeter;
-  }
-
-  return String(fallbackValue ?? "").trim();
-}
-
-function syncUtilitySheetBuildingOptions() {
-  if (!(utilitySheetBuildingSelectEl instanceof HTMLSelectElement)) {
-    return;
-  }
-
-  utilitySheetBuildingSelectEl.replaceChildren();
-  if (!Array.isArray(state.buildings) || state.buildings.length === 0) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "No buildings";
-    utilitySheetBuildingSelectEl.append(option);
-    utilitySheetBuildingSelectEl.disabled = true;
-    return;
-  }
-
-  utilitySheetBuildingSelectEl.disabled = false;
-  state.buildings.forEach((building) => {
-    const option = document.createElement("option");
-    option.value = building.id;
-    option.textContent = getBuildingDisplayName(building);
-    if (building.id === state.selectedRegistryBuildingId) {
-      option.selected = true;
-    }
-    utilitySheetBuildingSelectEl.append(option);
-  });
-}
-
-function renderUtilitySheetRows(rows) {
-  if (!(utilitySheetBodyEl instanceof HTMLElement)) {
-    return;
-  }
-
-  utilitySheetBodyEl.replaceChildren();
-  if (!Array.isArray(rows) || rows.length === 0) {
-    const row = document.createElement("tr");
-    row.innerHTML =
-      '<td colspan="9" class="table-cell-full">No houses found for this building.</td>';
-    utilitySheetBodyEl.append(row);
-    return;
-  }
-
-  const buildingId = getSelectedUtilityBuildingId();
-  const isCombinedChargeBuilding =
-    String(state.utilitySheetBuildingConfiguration?.buildingId ?? "").trim() === buildingId &&
-    String(state.utilitySheetBuildingConfiguration?.utilityBillingMode ?? "").trim() ===
-      "combined_charge";
-  [...rows].sort((a, b) => compareHouseNumber(a.houseNumber, b.houseNumber)).forEach((item) => {
-    const houseNumber = normalizeHouse(item.houseNumber);
-    const waterBill = getLatestUtilityBill("water", buildingId, houseNumber);
-    const electricityBill = getLatestUtilityBill("electricity", buildingId, houseNumber);
-    const waterPrev =
-      waterBill && Number.isFinite(Number(waterBill.currentReading))
-        ? Number(waterBill.currentReading)
-        : undefined;
-    const electricityPrev =
-      electricityBill && Number.isFinite(Number(electricityBill.currentReading))
-        ? Number(electricityBill.currentReading)
-        : undefined;
-
-    const waterMeterValue = meterNumberForHouse(
-      "water",
-      buildingId,
-      houseNumber,
-      item.waterMeterNumber
-    );
-    const electricityMeterValue = meterNumberForHouse(
-      "electricity",
-      buildingId,
-      houseNumber,
-      item.electricityMeterNumber
-    );
-    const configuredWaterMeter = findConfiguredMeter("water", buildingId, houseNumber);
-    const configuredElectricityMeter = findConfiguredMeter(
-      "electricity",
-      buildingId,
-      houseNumber
-    );
-    const transferredWaterReading =
-      isCombinedChargeBuilding && !hasUsableMeterNumber(configuredWaterMeter?.meterNumber)
-        ? numericValueFromString(item.waterMeterNumber)
-        : undefined;
-    const transferredElectricityReading =
-      isCombinedChargeBuilding &&
-      !hasUsableMeterNumber(configuredElectricityMeter?.meterNumber)
-        ? numericValueFromString(item.electricityMeterNumber)
-        : undefined;
-    const waterMeterNumber =
-      transferredWaterReading != null ? "" : normalizeUtilityMeterNumber(waterMeterValue);
-    const electricityMeterNumber =
-      transferredElectricityReading != null
-        ? ""
-        : normalizeUtilityMeterNumber(electricityMeterValue);
-    const hasBothMeters =
-      hasUsableMeterNumber(waterMeterNumber) && hasUsableMeterNumber(electricityMeterNumber);
-    const roomWaterFixedCharge =
-      Number.isFinite(Number(item.waterFixedChargeKsh)) && Number(item.waterFixedChargeKsh) > 0
-        ? Number(item.waterFixedChargeKsh)
-        : undefined;
-    const roomElectricityFixedCharge =
-      Number.isFinite(Number(item.electricityFixedChargeKsh)) &&
-      Number(item.electricityFixedChargeKsh) > 0
-        ? Number(item.electricityFixedChargeKsh)
-        : undefined;
-    const buildingWaterFixedCharge = getBuildingUtilityFixedChargeDefault(
-      "water",
-      buildingId
-    );
-    const buildingElectricityFixedCharge = getBuildingUtilityFixedChargeDefault(
-      "electricity",
-      buildingId
-    );
-    const latestWaterFixedCharge =
-      Number.isFinite(Number(waterBill?.fixedChargeKsh)) && Number(waterBill?.fixedChargeKsh) > 0
-        ? Number(waterBill?.fixedChargeKsh)
-        : undefined;
-    const latestElectricityFixedCharge =
-      Number.isFinite(Number(electricityBill?.fixedChargeKsh)) &&
-      Number(electricityBill?.fixedChargeKsh) > 0
-        ? Number(electricityBill?.fixedChargeKsh)
-        : undefined;
-    const resolvedWaterFixedDefault = hasBothMeters
-      ? 0
-      : roomWaterFixedCharge ??
-        buildingWaterFixedCharge ??
-        latestWaterFixedCharge;
-    const resolvedElectricityFixedDefault = hasBothMeters
-      ? 0
-      : roomElectricityFixedCharge ??
-        buildingElectricityFixedCharge ??
-        latestElectricityFixedCharge;
-    const autoWaterFixedCharge =
-      roomWaterFixedCharge != null ? undefined : resolvedWaterFixedDefault;
-    const autoElectricityFixedCharge =
-      roomElectricityFixedCharge != null ? undefined : resolvedElectricityFixedDefault;
-
-    const row = document.createElement("tr");
-    row.dataset.houseNumber = houseNumber;
-    row.dataset.householdMembers = String(Number(item.householdMembers ?? 0));
-    row.dataset.hasActiveResident = item.hasActiveResident ? "true" : "false";
-    row.dataset.hasBothMeters = hasBothMeters ? "true" : "false";
-    row.dataset.roomWaterFixedCharge = numberToInputString(roomWaterFixedCharge);
-    row.dataset.roomElectricityFixedCharge = numberToInputString(roomElectricityFixedCharge);
-    row.dataset.autoWaterFixedCharge = numberToInputString(autoWaterFixedCharge);
-    row.dataset.autoElectricityFixedCharge = numberToInputString(autoElectricityFixedCharge);
-    row.innerHTML = `
-      <td data-label="House"><strong>${escapeHtml(houseNumber)}</strong></td>
-      <td data-label="Water Meter"><input class="registry-table-input utility-sheet-input" data-field="waterMeterNumber" type="text" maxlength="80" placeholder="WTR-0001" value="${escapeHtml(waterMeterNumber)}" /></td>
-      <td data-label="Water Prev"><input class="registry-table-input utility-sheet-input" data-field="waterPreviousReading" type="number" min="0" step="0.001" placeholder="auto" value="${escapeHtml(numberToInputString(waterPrev))}" /></td>
-      <td data-label="Water Current"><input class="registry-table-input utility-sheet-input" data-field="waterCurrentReading" type="number" min="0" step="0.001" placeholder="e.g. 358.5" value="${escapeHtml(numberToInputString(transferredWaterReading))}" /></td>
-      <td data-label="Water Fixed"><input class="registry-table-input utility-sheet-input" data-field="waterFixedChargeKsh" type="number" min="0" step="0.01" value="${escapeHtml(numberToInputString(resolvedWaterFixedDefault))}" /></td>
-      <td data-label="Electric Meter"><input class="registry-table-input utility-sheet-input" data-field="electricityMeterNumber" type="text" maxlength="80" placeholder="ELEC-0001" value="${escapeHtml(electricityMeterNumber)}" /></td>
-      <td data-label="Electric Prev"><input class="registry-table-input utility-sheet-input" data-field="electricityPreviousReading" type="number" min="0" step="0.001" placeholder="auto" value="${escapeHtml(numberToInputString(electricityPrev))}" /></td>
-      <td data-label="Electric Current"><input class="registry-table-input utility-sheet-input" data-field="electricityCurrentReading" type="number" min="0" step="0.001" placeholder="e.g. 911.2" value="${escapeHtml(numberToInputString(transferredElectricityReading))}" /></td>
-      <td data-label="Electric Fixed"><input class="registry-table-input utility-sheet-input" data-field="electricityFixedChargeKsh" type="number" min="0" step="0.01" value="${escapeHtml(numberToInputString(resolvedElectricityFixedDefault))}" /></td>
-    `;
-    utilitySheetBodyEl.append(row);
-  });
-}
-
-function buildUtilitySheetRegistryPayload() {
-  if (!(utilitySheetBodyEl instanceof HTMLElement)) {
-    return [];
-  }
-
-  const rows = [];
-  const trList = utilitySheetBodyEl.querySelectorAll("tr[data-house-number]");
-  trList.forEach((tr) => {
-    const houseNumber = normalizeHouse(tr.dataset.houseNumber);
-    const householdMembers = Number(tr.dataset.householdMembers ?? 0);
-    const waterInput = tr.querySelector('input[data-field="waterMeterNumber"]');
-    const electricityInput = tr.querySelector(
-      'input[data-field="electricityMeterNumber"]'
-    );
-    const waterFixedInput = tr.querySelector(
-      'input[data-field="waterFixedChargeKsh"]'
-    );
-    const electricityFixedInput = tr.querySelector(
-      'input[data-field="electricityFixedChargeKsh"]'
-    );
-
-    if (
-      !(waterInput instanceof HTMLInputElement) ||
-      !(electricityInput instanceof HTMLInputElement) ||
-      !(waterFixedInput instanceof HTMLInputElement) ||
-      !(electricityFixedInput instanceof HTMLInputElement)
-    ) {
-      return;
-    }
-
-    const waterFixedChargeInput = toOptionalNumber(waterFixedInput.value);
-    const electricityFixedChargeInput = toOptionalNumber(electricityFixedInput.value);
-    const roomWaterFixedCharge = numericValueFromString(tr.dataset.roomWaterFixedCharge);
-    const roomElectricityFixedCharge = numericValueFromString(
-      tr.dataset.roomElectricityFixedCharge
-    );
-    const autoWaterFixedCharge = numericValueFromString(tr.dataset.autoWaterFixedCharge);
-    const autoElectricityFixedCharge = numericValueFromString(
-      tr.dataset.autoElectricityFixedCharge
-    );
-    const waterFixedChargeKsh =
-      waterFixedChargeInput == null
-        ? 0
-        : roomWaterFixedCharge != null && roomWaterFixedCharge > 0
-          ? waterFixedChargeInput
-          : autoWaterFixedCharge != null &&
-              utilityPricingNumbersEqual(waterFixedChargeInput, autoWaterFixedCharge)
-            ? 0
-            : waterFixedChargeInput;
-    const electricityFixedChargeKsh =
-      electricityFixedChargeInput == null
-        ? 0
-        : roomElectricityFixedCharge != null && roomElectricityFixedCharge > 0
-          ? electricityFixedChargeInput
-          : autoElectricityFixedCharge != null &&
-              utilityPricingNumbersEqual(
-                electricityFixedChargeInput,
-                autoElectricityFixedCharge
-              )
-            ? 0
-            : electricityFixedChargeInput;
-
-    rows.push({
-      houseNumber,
-      householdMembers: Number.isInteger(householdMembers) ? householdMembers : 0,
-      waterMeterNumber: normalizeUtilityMeterNumber(waterInput.value) || undefined,
-      electricityMeterNumber:
-        normalizeUtilityMeterNumber(electricityInput.value) || undefined,
-      waterFixedChargeKsh,
-      electricityFixedChargeKsh
-    });
-  });
-  return rows;
-}
-
-function buildUtilitySheetAuditRows() {
-  if (!(utilitySheetBodyEl instanceof HTMLElement)) {
-    return [];
-  }
-
-  const rows = [];
-  const trList = utilitySheetBodyEl.querySelectorAll("tr[data-house-number]");
-  trList.forEach((tr) => {
-    const houseNumber = normalizeHouse(tr.dataset.houseNumber);
-    if (!houseNumber) {
-      return;
-    }
-
-    const householdMembers = Number(tr.dataset.householdMembers ?? 0);
-    const waterMeterInput = tr.querySelector('input[data-field="waterMeterNumber"]');
-    const waterPreviousInput = tr.querySelector(
-      'input[data-field="waterPreviousReading"]'
-    );
-    const waterCurrentInput = tr.querySelector(
-      'input[data-field="waterCurrentReading"]'
-    );
-    const waterFixedInput = tr.querySelector(
-      'input[data-field="waterFixedChargeKsh"]'
-    );
-    const electricityMeterInput = tr.querySelector(
-      'input[data-field="electricityMeterNumber"]'
-    );
-    const electricityPreviousInput = tr.querySelector(
-      'input[data-field="electricityPreviousReading"]'
-    );
-    const electricityCurrentInput = tr.querySelector(
-      'input[data-field="electricityCurrentReading"]'
-    );
-    const electricityFixedInput = tr.querySelector(
-      'input[data-field="electricityFixedChargeKsh"]'
-    );
-
-    rows.push({
-      houseNumber,
-      householdMembers: Number.isInteger(householdMembers) ? householdMembers : 0,
-      hasActiveResident: tr.dataset.hasActiveResident === "true",
-      waterMeterNumber:
-        waterMeterInput instanceof HTMLInputElement
-          ? waterMeterInput.value.trim() || undefined
-          : undefined,
-      waterPreviousReading:
-        waterPreviousInput instanceof HTMLInputElement
-          ? toOptionalNumber(waterPreviousInput.value)
-          : undefined,
-      waterCurrentReading:
-        waterCurrentInput instanceof HTMLInputElement
-          ? toOptionalNumber(waterCurrentInput.value)
-          : undefined,
-      waterFixedChargeKsh:
-        waterFixedInput instanceof HTMLInputElement
-          ? toOptionalNumber(waterFixedInput.value)
-          : undefined,
-      electricityMeterNumber:
-        electricityMeterInput instanceof HTMLInputElement
-          ? electricityMeterInput.value.trim() || undefined
-          : undefined,
-      electricityPreviousReading:
-        electricityPreviousInput instanceof HTMLInputElement
-          ? toOptionalNumber(electricityPreviousInput.value)
-          : undefined,
-      electricityCurrentReading:
-        electricityCurrentInput instanceof HTMLInputElement
-          ? toOptionalNumber(electricityCurrentInput.value)
-          : undefined,
-      electricityFixedChargeKsh:
-        electricityFixedInput instanceof HTMLInputElement
-          ? toOptionalNumber(electricityFixedInput.value)
-          : undefined
-    });
-  });
-
-  return rows;
-}
-
-function csvCell(value) {
-  const stringValue = String(value ?? "");
-  if (!/[",\n]/.test(stringValue)) {
-    return stringValue;
-  }
-
-  return `"${stringValue.replace(/"/g, '""')}"`;
-}
-
-function buildUtilityBulkAuditCsv(record) {
-  const lines = [
-    ["Audit ID", record.id || ""],
-    ["Created At", record.createdAt || ""],
-    ["Building ID", record.buildingId || ""],
-    ["Building Name", record.buildingName || ""],
-    ["Billing Month", record.billingMonth || ""],
-    ["Due Date", record.dueDate || ""],
-    [
-      "Default Water Fixed Charge KSh",
-      record.defaultWaterFixedChargeKsh ?? ""
-    ],
-    [
-      "Default Electricity Fixed Charge KSh",
-      record.defaultElectricityFixedChargeKsh ?? ""
-    ],
-    [
-      "Default Combined Charge KSh",
-      record.defaultCombinedUtilityChargeKsh ?? ""
-    ],
-    [
-      "Monthly Combined Charge KSh",
-      record.monthlyCombinedUtilityChargeKsh ?? ""
-    ],
-    [
-      "Water Rate Per Unit KSh",
-      record.rateDefaults?.waterRatePerUnitKsh ?? ""
-    ],
-    [
-      "Electricity Rate Per Unit KSh",
-      record.rateDefaults?.electricityRatePerUnitKsh ?? ""
-    ],
-    ["Note", record.note || ""],
-    ["Status", record.result?.status || ""],
-    ["Posted Count", record.result?.postedCount ?? ""],
-    ["Requested Count", record.result?.requestedCount ?? ""],
-    ["Completed At", record.result?.completedAt || ""]
-  ].map((row) => row.map(csvCell).join(","));
-
-  lines.push("");
-  lines.push(
-    [
-      "House",
-      "Household Members",
-      "Has Active Resident",
-      "Water Meter",
-      "Water Previous",
-      "Water Current",
-      "Water Fixed KSh",
-      "Electricity Meter",
-      "Electricity Previous",
-      "Electricity Current",
-      "Electricity Fixed KSh"
-    ]
-      .map(csvCell)
-      .join(",")
-  );
-
-  (Array.isArray(record.rows) ? record.rows : []).forEach((row) => {
-    lines.push(
-      [
-        row.houseNumber || "",
-        row.householdMembers ?? "",
-        row.hasActiveResident ?? "",
-        row.waterMeterNumber || "",
-        row.waterPreviousReading ?? "",
-        row.waterCurrentReading ?? "",
-        row.waterFixedChargeKsh ?? "",
-        row.electricityMeterNumber || "",
-        row.electricityPreviousReading ?? "",
-        row.electricityCurrentReading ?? "",
-        row.electricityFixedChargeKsh ?? ""
-      ]
-        .map(csvCell)
-        .join(",")
-    );
-  });
-
-  if (Array.isArray(record.result?.failures) && record.result.failures.length > 0) {
-    lines.push("");
-    lines.push(csvCell("Failures"));
-    record.result.failures.forEach((failure) => {
-      lines.push(csvCell(failure));
-    });
-  }
-
-  return lines.join("\n");
-}
-
-function downloadUtilityBulkAuditCsv(record) {
-  const csv = buildUtilityBulkAuditCsv(record);
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = window.URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = [
-    "jk-flats",
-    String(record.buildingId || "").trim().toLowerCase(),
-    String(record.billingMonth || "").trim(),
-    "bulk-utility-audit.csv"
-  ]
-    .filter(Boolean)
-    .join("-");
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => {
-    window.URL.revokeObjectURL(url);
-  }, 1000);
-}
-
-async function finalizeUtilityBulkAudit(buildingId, auditId, payload) {
-  if (!buildingId || !auditId) {
-    return;
-  }
-
-  await requestJson(
-    `/api/landlord/buildings/${encodeURIComponent(buildingId)}/utility-bulk-audits/${encodeURIComponent(auditId)}`,
-    {
-      method: "PATCH",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    }
-  );
-}
-
-function buildUtilitySheetBillRequests(
-  buildingId,
-  billingMonth,
-  dueDateIso,
-  note,
-  combinedUtilityChargeKsh
-) {
-  if (!(utilitySheetBodyEl instanceof HTMLElement)) {
-    return [];
-  }
-
-  const waterRatePerUnitKsh =
-    toOptionalNumber(utilitySheetWaterRateEl?.value) ??
-    getUtilityRateDefault("water", buildingId);
-  const electricityRatePerUnitKsh =
-    toOptionalNumber(utilitySheetElectricRateEl?.value) ??
-    getUtilityRateDefault("electricity", buildingId);
-
-  const requests = [];
-  const trList = utilitySheetBodyEl.querySelectorAll("tr[data-house-number]");
-
-  trList.forEach((tr) => {
-    const houseNumber = normalizeHouse(tr.dataset.houseNumber);
-    const hasActiveResident = tr.dataset.hasActiveResident === "true";
-    const hasBothMeters = tr.dataset.hasBothMeters === "true";
-    if (!houseNumber) {
-      return;
-    }
-
-    const waterPreviousInput = tr.querySelector(
-      'input[data-field="waterPreviousReading"]'
-    );
-    const waterCurrentInput = tr.querySelector(
-      'input[data-field="waterCurrentReading"]'
-    );
-    const waterFixedInput = tr.querySelector(
-      'input[data-field="waterFixedChargeKsh"]'
-    );
-    const electricityPreviousInput = tr.querySelector(
-      'input[data-field="electricityPreviousReading"]'
-    );
-    const electricityCurrentInput = tr.querySelector(
-      'input[data-field="electricityCurrentReading"]'
-    );
-    const electricityFixedInput = tr.querySelector(
-      'input[data-field="electricityFixedChargeKsh"]'
-    );
-
-    const waterPreviousReading =
-      waterPreviousInput instanceof HTMLInputElement
-        ? toOptionalNumber(waterPreviousInput.value)
-        : undefined;
-    const waterCurrentReading =
-      waterCurrentInput instanceof HTMLInputElement
-        ? toOptionalNumber(waterCurrentInput.value)
-        : undefined;
-    const waterFixedChargeKsh =
-      waterFixedInput instanceof HTMLInputElement
-        ? toOptionalNumber(waterFixedInput.value) ?? 0
-        : 0;
-    const electricityPreviousReading =
-      electricityPreviousInput instanceof HTMLInputElement
-        ? toOptionalNumber(electricityPreviousInput.value)
-        : undefined;
-    const electricityCurrentReading =
-      electricityCurrentInput instanceof HTMLInputElement
-        ? toOptionalNumber(electricityCurrentInput.value)
-        : undefined;
-    const electricityFixedChargeKsh =
-      electricityFixedInput instanceof HTMLInputElement
-        ? toOptionalNumber(electricityFixedInput.value) ?? 0
-        : 0;
-
-    const hasRoomSpecificUtilityEntry =
-      waterPreviousReading != null ||
-      waterCurrentReading != null ||
-      waterFixedChargeKsh > 0 ||
-      electricityPreviousReading != null ||
-      electricityCurrentReading != null ||
-      electricityFixedChargeKsh > 0;
-
-    if (
-      hasActiveResident &&
-      !hasRoomSpecificUtilityEntry &&
-      Number(combinedUtilityChargeKsh ?? 0) > 0
-    ) {
-      requests.push({
-        utilityType: "water",
-        houseNumber,
-        payload: {
-          buildingId,
-          billingMonth,
-          fixedChargeKsh: Number(combinedUtilityChargeKsh),
-          dueDate: dueDateIso,
-          note: `Combined utility fee (water+electricity) for ${billingMonth}.${note ? ` ${note}` : ""}`
-        }
-      });
-      return;
-    }
-
-    ["water", "electricity"].forEach((utilityType) => {
-      const meterInput = tr.querySelector(
-        `input[data-field="${utilityType}MeterNumber"]`
-      );
-      const previousInput = tr.querySelector(
-        `input[data-field="${utilityType}PreviousReading"]`
-      );
-      const currentInput = tr.querySelector(
-        `input[data-field="${utilityType}CurrentReading"]`
-      );
-      const fixedInput = tr.querySelector(
-        `input[data-field="${utilityType}FixedChargeKsh"]`
-      );
-
-      if (
-        !(meterInput instanceof HTMLInputElement) ||
-        !(previousInput instanceof HTMLInputElement) ||
-        !(currentInput instanceof HTMLInputElement) ||
-        !(fixedInput instanceof HTMLInputElement)
-      ) {
-        return;
-      }
-
-      const previousReading = toOptionalNumber(previousInput.value);
-      const currentReading = toOptionalNumber(currentInput.value);
-      const ratePerUnitKsh =
-        utilityType === "water" ? waterRatePerUnitKsh : electricityRatePerUnitKsh;
-      const fixedChargeKsh = hasBothMeters ? 0 : toOptionalNumber(fixedInput.value);
-
-      const hasMeteredFields = previousReading != null || currentReading != null;
-      const hasFixedCharge = fixedChargeKsh != null && fixedChargeKsh > 0;
-      if (!hasMeteredFields && !hasFixedCharge) {
-        return;
-      }
-
-      if (currentReading != null && ratePerUnitKsh == null) {
-        throw new Error(
-          `${utilityType} for ${houseNumber} requires a building rate per unit.`
-        );
-      }
-
-      if (previousReading != null && currentReading == null) {
-        throw new Error(
-          `${utilityType} for ${houseNumber} requires current reading when previous reading is provided.`
-        );
-      }
-
-      if (
-        previousReading != null &&
-        currentReading != null &&
-        currentReading < previousReading
-      ) {
-        throw new Error(
-          `${utilityType} for ${houseNumber} has current reading lower than previous reading.`
-        );
-      }
-
-      const resolvedRatePerUnitKsh =
-        currentReading != null ? ratePerUnitKsh : undefined;
-
-      const payload = {
-        buildingId,
-        billingMonth,
-        meterNumber: meterInput.value.trim() || undefined,
-        previousReading,
-        currentReading,
-        ratePerUnitKsh: resolvedRatePerUnitKsh,
-        fixedChargeKsh,
-        dueDate: dueDateIso,
-        note
-      };
-
-      requests.push({
-        utilityType,
-        houseNumber,
-        payload
-      });
-    });
-  });
-
-  return requests;
-}
-
-async function openUtilitySheetModal() {
-  const buildingId = getSelectedUtilityBuildingId();
-  if (!buildingId) {
-    showError("Select a building first.");
-    return;
-  }
-
-  state.selectedRegistryBuildingId = buildingId;
-  if (registryBuildingSelectEl instanceof HTMLSelectElement) {
-    registryBuildingSelectEl.value = buildingId;
-  }
-
-  clearError();
-  showUtilitySheetModal();
-  syncUtilitySheetBuildingOptions();
-  if (utilitySheetBuildingSelectEl instanceof HTMLSelectElement) {
-    utilitySheetBuildingSelectEl.value = buildingId;
-  }
-  if (
-    utilitySheetBillingMonthEl instanceof HTMLInputElement &&
-    !utilitySheetBillingMonthEl.value
-  ) {
-    utilitySheetBillingMonthEl.value = toMonthInputValue(new Date());
-  }
-  if (utilitySheetDueDateEl instanceof HTMLInputElement && !utilitySheetDueDateEl.value) {
-    const due = new Date();
-    due.setDate(due.getDate() + 7);
-    due.setHours(23, 59, 0, 0);
-    utilitySheetDueDateEl.value = toDateTimeLocalInputValue(due);
-  }
-
-  try {
-    await Promise.all([
-      loadRegistryRows(),
-      loadMeters(),
-      loadBills(),
-      loadUtilitySheetBuildingConfiguration(),
-      loadUtilitySheetMonthlyCombinedCharge()
-    ]);
-    renderUtilitySheetRows(state.registryRows);
-  } catch (error) {
-    handleLandlordError(error, "Failed to load bulk utility entry.");
-  }
-}
-
-// Meters is one of the few views whose data isn't already bundled into the shared
-// /api/landlord/startup payload — it was previously only loaded when the Utility Setup drawer
-// opened. Now that Meters is a plain sidebar view, this is called from the nav click instead.
+// Meters data isn't part of the shared /api/landlord/startup payload, so it loads
+// whenever the Meters view is opened (see setActiveLandlordView).
 async function loadMetersView() {
   clearError();
 
   await Promise.all([
+    meterReadingsView.load(),
     loadRegistryRows(),
-    loadMeters(),
     loadBills(),
-    loadPayments(),
-    loadUtilitySheetBuildingConfiguration(),
-    loadUtilitySheetMonthlyCombinedCharge()
+    loadPayments()
   ]);
 }
 
@@ -5510,59 +4514,6 @@ function findConfiguredMeter(utilityType, buildingId, houseNumber) {
     state.meterByKey.get(utilityBuildingHouseLookupKey(utilityType, "", houseNumber)) ??
     null
   );
-}
-
-function syncUtilityBillInputMode() {
-  const utilityType = String(utilityBillTypeEl.value ?? "water");
-  const buildingId = getSelectedUtilityBuildingId();
-  const houseNumber = normalizeHouse(utilityBillHouseEl.value);
-  const meter = findConfiguredMeter(utilityType, buildingId, houseNumber);
-
-  const hasMeter = Boolean(meter?.meterNumber);
-  if (utilityBillAutoMonthEl) {
-    utilityBillAutoMonthEl.textContent = houseNumber
-      ? `${houseNumber}: oldest unpaid cycle`
-      : "Oldest unpaid cycle";
-  }
-  utilityBillPreviousReadingEl.disabled = !hasMeter;
-  utilityBillCurrentReadingEl.disabled = !hasMeter;
-  utilityBillRateEl.disabled = !hasMeter;
-  utilityBillCurrentReadingEl.required = hasMeter;
-  utilityBillRateEl.required = hasMeter;
-  utilityBillFixedEl.required = !hasMeter;
-
-  if (!hasMeter) {
-    utilityBillPreviousReadingEl.value = "";
-    utilityBillCurrentReadingEl.value = "";
-    utilityBillRateEl.value = "";
-    utilityBillCurrentReadingEl.placeholder = "Not required for fixed charge";
-    utilityBillRateEl.placeholder = "Not required for fixed charge";
-    utilityBillFixedEl.min = "1";
-    const defaultFixedCharge = getRoomUtilityFixedChargeDefault(
-      utilityType,
-      buildingId,
-      houseNumber
-    );
-    utilityBillFixedEl.value = numberToInputString(defaultFixedCharge);
-    if (utilityBillInputGuidanceEl) {
-      const houseLabel = houseNumber || "this house";
-      utilityBillInputGuidanceEl.textContent = `${houseLabel}: fixed charge.`;
-    }
-    return;
-  }
-
-  utilityBillCurrentReadingEl.placeholder = "e.g. 358.5";
-  utilityBillRateEl.placeholder = "e.g. 35";
-  utilityBillFixedEl.min = "0";
-  if (!utilityBillRateEl.value) {
-    const defaultRate = getUtilityRateDefault(utilityType, buildingId);
-    if (defaultRate != null) {
-      utilityBillRateEl.value = numberToInputString(defaultRate);
-    }
-  }
-  if (utilityBillInputGuidanceEl) {
-    utilityBillInputGuidanceEl.textContent = `Meter ${meter.meterNumber}: reading + rate.`;
-  }
 }
 
 async function requestJson(url, options = {}) {
@@ -6222,7 +5173,6 @@ function getPendingApplicationRowsForFocusedBuilding() {
 function renderDailyDashboard() {
   const requiredEls = [
     overviewDailyHeadingEl,
-    overviewDailySubtitleEl,
     overviewDailyCollectedEl,
     overviewDailyOutstandingEl,
     overviewDailyUnpaidEl,
@@ -6286,9 +5236,6 @@ function renderDailyDashboard() {
   const pendingRequests = getPendingApplicationRowsForFocusedBuilding().length;
 
   overviewDailyHeadingEl.textContent = `${buildingLabel} Dashboard`;
-  overviewDailySubtitleEl.textContent = focusedBuildingId
-    ? "Daily collection, issue, request, and room signals for the focused building."
-    : "Daily collection, issue, request, and room signals across the portfolio.";
   overviewDailyCollectedEl.textContent = formatCurrency(rentCollectedThisMonth + utilityCollectedThisMonth);
   overviewDailyOutstandingEl.textContent = formatCurrency(outstanding);
   overviewDailyUnpaidEl.textContent = String(unpaidRoomKeys.size);
@@ -6390,7 +5337,7 @@ function renderLandlordFocusPanel() {
     landlordFocusResidentsEl.textContent = "-";
     landlordFocusOpenBillsEl.textContent = "-";
     landlordFocusOutstandingEl.textContent = "-";
-    landlordFocusNoteEl.textContent = "Choose a building to keep the workspace aligned.";
+    landlordFocusNoteEl.textContent = "";
     return;
   }
 
@@ -6671,9 +5618,6 @@ function setPreferredBuildingSelection(buildingId, options = {}) {
   if (registryBuildingSelectEl instanceof HTMLSelectElement) {
     registryBuildingSelectEl.value = normalizedBuildingId;
   }
-  if (utilitySheetBuildingSelectEl instanceof HTMLSelectElement) {
-    utilitySheetBuildingSelectEl.value = normalizedBuildingId;
-  }
   if (caretakerBuildingSelectEl instanceof HTMLSelectElement) {
     caretakerBuildingSelectEl.value = normalizedBuildingId;
   }
@@ -6860,9 +5804,6 @@ async function loadBuildingDefaults(buildingId) {
     if (buildingDefaultsRentDueDayEl instanceof HTMLInputElement) {
       buildingDefaultsRentDueDayEl.value = data.defaultRentDueDay ?? "";
     }
-    if (buildingDefaultsMeterReadingDayEl instanceof HTMLInputElement) {
-      buildingDefaultsMeterReadingDayEl.value = data.meterReadingDay ?? "";
-    }
     if (buildingDefaultsAllowManualRentEl instanceof HTMLInputElement) {
       buildingDefaultsAllowManualRentEl.checked = data.allowManualRentPosting !== false;
     }
@@ -6915,7 +5856,6 @@ buildingDefaultsFormEl?.addEventListener("submit", (event) => {
     utilityBalanceVisibleDays: toOptionalNumber(buildingDefaultsBalanceVisibleDaysEl?.value),
     defaultMonthlyRentKsh: toOptionalNumber(buildingDefaultsMonthlyRentEl?.value),
     defaultRentDueDay: toOptionalNumber(buildingDefaultsRentDueDayEl?.value),
-    meterReadingDay: toOptionalNumber(buildingDefaultsMeterReadingDayEl?.value),
     allowManualRentPosting: Boolean(buildingDefaultsAllowManualRentEl?.checked),
     allowManualUtilityPosting: Boolean(buildingDefaultsAllowManualUtilityEl?.checked),
     acknowledgeImpact: true,
@@ -7527,7 +6467,6 @@ function renderRegistryBuildingOptions() {
     state.selectedRegistryBuildingId = "";
     setRegistryRows([]);
     registryBuildingSelectEl.disabled = true;
-    registryLoadBtnEl.disabled = true;
     registrySaveBtnEl.disabled = true;
 
     const option = document.createElement("option");
@@ -7537,7 +6476,6 @@ function renderRegistryBuildingOptions() {
     renderRegistryRows([]);
     syncRentPaymentBuildingOptions();
     syncRentSheetBuildingOptions();
-    syncUtilitySheetBuildingOptions();
     syncCaretakerBuildingOptions();
     syncLandlordTicketBuildingOptions();
     return;
@@ -7551,7 +6489,6 @@ function renderRegistryBuildingOptions() {
 
   state.selectedRegistryBuildingId = knownSelection;
   registryBuildingSelectEl.disabled = false;
-  registryLoadBtnEl.disabled = false;
   registrySaveBtnEl.disabled = false;
 
   state.buildings.forEach((building) => {
@@ -7566,7 +6503,6 @@ function renderRegistryBuildingOptions() {
 
   syncRentPaymentBuildingOptions();
   syncRentSheetBuildingOptions();
-  syncUtilitySheetBuildingOptions();
   syncCaretakerBuildingOptions();
   syncLandlordTicketBuildingOptions();
   syncDirectTenantBuildingOptions();
@@ -8571,7 +7507,7 @@ function renderRegistryRows(rows) {
 
   if (!Array.isArray(rows) || rows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="13">No houses found for this building.</td>';
+    row.innerHTML = '<td colspan="8">No houses found for this building.</td>';
     registryBodyEl.append(row);
     return;
   }
@@ -8581,18 +7517,6 @@ function renderRegistryRows(rows) {
   const billingMonth = getSelectedRegistryReadingMonth();
   rows.forEach((item) => {
     const houseNumber = normalizeHouse(item.houseNumber);
-    const waterReadingBill = getUtilityBillForMonth(
-      "water",
-      buildingId,
-      houseNumber,
-      billingMonth
-    );
-    const electricityReadingBill = getUtilityBillForMonth(
-      "electricity",
-      buildingId,
-      houseNumber,
-      billingMonth
-    );
     const hasBothMeters =
       hasUsableMeterNumber(item.waterMeterNumber) &&
       hasUsableMeterNumber(item.electricityMeterNumber);
@@ -8604,9 +7528,12 @@ function renderRegistryRows(rows) {
     row.dataset.houseNumber = houseNumber;
     row.dataset.hasBothMeters = hasBothMeters ? "true" : "false";
     row.innerHTML = `
-      <td><strong>${escapeHtml(houseNumber)}</strong></td>
+      <td>
+        <strong>${escapeHtml(houseNumber)}</strong>
+        <input type="hidden" data-field="waterMeterNumber" value="${escapeHtml(waterMeterNumber)}" />
+        <input type="hidden" data-field="electricityMeterNumber" value="${escapeHtml(electricityMeterNumber)}" />
+      </td>
       <td>${escapeHtml(item.residentName ?? "-")}</td>
-      <td>${escapeHtml(item.residentPhone ?? "-")}</td>
       <td>
         <input
           type="number"
@@ -8618,28 +7545,6 @@ function renderRegistryRows(rows) {
           value="${Number(item.householdMembers ?? 0)}"
         />
       </td>
-      <td>
-        <input
-          type="text"
-          class="registry-table-input"
-          data-field="waterMeterNumber"
-          maxlength="80"
-          placeholder="WTR-0001"
-          value="${escapeHtml(waterMeterNumber)}"
-        />
-      </td>
-      <td>
-        <input
-          type="text"
-          class="registry-table-input"
-          data-field="electricityMeterNumber"
-          maxlength="80"
-          placeholder="ELEC-0001"
-          value="${escapeHtml(electricityMeterNumber)}"
-        />
-      </td>
-      <td>${formatRegistryReadingMarkup(waterReadingBill, billingMonth)}</td>
-      <td>${formatRegistryReadingMarkup(electricityReadingBill, billingMonth)}</td>
       <td>
         <input
           type="number"
@@ -10599,28 +9504,6 @@ function renderPaymentInstructions() {
   });
 }
 
-function renderMeters(rows) {
-  metersBodyEl.replaceChildren();
-
-  if (!Array.isArray(rows) || rows.length === 0) {
-    const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="4">No utility meters configured.</td>';
-    metersBodyEl.append(row);
-    return;
-  }
-
-  rows.forEach((item) => {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td>${item.utilityType}</td>
-      <td>${item.houseNumber}</td>
-      <td>${item.meterNumber}</td>
-      <td>${formatDateTime(item.updatedAt)}</td>
-    `;
-    metersBodyEl.append(row);
-  });
-}
-
 function renderUtilityBills(rows) {
   utilityBillsBodyEl.replaceChildren();
   const visibleRows = getVisibleUtilityBills(rows);
@@ -11378,33 +10261,6 @@ function renderMetrics() {
   renderDailyDashboard();
 }
 
-function createUtilityBillPayload() {
-  const buildingId = getSelectedUtilityBuildingId();
-  const previousReading = toOptionalNumber(utilityBillPreviousReadingEl.value);
-  const currentReading = toOptionalNumber(utilityBillCurrentReadingEl.value);
-  const utilityType = String(utilityBillTypeEl.value ?? "water");
-  let ratePerUnitKsh = toOptionalNumber(utilityBillRateEl.value);
-  if (ratePerUnitKsh == null && currentReading != null) {
-    ratePerUnitKsh = getUtilityRateDefault(utilityType, buildingId);
-  }
-  const fixedChargeKsh = toOptionalNumber(utilityBillFixedEl.value);
-
-  return {
-    buildingId,
-    utilityType,
-    houseNumber: normalizeHouse(utilityBillHouseEl.value),
-    payload: {
-      buildingId,
-      previousReading,
-      currentReading,
-      ratePerUnitKsh,
-      fixedChargeKsh,
-      dueDate: toIsoFromDateTimeLocal(utilityBillDueDateEl.value),
-      note: utilityBillNoteEl.value.trim() || undefined
-    }
-  };
-}
-
 function createUtilityPaymentPayload() {
   const buildingId = getSelectedUtilityBuildingId();
 
@@ -11767,11 +10623,7 @@ async function loadRegistryRows() {
     setRegistryReadingBills([]);
     setUtilityPricingState(null, null, "");
     state.registryMonthlyCombinedCharge = null;
-    syncUtilitySheetRateDefaults();
-    syncUtilitySheetBuildingFixedDefaults();
-    syncUtilitySheetBuildingCombinedCharge();
     renderRegistryRows(state.registryRows);
-    renderUtilitySheetRows(state.registryRows);
     return;
   }
 
@@ -11785,18 +10637,8 @@ async function loadRegistryRows() {
     buildingId
   );
   await loadRegistryMonthlyCombinedCharge();
-  syncUtilitySheetRateDefaults();
-  syncUtilitySheetBuildingFixedDefaults();
-  syncUtilitySheetBuildingCombinedCharge();
-  syncUtilityBillInputMode();
   renderRegistryRows(state.registryRows);
   renderKeyedPrices();
-  if (
-    utilitySheetModalEl instanceof HTMLElement &&
-    !utilitySheetModalEl.classList.contains("hidden")
-  ) {
-    renderUtilitySheetRows(state.registryRows);
-  }
 }
 
 async function loadMeters() {
@@ -11805,14 +10647,6 @@ async function loadMeters() {
     withBuildingQuery("/api/landlord/utilities/meters", buildingId)
   );
   setMeters(payload.data ?? []);
-  renderMeters(state.meters);
-  if (
-    utilitySheetModalEl instanceof HTMLElement &&
-    !utilitySheetModalEl.classList.contains("hidden")
-  ) {
-    renderUtilitySheetRows(state.registryRows);
-  }
-  syncUtilityBillInputMode();
   renderMetrics();
 }
 
@@ -11822,43 +10656,11 @@ async function loadBills() {
     withBuildingQuery("/api/landlord/utilities/bills", buildingId, "limit=600")
   );
   setBills(payload.data ?? []);
-  syncRegistryReadingMonthInput();
   renderUtilityRoomSummary(state.bills);
   renderRoomLedger(state.residentDirectory);
   renderUtilityBills(state.bills);
   renderRegistryRows(state.registryRows);
-  if (
-    utilitySheetModalEl instanceof HTMLElement &&
-    !utilitySheetModalEl.classList.contains("hidden")
-  ) {
-    renderUtilitySheetRows(state.registryRows);
-  }
   renderMetrics();
-}
-
-async function loadRegistryReadingBills() {
-  const buildingId = getSelectedUtilityBuildingId();
-  syncRegistryReadingMonthInput();
-  const billingMonth = getSelectedRegistryReadingMonth();
-
-  if (!buildingId || !billingMonth) {
-    setRegistryReadingBills([]);
-    renderRegistryRows(state.registryRows);
-    return;
-  }
-
-  const payload = await requestJson(
-    withBuildingQuery(
-      "/api/landlord/utilities/bills",
-      buildingId,
-      new URLSearchParams({
-        billingMonth,
-        limit: "600"
-      }).toString()
-    )
-  );
-  setRegistryReadingBills(payload.data ?? []);
-  renderRegistryRows(state.registryRows);
 }
 
 async function loadPayments() {
@@ -11925,7 +10727,8 @@ async function activateBuilding(buildingId, options = {}) {
     loadCaretakerAccessRequests(),
     loadCaretakers(),
     loadLandlordTickets(),
-    loadResidents()
+    loadResidents(),
+    state.activeLandlordView === "meters" ? meterReadingsView.load() : Promise.resolve()
   ]);
 }
 
@@ -12035,10 +10838,6 @@ function applyLandlordStartupData(startup) {
   updateApplicationsIndicator();
   renderRentStatus(state.rentStatus);
   renderOverviewCollections(state.rentStatus);
-  syncUtilitySheetRateDefaults();
-  syncUtilitySheetBuildingFixedDefaults();
-  syncUtilitySheetBuildingCombinedCharge();
-  syncUtilityBillInputMode();
   renderRegistryRows(state.registryRows);
   renderResidentDirectory(state.residentDirectory);
   renderOwnerStaff();
@@ -12047,7 +10846,6 @@ function applyLandlordStartupData(startup) {
   renderCaretakerRequests(state.caretakerRequests);
   renderCaretakers(state.caretakers);
   renderLandlordTickets(state.tickets);
-  renderMeters(state.meters);
   renderUtilityRoomSummary(state.bills);
   renderUtilityBills(state.bills);
   renderUtilityPayments(state.payments);
@@ -12058,13 +10856,6 @@ function applyLandlordStartupData(startup) {
   renderMetrics();
   renderDailyDashboard();
   updateLandlordBranding();
-
-  if (
-    utilitySheetModalEl instanceof HTMLElement &&
-    !utilitySheetModalEl.classList.contains("hidden")
-  ) {
-    renderUtilitySheetRows(state.registryRows);
-  }
 }
 
 async function loadDataLegacy() {
@@ -12200,11 +10991,6 @@ landlordNavButtons.forEach((button) => {
     if (sectionTarget) {
       scrollToLandlordSection(sectionTarget);
     }
-    if (targetView === "meters") {
-      void loadMetersView().catch((error) => {
-        handleLandlordError(error, "Unable to load meters.");
-      });
-    }
   });
 });
 
@@ -12319,10 +11105,6 @@ directTenantDrawerBackdropEl?.addEventListener("click", () => {
   closeDirectTenantDrawer();
 });
 
-openUtilitySheetBtnEl?.addEventListener("click", () => {
-  void openUtilitySheetModal();
-});
-
 openRentSheetBtnEl?.addEventListener("click", () => {
   void openRentSheetModal();
 });
@@ -12331,24 +11113,12 @@ residentsOpenRentSheetBtnEl?.addEventListener("click", () => {
   void openRentSheetModal();
 });
 
-closeUtilitySheetBtnEl?.addEventListener("click", () => {
-  closeUtilitySheetModal();
-});
-
 closeRentSheetBtnEl?.addEventListener("click", () => {
   closeRentSheetModal();
 });
 
-utilitySheetBackdropEl?.addEventListener("click", () => {
-  closeUtilitySheetModal();
-});
-
 rentSheetBackdropEl?.addEventListener("click", () => {
   closeRentSheetModal();
-});
-
-utilitySheetReloadBtnEl?.addEventListener("click", () => {
-  void openUtilitySheetModal();
 });
 
 rentSheetReloadBtnEl?.addEventListener("click", () => {
@@ -12361,7 +11131,6 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeCreateBuildingDrawer();
     closeBuildingDrawer();
-    closeUtilitySheetModal();
     closeRentSheetModal();
     closeResidentDrawer();
     closeDirectTenantDrawer();
@@ -13970,91 +12739,6 @@ applicationsBodyEl.addEventListener("click", (event) => {
   })();
 });
 
-utilityMeterFormEl.addEventListener("submit", (event) => {
-  event.preventDefault();
-  clearError();
-
-  const buildingId = getSelectedUtilityBuildingId();
-  const utilityType = String(utilityMeterTypeEl.value ?? "water");
-  const houseNumber = normalizeHouse(utilityMeterHouseEl.value);
-  const meterNumber = utilityMeterNumberEl.value.trim();
-
-  if (!buildingId) {
-    showError("Select a building first.");
-    return;
-  }
-
-  if (!houseNumber || !meterNumber) {
-    showError("Utility meter requires type, house, and meter number.");
-    return;
-  }
-
-  const submitButton = utilityMeterFormEl.querySelector("button[type='submit']");
-  submitButton.disabled = true;
-
-  void (async () => {
-    try {
-      await requestJson(
-        withBuildingQuery(
-          `/api/landlord/utilities/${encodeURIComponent(utilityType)}/${encodeURIComponent(houseNumber)}/meter`,
-          buildingId
-        ),
-        {
-          method: "PUT",
-          headers: {
-            "content-type": "application/json"
-          },
-          body: JSON.stringify({ buildingId, meterNumber })
-        }
-      );
-
-      setStatus(`Meter saved for ${utilityType} (${houseNumber}) in ${buildingId}.`);
-      await Promise.all([loadMeters(), loadRegistryRows()]);
-    } catch (error) {
-      handleLandlordError(error, "Failed to save utility meter.");
-    } finally {
-      submitButton.disabled = false;
-    }
-  })();
-});
-
-utilityBillTypeEl.addEventListener("change", () => {
-  syncUtilityBillInputMode();
-});
-
-utilityBillHouseEl.addEventListener("input", () => {
-  syncUtilityBillInputMode();
-});
-
-utilitySheetBuildingSelectEl?.addEventListener("change", () => {
-  const buildingId = String(utilitySheetBuildingSelectEl.value || "").trim();
-  if (!buildingId) {
-    return;
-  }
-
-  setPreferredBuildingSelection(buildingId);
-
-  void Promise.all([
-    loadRegistryRows(),
-    loadMeters(),
-    loadBills(),
-    loadRegistryReadingBills(),
-    loadPayments(),
-    loadExpenditures(),
-    loadMoveOutSettlements(),
-    loadUtilitySheetBuildingConfiguration(),
-    loadUtilitySheetMonthlyCombinedCharge()
-  ]).catch((error) => {
-    handleLandlordError(error, "Failed to load selected building for bulk utility entry.");
-  });
-});
-
-utilitySheetBillingMonthEl?.addEventListener("change", () => {
-  void loadUtilitySheetMonthlyCombinedCharge().catch((error) => {
-    handleLandlordError(error, "Failed to load monthly combined utility charge.");
-  });
-});
-
 rentSheetBuildingSelectEl?.addEventListener("change", () => {
   const buildingId = String(rentSheetBuildingSelectEl.value || "").trim();
   if (!buildingId) {
@@ -14068,56 +12752,6 @@ rentSheetBuildingSelectEl?.addEventListener("change", () => {
   void loadRentSheetRows().catch((error) => {
     handleLandlordError(error, "Failed to load selected building for rent setup.");
   });
-});
-
-registryReadingMonthEl?.addEventListener("change", () => {
-  state.registryReadingMonth = toBillingMonth(registryReadingMonthEl.value);
-  void Promise.all([loadRegistryReadingBills(), loadRegistryMonthlyCombinedCharge()])
-    .then(() => {
-      renderRegistryRows(state.registryRows);
-    })
-    .catch((error) => {
-      handleLandlordError(error, "Failed to load monthly utility readings.");
-    });
-});
-
-registryBuildingSelectEl.addEventListener("change", () => {
-  setPreferredBuildingSelection(String(registryBuildingSelectEl.value || ""));
-  void Promise.all([
-    loadRegistryRows(),
-    loadMeters(),
-    loadBills(),
-    loadRegistryReadingBills(),
-    loadPayments(),
-    loadExpenditures(),
-    loadMoveOutSettlements(),
-    loadCaretakerAccessRequests(),
-    loadCaretakers(),
-    loadResidents(),
-    loadLandlordTickets()
-  ]).catch(
-    (error) => {
-    handleLandlordError(error, "Failed to load building utility registry.");
-    }
-  );
-});
-
-registryLoadBtnEl.addEventListener("click", () => {
-  void Promise.all([
-    loadRegistryRows(),
-    loadMeters(),
-    loadBills(),
-    loadRegistryReadingBills(),
-    loadPayments(),
-    loadExpenditures(),
-    loadMoveOutSettlements(),
-    loadCaretakerAccessRequests(),
-    loadCaretakers()
-  ]).catch(
-    (error) => {
-    handleLandlordError(error, "Failed to load building utility registry.");
-    }
-  );
 });
 
 registrySaveBtnEl.addEventListener("click", () => {
@@ -14165,411 +12799,6 @@ registrySaveBtnEl.addEventListener("click", () => {
       handleLandlordError(error, "Failed to save utility registry.");
     } finally {
       registrySaveBtnEl.disabled = false;
-    }
-  })();
-});
-
-utilitySheetFormEl?.addEventListener("submit", (event) => {
-  event.preventDefault();
-  clearError();
-
-  const buildingId = String(
-    utilitySheetBuildingSelectEl?.value || state.selectedRegistryBuildingId || ""
-  ).trim();
-  if (!buildingId) {
-    showError("Select a building first.");
-    return;
-  }
-
-  const billingMonth = toBillingMonth(utilitySheetBillingMonthEl?.value);
-  const dueDate = toIsoFromDateTimeLocal(utilitySheetDueDateEl?.value);
-  if (!billingMonth || !dueDate) {
-    showError("Bulk utility entry requires billing month and due date.");
-    return;
-  }
-
-  let registryRows;
-  let auditRows;
-  let billRequests;
-  let auditId = "";
-  let postedCount = 0;
-  const failures = [];
-  const combinedUtilityChargeKsh = toOptionalNumber(utilitySheetCombinedChargeEl?.value);
-  const buildingDefaultWaterFixedChargeKsh = toOptionalNumber(
-    utilitySheetWaterFixedDefaultEl?.value
-  );
-  const buildingDefaultElectricityFixedChargeKsh = toOptionalNumber(
-    utilitySheetElectricFixedDefaultEl?.value
-  );
-  const buildingDefaultCombinedUtilityChargeKsh = toOptionalNumber(
-    utilitySheetBuildingCombinedChargeEl?.value
-  );
-  const normalizedBuildingDefaultWaterFixedChargeKsh =
-    buildingDefaultWaterFixedChargeKsh == null
-      ? null
-      : Math.max(0, buildingDefaultWaterFixedChargeKsh);
-  const normalizedBuildingDefaultElectricityFixedChargeKsh =
-    buildingDefaultElectricityFixedChargeKsh == null
-      ? null
-      : Math.max(0, buildingDefaultElectricityFixedChargeKsh);
-  const normalizedBuildingDefaultCombinedUtilityChargeKsh =
-    buildingDefaultCombinedUtilityChargeKsh == null
-      ? null
-      : Math.max(0, Math.round(buildingDefaultCombinedUtilityChargeKsh));
-  const normalizedWaterRatePerUnitKsh =
-    toOptionalNumber(utilitySheetWaterRateEl?.value) == null
-      ? null
-      : Math.max(0, Number(toOptionalNumber(utilitySheetWaterRateEl?.value)));
-  const normalizedElectricityRatePerUnitKsh =
-    toOptionalNumber(utilitySheetElectricRateEl?.value) == null
-      ? null
-      : Math.max(0, Number(toOptionalNumber(utilitySheetElectricRateEl?.value)));
-  const currentBuildingDefaultWaterFixedChargeKsh =
-    state.utilitySheetBuildingConfiguration?.defaultWaterFixedChargeKsh == null
-      ? null
-      : Math.max(0, Number(state.utilitySheetBuildingConfiguration.defaultWaterFixedChargeKsh));
-  const currentBuildingDefaultElectricityFixedChargeKsh =
-    state.utilitySheetBuildingConfiguration?.defaultElectricityFixedChargeKsh == null
-      ? null
-      : Math.max(
-          0,
-          Number(state.utilitySheetBuildingConfiguration.defaultElectricityFixedChargeKsh)
-        );
-  const currentWaterRatePerUnitKsh =
-    state.utilitySheetBuildingConfiguration?.defaultWaterRatePerUnitKsh == null
-      ? null
-      : Math.max(0, Number(state.utilitySheetBuildingConfiguration.defaultWaterRatePerUnitKsh));
-  const currentElectricityRatePerUnitKsh =
-    state.utilitySheetBuildingConfiguration?.defaultElectricityRatePerUnitKsh == null
-      ? null
-      : Math.max(
-          0,
-          Number(state.utilitySheetBuildingConfiguration.defaultElectricityRatePerUnitKsh)
-        );
-  const currentBuildingDefaultCombinedUtilityChargeKsh =
-    state.utilitySheetBuildingConfiguration?.defaultCombinedUtilityChargeKsh == null
-      ? null
-      : Math.max(
-          0,
-          Math.round(state.utilitySheetBuildingConfiguration.defaultCombinedUtilityChargeKsh)
-        );
-  const normalizedMonthlyCombinedUtilityChargeKsh =
-    combinedUtilityChargeKsh == null ? null : Math.max(0, Math.round(combinedUtilityChargeKsh));
-  const rateDefaults = {
-    waterRatePerUnitKsh: normalizedWaterRatePerUnitKsh ?? undefined,
-    electricityRatePerUnitKsh: normalizedElectricityRatePerUnitKsh ?? undefined
-  };
-  const bulkNote = utilitySheetNoteEl?.value.trim() || undefined;
-  const selectedBuilding = getBuildingRecord(buildingId);
-  try {
-    auditRows = buildUtilitySheetAuditRows();
-    registryRows = buildUtilitySheetRegistryPayload();
-    billRequests = buildUtilitySheetBillRequests(
-      buildingId,
-      billingMonth,
-      dueDate,
-      bulkNote,
-      combinedUtilityChargeKsh
-    );
-  } catch (error) {
-    handleLandlordError(error, "Invalid values in bulk utility entry.");
-    return;
-  }
-
-  if (!Array.isArray(registryRows) || registryRows.length === 0) {
-    showError("No houses available for bulk utility entry.");
-    return;
-  }
-
-  if (!Array.isArray(auditRows) || auditRows.length === 0) {
-    showError("No utility entry snapshot available to audit.");
-    return;
-  }
-
-  if (utilitySheetSubmitBtnEl instanceof HTMLButtonElement) {
-    utilitySheetSubmitBtnEl.disabled = true;
-  }
-
-  void (async () => {
-    try {
-      const auditPayload = await requestJson(
-        `/api/landlord/buildings/${encodeURIComponent(buildingId)}/utility-bulk-audits`,
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json"
-          },
-          body: JSON.stringify({
-            billingMonth,
-            dueDate,
-            note: bulkNote,
-            defaultWaterFixedChargeKsh:
-              normalizedBuildingDefaultWaterFixedChargeKsh,
-            defaultElectricityFixedChargeKsh:
-              normalizedBuildingDefaultElectricityFixedChargeKsh,
-            defaultCombinedUtilityChargeKsh:
-              normalizedBuildingDefaultCombinedUtilityChargeKsh,
-            monthlyCombinedUtilityChargeKsh: normalizedMonthlyCombinedUtilityChargeKsh,
-            rateDefaults,
-            rows: auditRows
-          })
-        }
-      );
-      auditId = String(auditPayload?.data?.id ?? "").trim();
-      if (!auditId) {
-        throw new Error("Bulk utility audit could not be created.");
-      }
-      try {
-        downloadUtilityBulkAuditCsv(
-          auditPayload?.data ?? {
-            id: auditId,
-            createdAt: new Date().toISOString(),
-            buildingId,
-            buildingName: getBuildingDisplayName(selectedBuilding),
-            billingMonth,
-            dueDate,
-            note: bulkNote,
-            defaultWaterFixedChargeKsh:
-              normalizedBuildingDefaultWaterFixedChargeKsh,
-            defaultElectricityFixedChargeKsh:
-              normalizedBuildingDefaultElectricityFixedChargeKsh,
-            defaultCombinedUtilityChargeKsh:
-              normalizedBuildingDefaultCombinedUtilityChargeKsh,
-            monthlyCombinedUtilityChargeKsh: normalizedMonthlyCombinedUtilityChargeKsh,
-            rateDefaults,
-            rows: auditRows,
-            result: {
-              status: "pending",
-              postedCount: 0,
-              requestedCount: billRequests.length,
-              failures: []
-            }
-          }
-        );
-      } catch (downloadError) {
-        console.error("Failed to download utility bulk audit CSV", downloadError);
-      }
-
-      if (
-        !utilityPricingNumbersEqual(
-          normalizedWaterRatePerUnitKsh,
-          currentWaterRatePerUnitKsh
-        ) ||
-        !utilityPricingNumbersEqual(
-          normalizedElectricityRatePerUnitKsh,
-          currentElectricityRatePerUnitKsh
-        ) ||
-        !utilityPricingNumbersEqual(
-          normalizedBuildingDefaultWaterFixedChargeKsh,
-          currentBuildingDefaultWaterFixedChargeKsh
-        ) ||
-        !utilityPricingNumbersEqual(
-          normalizedBuildingDefaultElectricityFixedChargeKsh,
-          currentBuildingDefaultElectricityFixedChargeKsh
-        ) ||
-        normalizedBuildingDefaultCombinedUtilityChargeKsh !==
-          currentBuildingDefaultCombinedUtilityChargeKsh
-      ) {
-        const configurationPayload = await requestJson(
-          `/api/landlord/buildings/${encodeURIComponent(buildingId)}/configuration`,
-          {
-            method: "PATCH",
-            headers: {
-              "content-type": "application/json"
-            },
-            body: JSON.stringify({
-              defaultWaterRatePerUnitKsh: normalizedWaterRatePerUnitKsh,
-              defaultElectricityRatePerUnitKsh:
-                normalizedElectricityRatePerUnitKsh,
-              defaultWaterFixedChargeKsh:
-                normalizedBuildingDefaultWaterFixedChargeKsh,
-              defaultElectricityFixedChargeKsh:
-                normalizedBuildingDefaultElectricityFixedChargeKsh,
-              defaultCombinedUtilityChargeKsh:
-                normalizedBuildingDefaultCombinedUtilityChargeKsh,
-              acknowledgeImpact: true
-            })
-          }
-        );
-        setUtilityPricingState(configurationPayload.data ?? null, null, buildingId);
-        syncUtilitySheetRateDefaults();
-        syncUtilitySheetBuildingFixedDefaults();
-        syncUtilitySheetBuildingCombinedCharge();
-      }
-
-      if (combinedUtilityChargeKsh != null && combinedUtilityChargeKsh > 0) {
-        await requestJson(
-          `/api/landlord/buildings/${encodeURIComponent(buildingId)}/monthly-combined-utility-charge`,
-          {
-            method: "PUT",
-            headers: {
-              "content-type": "application/json"
-            },
-            body: JSON.stringify({
-              billingMonth,
-              amountKsh: Math.round(combinedUtilityChargeKsh),
-              acknowledgeImpact: true
-            })
-          }
-        );
-      }
-
-      await requestJson(
-        `/api/landlord/buildings/${encodeURIComponent(buildingId)}/utility-registry`,
-        {
-          method: "PUT",
-          headers: {
-            "content-type": "application/json"
-          },
-          body: JSON.stringify({ rows: registryRows })
-        }
-      );
-
-      for (const billRequest of billRequests) {
-        try {
-          await requestJson(
-            withBuildingQuery(
-              `/api/landlord/utilities/${encodeURIComponent(billRequest.utilityType)}/${encodeURIComponent(billRequest.houseNumber)}/bills`,
-              buildingId
-            ),
-            {
-              method: "POST",
-              headers: {
-                "content-type": "application/json"
-              },
-              body: JSON.stringify(billRequest.payload)
-            }
-          );
-          postedCount += 1;
-        } catch (error) {
-          failures.push(
-            `${billRequest.utilityType} ${billRequest.houseNumber}: ${error instanceof Error ? error.message : "failed"}`
-          );
-        }
-      }
-
-      await Promise.all([
-        loadRegistryRows(),
-        loadMeters(),
-        loadBills(),
-        loadPayments(),
-        loadResidents(),
-        loadUtilitySheetBuildingConfiguration(),
-        loadUtilitySheetMonthlyCombinedCharge()
-      ]);
-      try {
-        await finalizeUtilityBulkAudit(buildingId, auditId, {
-          status: failures.length > 0 ? "partial_failed" : "completed",
-          postedCount,
-          requestedCount: billRequests.length,
-          failures,
-          completedAt: new Date().toISOString()
-        });
-      } catch (auditFinalizeError) {
-        console.error("Failed to finalize utility bulk audit", auditFinalizeError);
-      }
-      if (failures.length > 0) {
-        const preview = failures.slice(0, 3).join(" | ");
-        showError(
-          `Saved meter updates. Posted ${postedCount}/${billRequests.length} bills. Failed: ${preview}${failures.length > 3 ? " ..." : ""}`
-        );
-        setStatus(
-          `Bulk save completed for ${buildingId} with ${failures.length} bill error(s).`
-        );
-      } else {
-        setStatus(
-          `Saved bulk utility entry for ${buildingId}. Posted ${postedCount} bill(s).`
-        );
-        closeUtilitySheetModal();
-      }
-    } catch (error) {
-      if (auditId) {
-        try {
-          const errorMessage = error instanceof Error ? error.message : "failed";
-          await finalizeUtilityBulkAudit(buildingId, auditId, {
-            status: "failed",
-            postedCount,
-            requestedCount: Array.isArray(billRequests) ? billRequests.length : 0,
-            failures: [...failures, errorMessage],
-            completedAt: new Date().toISOString()
-          });
-        } catch (auditFinalizeError) {
-          console.error("Failed to finalize utility bulk audit", auditFinalizeError);
-        }
-      }
-      handleLandlordError(error, "Failed to save bulk utility entry.");
-    } finally {
-      if (utilitySheetSubmitBtnEl instanceof HTMLButtonElement) {
-        utilitySheetSubmitBtnEl.disabled = false;
-      }
-    }
-  })();
-});
-
-utilityBillFormEl.addEventListener("submit", (event) => {
-  event.preventDefault();
-  clearError();
-
-  const utility = createUtilityBillPayload();
-  if (
-    !utility.buildingId ||
-    !utility.houseNumber ||
-    !utility.payload.dueDate
-  ) {
-    showError("Utility bill requires house and due date.");
-    return;
-  }
-
-  const configuredMeter = findConfiguredMeter(
-    utility.utilityType,
-    utility.buildingId,
-    utility.houseNumber
-  );
-  if (configuredMeter) {
-    if (
-      utility.payload.currentReading == null ||
-      utility.payload.ratePerUnitKsh == null
-    ) {
-      showError(
-        `House ${utility.houseNumber} has meter ${configuredMeter.meterNumber}. Enter current reading and rate per unit.`
-      );
-      return;
-    }
-  } else if (Number(utility.payload.fixedChargeKsh ?? 0) <= 0) {
-    showError(
-      `House ${utility.houseNumber} has no ${utility.utilityType} meter. Enter a fixed charge greater than zero.`
-    );
-    return;
-  }
-
-  const submitButton = utilityBillFormEl.querySelector("button[type='submit']");
-  submitButton.disabled = true;
-
-  void (async () => {
-    try {
-      const response = await requestJson(
-        withBuildingQuery(
-          `/api/landlord/utilities/${encodeURIComponent(utility.utilityType)}/${encodeURIComponent(utility.houseNumber)}/bills`,
-          utility.buildingId
-        ),
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json"
-          },
-          body: JSON.stringify(utility.payload)
-        }
-      );
-      const postedBillingMonth = String(response?.data?.billingMonth ?? "").trim();
-
-      setStatus(
-        `${utility.utilityType} bill posted for ${utility.houseNumber}${postedBillingMonth ? ` (${postedBillingMonth})` : ""} in ${utility.buildingId}.`
-      );
-      await Promise.all([loadBills(), loadPayments()]);
-    } catch (error) {
-      handleLandlordError(error, "Failed to post utility bill.");
-    } finally {
-      submitButton.disabled = false;
     }
   })();
 });
@@ -15271,21 +13500,6 @@ settingsClearDataBtnEl?.addEventListener("click", () => {
   );
 });
 
-refreshMetersBtnEl.addEventListener("click", () => {
-  void (async () => {
-    await loadMeters();
-    await loadRegistryRows();
-  })().catch((error) => {
-    handleLandlordError(error, "Unable to refresh meters.");
-  });
-});
-
-refreshBillsBtnEl.addEventListener("click", () => {
-  void loadBills().catch((error) => {
-    handleLandlordError(error, "Unable to refresh bills.");
-  });
-});
-
 refreshPaymentsBtnEl.addEventListener("click", () => {
   void loadPayments().catch((error) => {
     handleLandlordError(error, "Unable to refresh payments.");
@@ -15575,31 +13789,44 @@ landlordLogoutBtnEl.addEventListener("click", () => {
   void signOut();
 });
 
+const landlordMenuEl = document.querySelector(".lh-menu");
+if (landlordMenuEl instanceof HTMLDetailsElement) {
+  landlordMenuEl.addEventListener("click", (event) => {
+    if (event.target instanceof Element && event.target.closest(".lh-menu-panel :is(button, a)")) {
+      landlordMenuEl.open = false;
+    }
+  });
+  document.addEventListener("click", (event) => {
+    if (landlordMenuEl.open && event.target instanceof Node && !landlordMenuEl.contains(event.target)) {
+      landlordMenuEl.open = false;
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      landlordMenuEl.open = false;
+    }
+  });
+}
+
 void (async () => {
-  const now = new Date();
-  utilityBillMonthEl.value = "";
-  if (registryReadingMonthEl instanceof HTMLInputElement) {
-    registryReadingMonthEl.value = toMonthInputValue(previousBillingMonth(now));
-    state.registryReadingMonth = toBillingMonth(registryReadingMonthEl.value);
-  }
-  if (utilitySheetBillingMonthEl instanceof HTMLInputElement) {
-    utilitySheetBillingMonthEl.value = toMonthInputValue(now);
-  }
-  if (utilitySheetDueDateEl instanceof HTMLInputElement) {
-    const due = new Date(now);
-    due.setDate(due.getDate() + 7);
-    due.setHours(23, 59, 0, 0);
-    utilitySheetDueDateEl.value = toDateTimeLocalInputValue(due);
+  state.registryReadingMonth = currentBillingMonth();
+  const requestedView = new URLSearchParams(window.location.search).get("view");
+  if (requestedView) {
+    state.activeLandlordView = requestedView;
   }
   applyRoomsWorkspaceLayout();
-  setActiveLandlordView(state.activeLandlordView);
+  setActiveLandlordView(state.activeLandlordView, { skipLoad: true });
   try {
     renderGeneratedHousePreview(buildGeneratedHouseNumbers());
   } catch (_error) {
     renderGeneratedHousePreview([]);
   }
-  syncUtilityBillInputMode();
   await loadData();
+  if (state.activeLandlordView === "meters") {
+    void loadMetersView().catch((error) => {
+      handleLandlordError(error, "Unable to load meters.");
+    });
+  }
   applyRoomsWorkspaceLayout();
   try {
     await openRentSetupDeepLinkIfRequested();

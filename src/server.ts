@@ -27,6 +27,10 @@ import {
 } from "./services/adminAuthService.js";
 import { AppStateService } from "./services/appStateService.js";
 import {
+  METER_READING_REMIND_DAYS_BEFORE,
+  getMeterReadingDueInfo
+} from "./services/meterReadingSchedule.js";
+import {
   RentLedgerService,
   type RentLatePenaltyPolicy,
   type RentLedgerPersistedState
@@ -156,6 +160,7 @@ import {
   createRoomBillingHoldSchema,
   cancelRoomBillingHoldSchema,
   landlordUtilityRegistryUpsertSchema,
+  landlordMeterReadingsSaveSchema,
   landlordAssignCaretakerSchema,
   caretakerAccessResolveSchema,
   caretakerPasswordSetupSchema,
@@ -6047,38 +6052,46 @@ async function bootstrap() {
     return notification;
   };
 
+  // Rolling reminder: a meter is due one month after its last recorded reading.
+  // One alert per building per batch of due meters; the dedupe key moves when a
+  // later-read meter joins the batch, so newly due rooms are announced too.
   const maybeEnqueueMeterReadingReminder = async (building: {
     id: string;
     name: string;
+    houseNumbers?: string[];
   }): Promise<void> => {
-    if (!buildingConfigurationService) {
+    if (buildingConfigurationService) {
+      const config = await buildingConfigurationService.getForBuilding(building.id);
+      if (config && config.utilityBillingMode !== "metered") {
+        return;
+      }
+    }
+
+    const now = new Date();
+    const activeHouses = Array.isArray(building.houseNumbers)
+      ? new Set(building.houseNumbers.map((item) => normalizeHouseNumber(item)).filter(Boolean))
+      : null;
+    const dueReadings = utilityBillingService
+      .listLatestMeterReadings(building.id)
+      .filter((item) => !activeHouses || activeHouses.has(normalizeHouseNumber(item.houseNumber)))
+      .map((item) => ({ ...item, due: getMeterReadingDueInfo(item.recordedAt, now) }))
+      .filter((item) => item.due.status === "due_soon" || item.due.status === "overdue");
+    if (dueReadings.length === 0) {
       return;
     }
 
-    const config = await buildingConfigurationService.getForBuilding(building.id);
-    if (!config || config.utilityBillingMode !== "metered" || !config.meterReadingDay) {
-      return;
-    }
-
-    const today = new Date();
-    if (today.getUTCDate() < config.meterReadingDay) {
-      return;
-    }
-
-    const billingMonth = billingMonthFromDate(today);
-    const meteredHouseNumbers = utilityBillingService
-      .listMeters({ buildingId: building.id })
-      .filter((meter) => hasUsableRoomMeterNumber(meter.meterNumber))
-      .map((meter) => meter.houseNumber);
-
-    const gap = utilityBillingService.collectMeterReadingGap(
-      building.id,
-      meteredHouseNumbers,
-      billingMonth
+    const dueHouses = [...new Set(dueReadings.map((item) => item.houseNumber))].sort(
+      compareHouseNumbers
     );
-    if (gap.unreadHouseCount === 0) {
-      return;
-    }
+    const latestReadDay = dueReadings
+      .map((item) => item.recordedAt.slice(0, 10))
+      .sort()
+      .at(-1);
+    const earliestDueAt = dueReadings
+      .map((item) => item.due.nextDueAt ?? "")
+      .filter(Boolean)
+      .sort()[0];
+    const anyOverdue = dueReadings.some((item) => item.due.status === "overdue");
 
     const ownerStaff = userAccountService
       ? await userAccountService.listLandlordAndStaffUsers()
@@ -6093,18 +6106,23 @@ async function bootstrap() {
         LEGACY_OWNER_ALERT_USER_ID
       ])
     ];
-    if (recipientUserIds.length === 0) {
-      return;
-    }
 
-    const houseWord = gap.unreadHouseCount === 1 ? "house" : "houses";
-    const needsWord = gap.unreadHouseCount === 1 ? "needs" : "need";
-    const sample = gap.sampleUnreadHouses.join(", ");
+    const roomWord = dueHouses.length === 1 ? "room" : "rooms";
+    const sample = dueHouses.slice(0, 5).join(", ");
+    const dueLabel = earliestDueAt
+      ? new Date(earliestDueAt).toLocaleDateString("en-GB", {
+          day: "numeric",
+          month: "short",
+          timeZone: "Africa/Nairobi"
+        })
+      : "";
 
     const notification = ownerNotificationService.enqueue({
       title: "Meter Readings Due",
-      message: `${gap.unreadHouseCount} ${houseWord} in ${building.name} still ${needsWord} a meter reading for ${billingMonth}${
-        sample ? ` (e.g. ${sample})` : ""
+      message: `${dueHouses.length} ${roomWord} in ${building.name} ${
+        anyOverdue ? "are overdue for" : "are due for"
+      } a meter reading${dueLabel ? ` (${dueLabel})` : ""}: ${sample}${
+        dueHouses.length > 5 ? ", ..." : ""
       }.`,
       level: "warning",
       source: "system",
@@ -6112,8 +6130,12 @@ async function bootstrap() {
       buildingId: building.id,
       buildingName: building.name,
       recipientUserIds,
-      dedupeKey: `meter-reading-due-${normalizeBuildingId(building.id)}-${billingMonth}`,
-      url: buildLandlordRoomUrl(building.id)
+      dedupeKey: `meter-reading-due-${normalizeBuildingId(building.id)}-${latestReadDay}`,
+      url: "/landlord?view=meters",
+      metadata: {
+        houses: dueHouses,
+        earliestDueAt
+      }
     });
 
     if (notification) {
@@ -17742,6 +17764,253 @@ async function bootstrap() {
     }
   );
 
+  const METER_READING_BILL_DUE_DAYS = 7;
+
+  const buildMeterReadingRows = async (building: {
+    id: string;
+    houseNumbers?: string[];
+  }) => {
+    const now = new Date();
+    const registryRows = await buildLandlordUtilityRegistryRows(
+      building.id,
+      building.houseNumbers ?? []
+    );
+    const latestByKey = new Map(
+      utilityBillingService
+        .listLatestMeterReadings(building.id)
+        .map((item) => [`${item.utilityType}:${normalizeHouseNumber(item.houseNumber)}`, item])
+    );
+
+    const describeMeter = (
+      utilityType: "water" | "electricity",
+      houseNumber: string,
+      meterNumber: string | undefined
+    ) => {
+      const latest = latestByKey.get(`${utilityType}:${normalizeHouseNumber(houseNumber)}`);
+      return {
+        meterNumber: hasUsableRoomMeterNumber(meterNumber) ? String(meterNumber).trim() : "",
+        lastReading: latest ? latest.currentReading : null,
+        lastReadAt: latest?.recordedAt ?? null,
+        lastBillingMonth: latest?.billingMonth ?? null,
+        ...getMeterReadingDueInfo(latest?.recordedAt, now)
+      };
+    };
+
+    return registryRows.map((row) => ({
+      houseNumber: row.houseNumber,
+      residentName: row.residentName ?? "",
+      hasActiveResident: Boolean(row.hasActiveResident),
+      water: describeMeter("water", row.houseNumber, row.waterMeterNumber),
+      electricity: describeMeter("electricity", row.houseNumber, row.electricityMeterNumber)
+    }));
+  };
+
+  const getMeterReadingRates = (buildingId: string) => {
+    const defaults = getUtilityRateDefaultsForBuilding(buildingId);
+    const water = Number(defaults?.waterRatePerUnitKsh ?? DEFAULT_WATER_RATE_PER_UNIT_KSH);
+    const electricity = Number(defaults?.electricityRatePerUnitKsh);
+    return {
+      water: Number.isFinite(water) ? water : null,
+      electricity: Number.isFinite(electricity) ? electricity : null
+    };
+  };
+
+  const resolveManagedBuildingForRequest = async (
+    req: Request,
+    res: Response
+  ) => {
+    const context = await resolveLandlordAccessContext(req, res);
+    if (!context) {
+      return null;
+    }
+
+    const buildingId = String(req.params.buildingId ?? "").trim();
+    const building = buildingId ? await store.getBuilding(buildingId) : null;
+    if (!building) {
+      res.status(404).json({ error: "Building not found" });
+      return null;
+    }
+
+    if (!(await canManageBuildingFromLandlordContext(context, building.id))) {
+      res.status(403).json({ error: "Building access denied" });
+      return null;
+    }
+
+    return { context, building };
+  };
+
+  app.get("/api/landlord/buildings/:buildingId/meter-readings", async (req, res, next) => {
+    try {
+      const resolved = await resolveManagedBuildingForRequest(req, res);
+      if (!resolved) {
+        return;
+      }
+
+      const { context, building } = resolved;
+      const configuration = buildingConfigurationService
+        ? await buildingConfigurationService.getForBuilding(building.id)
+        : null;
+
+      return res.json({
+        data: await buildMeterReadingRows(building),
+        building: { id: building.id, name: building.name },
+        billingMode: configuration?.utilityBillingMode ?? "metered",
+        rates: getMeterReadingRates(building.id),
+        remindDaysBefore: METER_READING_REMIND_DAYS_BEFORE,
+        role: context.role
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.post("/api/landlord/buildings/:buildingId/meter-readings", async (req, res, next) => {
+    try {
+      const resolved = await resolveManagedBuildingForRequest(req, res);
+      if (!resolved) {
+        return;
+      }
+
+      const { context, building } = resolved;
+      const parsed = landlordMeterReadingsSaveSchema.parse(req.body ?? {});
+      const allowedHouses = new Set(
+        (building.houseNumbers ?? []).map((item) => normalizeHouseNumber(item)).filter(Boolean)
+      );
+      const now = new Date();
+      const dueDate = new Date(
+        now.getTime() + METER_READING_BILL_DUE_DAYS * 24 * 60 * 60 * 1000
+      ).toISOString();
+      const latestByKey = new Map(
+        utilityBillingService
+          .listLatestMeterReadings(building.id)
+          .map((item) => [`${item.utilityType}:${normalizeHouseNumber(item.houseNumber)}`, item])
+      );
+
+      await refreshRoomBillingHoldCache();
+      const saved: Array<{
+        houseNumber: string;
+        utilityType: "water" | "electricity";
+        billingMonth: string;
+        unitsConsumed: number;
+        amountKsh: number;
+      }> = [];
+      const failures: Array<{ houseNumber: string; utilityType: string; error: string }> = [];
+      let meterNumbersUpdated = 0;
+
+      for (const entry of parsed.entries) {
+        const houseNumber = normalizeHouseNumber(entry.houseNumber);
+        const utilityType = entry.utilityType;
+        const fail = (error: string) => failures.push({ houseNumber, utilityType, error });
+
+        if (!allowedHouses.has(houseNumber)) {
+          fail(`House ${houseNumber} is not in ${building.name}.`);
+          continue;
+        }
+
+        try {
+          const meterNumber = entry.meterNumber?.trim();
+          if (meterNumber) {
+            utilityBillingService.upsertMeter(utilityType, building.id, houseNumber, {
+              meterNumber
+            });
+            meterNumbersUpdated += 1;
+          }
+
+          if (entry.reading == null) {
+            continue;
+          }
+
+          const previous = latestByKey.get(`${utilityType}:${houseNumber}`);
+          if (!previous && entry.previousReading == null) {
+            fail("First reading for this meter needs the starting reading.");
+            continue;
+          }
+
+          const billingMonth = utilityBillingService.resolveReadingBillMonth(
+            utilityType,
+            building.id,
+            houseNumber,
+            now
+          );
+          if (
+            isRoomBillingHeld({
+              buildingId: building.id,
+              houseNumber,
+              kind: "utility",
+              utilityType,
+              billingMonth
+            })
+          ) {
+            fail("Utility billing is paused for this room.");
+            continue;
+          }
+
+          const input = createUtilityBillSchema.parse(
+            resolveUtilityBillInput(utilityType, building.id, houseNumber, {
+              billingMonth,
+              previousReading: previous ? undefined : entry.previousReading,
+              currentReading: entry.reading,
+              dueDate,
+              note: "Meter reading recorded."
+            })
+          );
+          const bill = utilityBillingService.createBill(
+            utilityType,
+            building.id,
+            houseNumber,
+            input
+          );
+          saved.push({
+            houseNumber,
+            utilityType,
+            billingMonth: bill.billingMonth,
+            unitsConsumed: bill.unitsConsumed,
+            amountKsh: bill.amountKsh
+          });
+        } catch (error) {
+          const mapped = mapUtilityDomainError(error);
+          fail(
+            mapped?.message ??
+              (error instanceof ZodError
+                ? error.issues[0]?.message ?? "Invalid reading."
+                : error instanceof Error
+                  ? error.message
+                  : "Failed to save reading.")
+          );
+        }
+      }
+
+      if (saved.length > 0 || meterNumbersUpdated > 0) {
+        await persistUtilityBillingStateNow();
+      }
+
+      if (saved.length > 0) {
+        const totalKsh = saved.reduce((sum, item) => sum + item.amountKsh, 0);
+        await enqueueOwnerNotificationForManagementAction(context, {
+          title: "Meter Readings Recorded",
+          message: `${actorFromLandlordContext(context).name || "House manager"} recorded ${saved.length} meter reading${saved.length === 1 ? "" : "s"} for ${building.name} (KSh ${totalKsh.toLocaleString("en-US")} billed).`,
+          level: "info",
+          action: "utility.readings.recorded",
+          buildingId: building.id,
+          buildingName: building.name,
+          dedupeKey: `manager-meter-readings-${building.id}-${now.toISOString()}`,
+          url: buildLandlordRoomUrl(building.id)
+        });
+      }
+
+      return res.status(saved.length > 0 ? 201 : 200).json({
+        data: await buildMeterReadingRows(building),
+        saved,
+        failures,
+        meterNumbersUpdated,
+        rates: getMeterReadingRates(building.id),
+        role: context.role
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   app.get("/api/landlord/utilities/meters", async (req, res, next) => {
     try {
       const context = await resolveLandlordAccessContext(req, res);
@@ -19805,7 +20074,27 @@ async function bootstrap() {
     );
   });
 
+  const METER_READING_REMINDER_INTERVAL_MS = 6 * 60 * 60 * 1000;
+  const runMeterReadingReminderSweep = async () => {
+    try {
+      const buildings = await store.listBuildings();
+      for (const building of buildings) {
+        await maybeEnqueueMeterReadingReminder(building);
+      }
+    } catch (error) {
+      console.error("Meter reading reminder sweep failed", error);
+    }
+  };
+  const meterReadingReminderTimer = setInterval(() => {
+    void runMeterReadingReminderSweep();
+  }, METER_READING_REMINDER_INTERVAL_MS);
+  meterReadingReminderTimer.unref();
+  setTimeout(() => {
+    void runMeterReadingReminderSweep();
+  }, 60_000).unref();
+
   const shutdown = async () => {
+    clearInterval(meterReadingReminderTimer);
     await repositoryContext.close();
     server.close();
   };

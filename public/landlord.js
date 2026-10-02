@@ -1,6 +1,6 @@
 import { initResponsiveTables } from "./mobile-table.js";
 import { notifyError, notifyStatus } from "./notifications.js";
-import { createMeterReadingsView } from "./meter-readings.js";
+import { createMeterReadingsView } from "./meter-readings.js?v=20261002g";
 import { createUploadedImageGallery, renderSelectedImagePreviews, uploadImageFiles, validateImageFiles } from "./media-upload.js";
 import { applyDocumentBranding, getLandlordPortalTitle, getLandlordShellBrand } from "./portal-branding.js";
 const LANDLORD_SW_URL = "/resident-sw.js?v=20260831a";

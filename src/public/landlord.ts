@@ -2,6 +2,7 @@
 import { initResponsiveTables } from "./mobile-table.js";
 import { notifyError, notifyStatus } from "./notifications.js";
 import { createMeterReadingsView } from "./meter-readings.js";
+import { createBalancesView } from "./balances-view.js";
 import {
   createUploadedImageGallery,
   renderSelectedImagePreviews,
@@ -158,6 +159,19 @@ const meterReadingsView = createMeterReadingsView({
   onSaved: () => {
     void Promise.all([loadBills(), loadRegistryRows(), loadMeters()]).catch((error) => {
       handleLandlordError(error, "Unable to refresh utility bills.");
+    });
+  }
+});
+const balancesView = createBalancesView({
+  root: document.getElementById("balances-section"),
+  requestJson: (url, options) => requestJson(url, options),
+  getBuildingId: () => getFocusedBuildingId() || state.selectedRegistryBuildingId || "",
+  formatCurrency: (value) => formatCurrency(value),
+  onStatus: (message) => setStatus(message),
+  onError: (error, fallback) => handleLandlordError(error, fallback),
+  onSaved: () => {
+    void Promise.all([loadBills(), loadPayments(), loadRentStatus()]).catch((error) => {
+      handleLandlordError(error, "Unable to refresh balances.");
     });
   }
 });
@@ -877,6 +891,7 @@ function isLandlordViewAvailableForRole(view) {
       normalizedView === "tenants" ||
       normalizedView === "meters" ||
       normalizedView === "rent" ||
+      normalizedView === "balances" ||
       normalizedView === "applications"
     );
   }
@@ -1422,7 +1437,8 @@ function setActiveLandlordView(nextView, options = {}) {
     normalizedView === "tenants" ||
     normalizedView === "meters" ||
     normalizedView === "rent" ||
-    normalizedView === "expenses"
+    normalizedView === "expenses" ||
+    normalizedView === "balances"
       ? normalizedView
       : "overview";
   const targetView = isLandlordViewAvailableForRole(requestedTargetView)
@@ -1454,6 +1470,12 @@ function setActiveLandlordView(nextView, options = {}) {
     navStrip.scrollTo({
       left: activeNavButton.offsetLeft - (navStrip.clientWidth - activeNavButton.offsetWidth) / 2,
       behavior: "smooth"
+    });
+  }
+
+  if (targetView === "balances" && previousView !== "balances" && !options.skipLoad) {
+    void balancesView.load().catch((error) => {
+      handleLandlordError(error, "Unable to load balances.");
     });
   }
 
@@ -10196,7 +10218,8 @@ async function activateBuilding(buildingId, options = {}) {
     loadCaretakers(),
     loadLandlordTickets(),
     loadResidents(),
-    state.activeLandlordView === "meters" ? meterReadingsView.load() : Promise.resolve()
+    state.activeLandlordView === "meters" ? meterReadingsView.load() : Promise.resolve(),
+    state.activeLandlordView === "balances" ? balancesView.load() : Promise.resolve()
   ]);
 }
 
@@ -13185,6 +13208,11 @@ void (async () => {
   await loadData();
   if (state.activeLandlordView === "settings") {
     syncSettingsBuildingOptions();
+  }
+  if (state.activeLandlordView === "balances") {
+    void balancesView.load().catch((error) => {
+      handleLandlordError(error, "Unable to load balances.");
+    });
   }
   if (state.activeLandlordView === "meters") {
     void loadMetersView().catch((error) => {

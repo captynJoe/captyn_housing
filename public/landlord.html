@@ -98,6 +98,7 @@
             <button type="button" class="lh-nav-btn" data-landlord-view="overview" data-landlord-section-target="overview-collections-panel">Dashboard</button>
             <button type="button" class="lh-nav-btn" data-landlord-view="tenants" data-landlord-section-target="residents-section">Rooms</button>
             <button type="button" class="lh-nav-btn" data-landlord-view="rent" data-landlord-section-target="overview-rent-status-section">Rent</button>
+            <button type="button" class="lh-nav-btn" data-landlord-view="balances" data-landlord-section-target="balances-section">Balances</button>
             <button type="button" class="lh-nav-btn" data-landlord-view="applications" data-landlord-section-target="applications-section">
               <span class="landlord-nav-label">Requests</span>
               <span id="applications-nav-badge" class="lh-count-badge hidden" aria-live="polite"></span>
@@ -1115,6 +1116,23 @@
         </section>
 
         <section
+          class="panel wide-panel landlord-view hidden"
+          data-landlord-view-panel="balances"
+          id="balances-section"
+        >
+          <div class="panel-head mr-head">
+            <h2>Balances</h2>
+            <div class="mr-toggle bal-filters" role="group" aria-label="Show">
+              <button type="button" data-balance-filter="unchecked" aria-pressed="true">Not checked</button>
+              <button type="button" data-balance-filter="owing" aria-pressed="false">Owing</button>
+              <button type="button" data-balance-filter="all" aria-pressed="false">All</button>
+            </div>
+          </div>
+          <div id="balances-summary" class="mr-summary"></div>
+          <div id="balances-list" class="mr-list"></div>
+        </section>
+
+        <section
           class="panel wide-panel landlord-view hidden mr-panel"
           data-landlord-view-panel="meters"
           id="utilities-registry-section"
@@ -2042,6 +2060,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=3ce898dd50"></script>
+    <script type="module" src="/landlord.js?v=4742013e52"></script>
   </body>
 </html>

@@ -79,6 +79,8 @@ interface UtilityBillRecord {
   updatedAt: string;
   payments: UtilityPaymentEvent[];
   usageCharges?: UtilityUsageCharge[];
+  // Manual balance correction by management: negative clears debt, positive adds to it.
+  adjustmentKsh?: number;
 }
 
 export interface UtilityBillSnapshot extends Omit<UtilityBillRecord, "payments"> {
@@ -374,6 +376,11 @@ function usageChargeTotal(record: Pick<UtilityBillRecord, "usageCharges">): numb
   );
 }
 
+function adjustmentTotal(record: Pick<UtilityBillRecord, "adjustmentKsh">): number {
+  const value = Math.round(Number(record.adjustmentKsh ?? 0));
+  return Number.isFinite(value) ? value : 0;
+}
+
 function paidTotal(record: Pick<UtilityBillRecord, "payments">): number {
   return (record.payments ?? []).reduce(
     (sum, payment) => sum + Number(payment.amountKsh ?? 0),
@@ -657,7 +664,9 @@ export class UtilityBillingService {
             : [],
           usageCharges: normalizeUsageCharges(
             (snapshot as { usageCharges?: unknown }).usageCharges
-          )
+          ),
+          adjustmentKsh:
+            Number((snapshot as { adjustmentKsh?: unknown }).adjustmentKsh ?? 0) || undefined
         };
 
         records.push(record);
@@ -1469,7 +1478,10 @@ export class UtilityBillingService {
     ];
     const baseAmount = Math.max(0, Math.round(Number(record.fixedChargeKsh ?? 0)));
     record.amountKsh = baseAmount + usageChargeTotal(record);
-    record.balanceKsh = Math.max(0, record.amountKsh - paidTotal(record));
+    record.balanceKsh = Math.max(
+      0,
+      record.amountKsh + adjustmentTotal(record) - paidTotal(record)
+    );
     record.updatedAt = nowIso();
     this.emitStateChange();
 
@@ -2108,6 +2120,107 @@ export class UtilityBillingService {
     return { unreadHouseCount: unread.length, sampleUnreadHouses: unread.slice(0, 5) };
   }
 
+  // Open bills a room currently owes on (what the landlord screens total up): one
+  // record per billing month, only bills whose balance is already visible.
+  private collectVisibleOpenBills(buildingId: string, houseNumber: string): UtilityBillRecord[] {
+    const normalizedBuildingId = normalizeBuildingId(buildingId);
+    const normalizedHouse = normalizeHouseNumber(houseNumber);
+    const byMonth = new Map<string, UtilityBillRecord>();
+    for (const records of this.billsByLedger.values()) {
+      for (const record of records) {
+        if (
+          record.houseNumber !== normalizedHouse ||
+          !buildingMatchesScope(record.buildingId, normalizedBuildingId) ||
+          Number(record.balanceKsh ?? 0) <= 0 ||
+          !this.isBillBalanceVisible(record)
+        ) {
+          continue;
+        }
+        const current = byMonth.get(record.billingMonth);
+        if (
+          !current ||
+          record.amountKsh > current.amountKsh ||
+          (record.amountKsh === current.amountKsh && record.balanceKsh > current.balanceKsh)
+        ) {
+          byMonth.set(record.billingMonth, record);
+        }
+      }
+    }
+    return [...byMonth.values()].sort((a, b) => monthSortAsc(a.billingMonth, b.billingMonth));
+  }
+
+  getVisibleOpenBalanceForHouse(
+    buildingId: string,
+    houseNumber: string
+  ): { water: number; electricity: number; total: number } {
+    const result = { water: 0, electricity: 0, total: 0 };
+    for (const bill of this.collectVisibleOpenBills(buildingId, houseNumber)) {
+      const balance = Math.max(0, Number(bill.balanceKsh ?? 0));
+      result[bill.utilityType] += balance;
+      result.total += balance;
+    }
+    return result;
+  }
+
+  // Sets what a room owes on utilities. Lowering clears the oldest bills first;
+  // raising adds to the newest open bill (or the latest bill if none is open).
+  setVisibleOpenBalanceForHouse(
+    buildingId: string,
+    houseNumber: string,
+    targetKsh: number
+  ): { previousKsh: number; newKsh: number } {
+    const target = Math.max(0, Math.round(Number(targetKsh) || 0));
+    const openBills = this.collectVisibleOpenBills(buildingId, houseNumber);
+    const previousKsh = openBills.reduce((sum, bill) => sum + Math.max(0, bill.balanceKsh), 0);
+    let delta = target - previousKsh;
+    if (delta === 0) {
+      return { previousKsh, newKsh: previousKsh };
+    }
+
+    const now = nowIso();
+    if (delta < 0) {
+      let credit = -delta;
+      for (const bill of openBills) {
+        if (credit <= 0) {
+          break;
+        }
+        const take = Math.min(Math.max(0, bill.balanceKsh), credit);
+        bill.adjustmentKsh = adjustmentTotal(bill) - take || undefined;
+        bill.balanceKsh = Math.max(0, bill.balanceKsh - take);
+        bill.updatedAt = now;
+        credit -= take;
+      }
+    } else {
+      const normalizedBuildingId = normalizeBuildingId(buildingId);
+      const normalizedHouse = normalizeHouseNumber(houseNumber);
+      const latestBill =
+        openBills.at(-1) ??
+        [...this.billsByLedger.values()]
+          .flatMap((records) => records)
+          .filter(
+            (record) =>
+              record.houseNumber === normalizedHouse &&
+              buildingMatchesScope(record.buildingId, normalizedBuildingId) &&
+              this.isBillBalanceVisible(record) &&
+              Number(record.amountKsh ?? 0) > 0
+          )
+          .sort((a, b) => monthSortDesc(a.billingMonth, b.billingMonth))[0];
+      if (!latestBill) {
+        throw new Error(
+          `${normalizedHouse} has no utility bill yet, so there is nothing to add the balance to.`
+        );
+      }
+      latestBill.adjustmentKsh = adjustmentTotal(latestBill) + delta || undefined;
+      latestBill.balanceKsh = Math.max(0, latestBill.balanceKsh + delta);
+      latestBill.updatedAt = now;
+      delta = 0;
+    }
+
+    this.emitStateChange();
+    const newKsh = this.getVisibleOpenBalanceForHouse(buildingId, houseNumber).total;
+    return { previousKsh, newKsh };
+  }
+
   listPayments(options: ListUtilityPaymentsOptions = {}): UtilityPaymentEvent[] {
     const limit = Number.isFinite(options.limit)
       ? Math.min(Math.max(options.limit ?? 500, 1), 2_000)
@@ -2183,6 +2296,7 @@ export class UtilityBillingService {
       updatedAt: record.updatedAt,
       payments: [...record.payments],
       usageCharges: record.usageCharges?.map((item) => ({ ...item })),
+      adjustmentKsh: record.adjustmentKsh || undefined,
       status: utilityStatus(record.balanceKsh, daysToDue),
       daysToDue
     };
@@ -2650,7 +2764,10 @@ export class UtilityBillingService {
       const target =
         records.find((item) => item.utilityType === "water") ?? reference;
       target.amountKsh = resolvedFallbackAmount + usageChargeTotal(target);
-      target.balanceKsh = Math.max(0, target.amountKsh - paidTotal(target));
+      target.balanceKsh = Math.max(
+        0,
+        target.amountKsh + adjustmentTotal(target) - paidTotal(target)
+      );
       target.fixedChargeKsh = resolvedFallbackAmount;
       target.previousReading = 0;
       target.currentReading = 0;
@@ -2749,8 +2866,10 @@ export class UtilityBillingService {
       const mergedUsage = [...latestUsageByUtility.values()];
       target.usageCharges = mergedUsage.length > 0 ? mergedUsage : undefined;
 
+      const mergedAdjustment = records.reduce((sum, item) => sum + adjustmentTotal(item), 0);
+      target.adjustmentKsh = mergedAdjustment || undefined;
       target.amountKsh = resolvedCombinedAmount + usageChargeTotal(target);
-      target.balanceKsh = Math.max(0, target.amountKsh - totalPaid);
+      target.balanceKsh = Math.max(0, target.amountKsh + mergedAdjustment - totalPaid);
       target.fixedChargeKsh = resolvedCombinedAmount;
       target.previousReading = 0;
       target.currentReading = 0;
@@ -2777,6 +2896,7 @@ export class UtilityBillingService {
         record.note = `Combined utility fee tracked on ${target.utilityType} for ${record.billingMonth}.`;
         record.payments = [];
         record.usageCharges = undefined;
+        record.adjustmentKsh = undefined;
         record.updatedAt = target.updatedAt;
       });
     }

@@ -1091,6 +1091,9 @@ function setActiveLandlordView(nextView, options = {}) {
             behavior: "smooth"
         });
     }
+    if (targetView === "settings" && previousView !== "settings" && !options.skipLoad) {
+        syncSettingsBuildingOptions();
+    }
     if (targetView === "meters" && (previousView !== "meters" || options.forceLoad) && !options.skipLoad) {
         void loadMetersView().catch((error) => {
             handleLandlordError(error, "Unable to load meters.");
@@ -4237,10 +4240,12 @@ function setBuildingDefaultsFormDisabled(disabled) {
         }
     });
 }
+let buildingDefaultsLoadedFor = "";
 async function loadBuildingDefaults(buildingId) {
     if (!(buildingDefaultsFormEl instanceof HTMLFormElement)) {
         return;
     }
+    buildingDefaultsLoadedFor = "";
     if (!buildingId) {
         setBuildingDefaultsFormDisabled(true);
         if (buildingDefaultsSummaryEl instanceof HTMLElement) {
@@ -4303,6 +4308,7 @@ async function loadBuildingDefaults(buildingId) {
         if (buildingDefaultsNoteEl instanceof HTMLInputElement) {
             buildingDefaultsNoteEl.value = "";
         }
+        buildingDefaultsLoadedFor = buildingId;
         setBuildingDefaultsFormDisabled(isCaretakerRole());
         if (buildingDefaultsSummaryEl instanceof HTMLElement && !isCaretakerRole()) {
             buildingDefaultsSummaryEl.textContent = `Editing defaults for ${getBuildingDisplayNameById(buildingId, "the selected building")}. Last updated ${formatDateTime(data.updatedAt)}.`;
@@ -4317,6 +4323,11 @@ buildingDefaultsFormEl?.addEventListener("submit", (event) => {
     event.preventDefault();
     const buildingId = getSelectedSettingsBuildingId();
     if (!buildingId) {
+        return;
+    }
+    if (buildingDefaultsLoadedFor !== buildingId) {
+        void loadBuildingDefaults(buildingId);
+        handleLandlordError(new Error("Building defaults were still loading. Check the values and save again."), "Failed to update building defaults.");
         return;
     }
     if (!(buildingDefaultsAcknowledgeEl instanceof HTMLInputElement) || !buildingDefaultsAcknowledgeEl.checked) {
@@ -10542,6 +10553,9 @@ void (async () => {
         renderGeneratedHousePreview([]);
     }
     await loadData();
+    if (state.activeLandlordView === "settings") {
+        syncSettingsBuildingOptions();
+    }
     if (state.activeLandlordView === "meters") {
         void loadMetersView().catch((error) => {
             handleLandlordError(error, "Unable to load meters.");

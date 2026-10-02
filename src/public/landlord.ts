@@ -1457,6 +1457,10 @@ function setActiveLandlordView(nextView, options = {}) {
     });
   }
 
+  if (targetView === "settings" && previousView !== "settings" && !options.skipLoad) {
+    syncSettingsBuildingOptions();
+  }
+
   if (targetView === "meters" && (previousView !== "meters" || options.forceLoad) && !options.skipLoad) {
     void loadMetersView().catch((error) => {
       handleLandlordError(error, "Unable to load meters.");
@@ -5390,10 +5394,15 @@ function setBuildingDefaultsFormDisabled(disabled) {
   });
 }
 
+// Building id whose saved defaults are currently shown in the form. Saving is refused
+// until this matches, so a blank form can never overwrite a building's settings.
+let buildingDefaultsLoadedFor = "";
+
 async function loadBuildingDefaults(buildingId) {
   if (!(buildingDefaultsFormEl instanceof HTMLFormElement)) {
     return;
   }
+  buildingDefaultsLoadedFor = "";
 
   if (!buildingId) {
     setBuildingDefaultsFormDisabled(true);
@@ -5463,6 +5472,7 @@ async function loadBuildingDefaults(buildingId) {
       buildingDefaultsNoteEl.value = "";
     }
 
+    buildingDefaultsLoadedFor = buildingId;
     setBuildingDefaultsFormDisabled(isCaretakerRole());
     if (buildingDefaultsSummaryEl instanceof HTMLElement && !isCaretakerRole()) {
       buildingDefaultsSummaryEl.textContent = `Editing defaults for ${getBuildingDisplayNameById(
@@ -5481,6 +5491,15 @@ buildingDefaultsFormEl?.addEventListener("submit", (event) => {
 
   const buildingId = getSelectedSettingsBuildingId();
   if (!buildingId) {
+    return;
+  }
+
+  if (buildingDefaultsLoadedFor !== buildingId) {
+    void loadBuildingDefaults(buildingId);
+    handleLandlordError(
+      new Error("Building defaults were still loading. Check the values and save again."),
+      "Failed to update building defaults."
+    );
     return;
   }
 
@@ -13164,6 +13183,9 @@ void (async () => {
     renderGeneratedHousePreview([]);
   }
   await loadData();
+  if (state.activeLandlordView === "settings") {
+    syncSettingsBuildingOptions();
+  }
   if (state.activeLandlordView === "meters") {
     void loadMetersView().catch((error) => {
       handleLandlordError(error, "Unable to load meters.");

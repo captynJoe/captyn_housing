@@ -72,6 +72,8 @@ const buildingDefaultsWaterRateEl = document.getElementById("building-defaults-w
 const buildingDefaultsElectricityRateEl = document.getElementById("building-defaults-electricity-rate");
 const buildingDefaultsWaterFixedEl = document.getElementById("building-defaults-water-fixed");
 const buildingDefaultsElectricityFixedEl = document.getElementById("building-defaults-electricity-fixed");
+const buildingDefaultsIncludedWaterUnitsEl = document.getElementById("building-defaults-included-water-units");
+const buildingDefaultsIncludedElectricityUnitsEl = document.getElementById("building-defaults-included-electricity-units");
 const buildingDefaultsCombinedChargeEl = document.getElementById("building-defaults-combined-charge");
 const buildingDefaultsBalanceVisibleDaysEl = document.getElementById("building-defaults-balance-visible-days");
 const buildingDefaultsMonthlyRentEl = document.getElementById("building-defaults-monthly-rent");
@@ -4271,6 +4273,12 @@ async function loadBuildingDefaults(buildingId) {
         if (buildingDefaultsElectricityFixedEl instanceof HTMLInputElement) {
             buildingDefaultsElectricityFixedEl.value = data.defaultElectricityFixedChargeKsh ?? "";
         }
+        if (buildingDefaultsIncludedWaterUnitsEl instanceof HTMLInputElement) {
+            buildingDefaultsIncludedWaterUnitsEl.value = data.includedWaterUnits ?? "";
+        }
+        if (buildingDefaultsIncludedElectricityUnitsEl instanceof HTMLInputElement) {
+            buildingDefaultsIncludedElectricityUnitsEl.value = data.includedElectricityUnits ?? "";
+        }
         if (buildingDefaultsCombinedChargeEl instanceof HTMLInputElement) {
             buildingDefaultsCombinedChargeEl.value = data.defaultCombinedUtilityChargeKsh ?? "";
         }
@@ -4322,6 +4330,8 @@ buildingDefaultsFormEl?.addEventListener("submit", (event) => {
         defaultWaterFixedChargeKsh: toOptionalNumber(buildingDefaultsWaterFixedEl?.value),
         defaultElectricityFixedChargeKsh: toOptionalNumber(buildingDefaultsElectricityFixedEl?.value),
         defaultCombinedUtilityChargeKsh: toOptionalNumber(buildingDefaultsCombinedChargeEl?.value),
+        includedWaterUnits: toOptionalNumber(buildingDefaultsIncludedWaterUnitsEl?.value),
+        includedElectricityUnits: toOptionalNumber(buildingDefaultsIncludedElectricityUnitsEl?.value),
         utilityBalanceVisibleDays: toOptionalNumber(buildingDefaultsBalanceVisibleDaysEl?.value),
         defaultMonthlyRentKsh: toOptionalNumber(buildingDefaultsMonthlyRentEl?.value),
         defaultRentDueDay: toOptionalNumber(buildingDefaultsRentDueDayEl?.value),

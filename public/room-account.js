@@ -1,6 +1,6 @@
-import { applyDocumentBranding, getLandlordPortalTitle, getLandlordShellBrand } from "./portal-branding.js";
-import { notifyError, notifyStatus } from "./notifications.js";
-import { createUploadedImageGallery, renderSelectedImagePreviews, uploadImageFiles, validateImageFiles } from "./media-upload.js";
+import { applyDocumentBranding, getLandlordPortalTitle, getLandlordShellBrand } from "./portal-branding.js?v=9b283694b2";
+import { notifyError, notifyStatus } from "./notifications.js?v=62acc56b74";
+import { createUploadedImageGallery, renderSelectedImagePreviews, uploadImageFiles, validateImageFiles } from "./media-upload.js?v=549f6d7675";
 const roomAccountTagEl = document.getElementById("room-account-tag");
 const roomAccountTitleEl = document.getElementById("room-account-title");
 const roomAccountSubtitleEl = document.getElementById("room-account-subtitle");

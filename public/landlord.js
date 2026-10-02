@@ -1,8 +1,8 @@
-import { initResponsiveTables } from "./mobile-table.js";
-import { notifyError, notifyStatus } from "./notifications.js";
-import { createMeterReadingsView } from "./meter-readings.js?v=20261002g";
-import { createUploadedImageGallery, renderSelectedImagePreviews, uploadImageFiles, validateImageFiles } from "./media-upload.js";
-import { applyDocumentBranding, getLandlordPortalTitle, getLandlordShellBrand } from "./portal-branding.js";
+import { initResponsiveTables } from "./mobile-table.js?v=3e39d752dc";
+import { notifyError, notifyStatus } from "./notifications.js?v=62acc56b74";
+import { createMeterReadingsView } from "./meter-readings.js?v=300b45915f";
+import { createUploadedImageGallery, renderSelectedImagePreviews, uploadImageFiles, validateImageFiles } from "./media-upload.js?v=549f6d7675";
+import { applyDocumentBranding, getLandlordPortalTitle, getLandlordShellBrand } from "./portal-branding.js?v=9b283694b2";
 const LANDLORD_SW_URL = "/resident-sw.js?v=20260831a";
 const authStatusEl = document.getElementById("auth-status");
 const landlordRoleEl = document.getElementById("landlord-role");

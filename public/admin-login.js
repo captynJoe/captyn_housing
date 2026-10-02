@@ -1,5 +1,5 @@
-import { initPasswordVisibilityToggles } from "./password-visibility.js";
-import { notifyError, notifyStatus } from "./notifications.js";
+import { initPasswordVisibilityToggles } from "./password-visibility.js?v=29790de3d5";
+import { notifyError, notifyStatus } from "./notifications.js?v=62acc56b74";
 const loginFormEl = document.getElementById("admin-login-form");
 const accessTokenEl = document.getElementById("admin-access-token");
 const usernameEl = document.getElementById("admin-username");

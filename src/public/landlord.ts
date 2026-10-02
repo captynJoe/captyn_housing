@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { initResponsiveTables } from "./mobile-table.js";
 import { notifyError, notifyStatus } from "./notifications.js";
-import { createMeterReadingsView } from "./meter-readings.js?v=20261002g";
+import { createMeterReadingsView } from "./meter-readings.js";
 import {
   createUploadedImageGallery,
   renderSelectedImagePreviews,

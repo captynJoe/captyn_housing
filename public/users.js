@@ -1,6 +1,6 @@
-import { initPasswordVisibilityToggles } from "./password-visibility.js";
-import { createUploadedImageGallery, renderSelectedImagePreviews, uploadImageFiles, validateImageFiles } from "./media-upload.js";
-import { applyDocumentBranding, getResidentPortalTitle, getResidentShellBrand } from "./portal-branding.js";
+import { initPasswordVisibilityToggles } from "./password-visibility.js?v=29790de3d5";
+import { createUploadedImageGallery, renderSelectedImagePreviews, uploadImageFiles, validateImageFiles } from "./media-upload.js?v=549f6d7675";
+import { applyDocumentBranding, getResidentPortalTitle, getResidentShellBrand } from "./portal-branding.js?v=9b283694b2";
 const RESIDENT_TOKEN_KEY = "estatedesk_resident_session_token";
 const RESIDENT_SESSION_TOKEN_KEY = "estatedesk_resident_session_token_session";
 const RESIDENT_REMEMBER_DEVICE_KEY = "estatedesk_resident_remember_device";

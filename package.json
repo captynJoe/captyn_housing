@@ -26,7 +26,7 @@
     "build:resident": "vite build --config vite.resident.config.ts",
     "typecheck:resident": "tsc --noEmit -p tsconfig.resident.json",
     "build:api": "tsc -p tsconfig.json",
-    "build:public": "tsc -p tsconfig.public.json",
+    "build:public": "tsc -p tsconfig.public.json && node scripts/stamp-public-assets.mjs",
     "typecheck:public": "tsc --noEmit -p tsconfig.public.json"
   },
   "dependencies": {

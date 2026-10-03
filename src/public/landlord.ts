@@ -7236,7 +7236,7 @@ function renderApplications(rows) {
 function renderRentStatus(rows) {
   rentStatusBodyEl.replaceChildren();
 
-  const visibleRows = getRowsForFocusedBuilding(rows);
+  const visibleRows = [...getRowsForFocusedBuilding(rows)].sort(compareStableRoomOrder);
   if (visibleRows.length === 0) {
     const row = document.createElement("tr");
     row.innerHTML = '<td colspan="14">No rent status data for the current building.</td>';

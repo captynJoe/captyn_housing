@@ -93,15 +93,46 @@ export function roomStatus(row: MeterReadingRow, metered: boolean): MeterDueStat
   )[0];
 }
 
-export function sortRooms(rows: MeterReadingRow[], metered: boolean): MeterReadingRow[] {
-  return [...rows].sort((left, right) => {
-    const byStatus =
-      STATUS_ORDER[roomStatus(left, metered)] - STATUS_ORDER[roomStatus(right, metered)];
-    if (byStatus !== 0) {
-      return byStatus;
-    }
-    return left.houseNumber.localeCompare(right.houseNumber, undefined, { numeric: true });
-  });
+// Rooms always appear in house-number order (1, 2, 3 ... last) so a room never jumps
+// around the list once it has been read.
+export function sortRooms(rows: MeterReadingRow[]): MeterReadingRow[] {
+  return [...rows].sort((left, right) =>
+    left.houseNumber.localeCompare(right.houseNumber, undefined, { numeric: true })
+  );
+}
+
+export const READING_WINDOW_DAYS = 30;
+
+export function readWithinDays(
+  info: MeterInfo,
+  days: number = READING_WINDOW_DAYS,
+  now: Date = new Date()
+): boolean {
+  if (!info.lastReadAt) {
+    return false;
+  }
+  const readAt = new Date(info.lastReadAt).getTime();
+  return Number.isFinite(readAt) && now.getTime() - readAt <= days * 24 * 60 * 60 * 1000;
+}
+
+// An occupied room still needs a reading if any of its meters has not been read in
+// the last 30 days. Vacant rooms can't take readings, so they never count.
+export function roomNeedsReading(row: MeterReadingRow, now: Date = new Date()): boolean {
+  return (
+    row.hasActiveResident &&
+    METER_UTILITIES.some((utility) => !readWithinDays(row[utility], READING_WINDOW_DAYS, now))
+  );
+}
+
+export type MeterRoomFilter = "unread" | "all";
+
+export function filterRooms(
+  rows: MeterReadingRow[],
+  filter: MeterRoomFilter,
+  now: Date = new Date()
+): MeterReadingRow[] {
+  const ordered = sortRooms(rows);
+  return filter === "unread" ? ordered.filter((row) => roomNeedsReading(row, now)) : ordered;
 }
 
 // includedUnits: undefined on metered buildings (every unit is billed); a number on
@@ -296,7 +327,11 @@ const UTILITY_LABEL: Record<MeterUtility, string> = {
 export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
   const listEl = deps.root.querySelector<HTMLElement>("#meter-readings-list");
   const summaryEl = deps.root.querySelector<HTMLElement>("#meter-readings-summary");
+  const filterButtons = [
+    ...deps.root.querySelectorAll<HTMLButtonElement>("[data-meter-filter]")
+  ];
 
+  let filter: MeterRoomFilter = "unread";
   let buildingId = "";
   let billingMode = "metered";
   let buildingCharges: MeterReadingsResponse["buildingCharges"] = undefined;
@@ -307,6 +342,8 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
   const serverErrors = new Map<string, string>();
   const editingMeters = new Set<string>();
   const savingRooms = new Set<string>();
+  // Rooms saved during this visit stay in the "Not read" list so nothing jumps away.
+  const savedThisVisit = new Set<string>();
 
   const isMetered = () => billingMode === "metered";
   const readsMeters = () => billingMode !== "disabled";
@@ -394,21 +431,23 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
     }
     const chips: string[] = [];
     if (readsMeters()) {
-      const counts = { overdue: 0, due_soon: 0, no_reading: 0, ok: 0 };
-      rows.forEach((row) => {
-        counts[roomStatus(row, true)] += 1;
-      });
-      const due = counts.overdue + counts.due_soon;
-      if (due > 0) {
-        chips.push(`<span class="mr-chip is-due">${due} due</span>`);
-      }
-      if (counts.no_reading > 0) {
-        chips.push(`<span class="mr-chip">${counts.no_reading} not started</span>`);
-      }
-      if (counts.ok > 0) {
-        chips.push(`<span class="mr-chip is-ok">${counts.ok} up to date</span>`);
-      }
+      const occupied = rows.filter((row) => row.hasActiveResident).length;
+      const unread = rows.filter((row) => roomNeedsReading(row)).length;
+      chips.push(
+        unread > 0
+          ? `<span class="mr-chip is-due">${unread} of ${occupied} not read in ${READING_WINDOW_DAYS} days</span>`
+          : `<span class="mr-chip is-ok">All ${occupied} read in the last ${READING_WINDOW_DAYS} days</span>`
+      );
     }
+    filterButtons.forEach((button) => {
+      const active = button.dataset.meterFilter === filter;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+      if (button.dataset.meterFilter === "unread") {
+        const unread = readsMeters() ? rows.filter((row) => roomNeedsReading(row)).length : 0;
+        button.textContent = `Not read (${unread})`;
+      }
+    });
     if (isMetered()) {
       for (const utility of METER_UTILITIES) {
         const rate = rates[utility];
@@ -515,7 +554,17 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
     }
 
     const metered = readsMeters();
-    listEl.innerHTML = sortRooms(rows, metered)
+    const visible = metered
+      ? sortRooms(rows).filter(
+          (row) =>
+            filter === "all" || roomNeedsReading(row) || savedThisVisit.has(row.houseNumber)
+        )
+      : sortRooms(rows);
+    if (visible.length === 0) {
+      listEl.innerHTML = `<p class="mr-empty">Every occupied room has been read in the last ${READING_WINDOW_DAYS} days.</p>`;
+      return;
+    }
+    listEl.innerHTML = visible
       .map((row) => {
         const status = roomStatus(row, metered);
         const draft = drafts.get(row.houseNumber);
@@ -569,6 +618,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
       drafts.clear();
       serverErrors.clear();
       editingMeters.clear();
+      savedThisVisit.clear();
     }
     buildingId = nextBuildingId;
     if (!buildingId) {
@@ -667,6 +717,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
             ? `Saved room ${houseNumber} (${deps.formatCurrency(totalKsh)} billed).`
             : `Saved room ${houseNumber}.`
       );
+      savedThisVisit.add(houseNumber);
       deps.onSaved?.();
     } catch (error) {
       deps.onError(error, `Unable to save room ${houseNumber}.`);
@@ -675,6 +726,14 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
       render();
     }
   }
+
+  filterButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      filter = button.dataset.meterFilter === "all" ? "all" : "unread";
+      savedThisVisit.clear();
+      render();
+    });
+  });
 
   listEl?.addEventListener("input", (event) => {
     const input = event.target;

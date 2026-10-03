@@ -3,8 +3,9 @@ import test from "node:test";
 import {
   buildRoomSavePayload,
   describeDue,
+  filterRooms,
   previewDraft,
-  roomStatus,
+  roomNeedsReading,
   sortRooms,
   type MeterInfo,
   type MeterReadingRow
@@ -105,18 +106,25 @@ test("flat-fee buildings preview only the units above the allowance", () => {
   );
 });
 
-test("rooms with an overdue or due meter come first", () => {
+test("rooms stay in house-number order and the 30-day filter shows unread rooms", () => {
+  const now = new Date("2026-10-03T12:00:00Z");
+  const recent = { lastReadAt: "2026-09-20T08:00:00Z" };
+  const old = { lastReadAt: "2026-08-20T08:00:00Z" };
   const rows = [
-    room("A3"),
-    room("A10", { water: readMeter({ status: "overdue", daysUntilDue: -2 }) }),
-    room("A2", { electricity: readMeter({ status: "due_soon", daysUntilDue: 1 }) })
+    room("10", { water: readMeter(recent), electricity: readMeter(recent) }),
+    room("2", { water: readMeter(recent), electricity: readMeter(old) }),
+    room("1", { water: readMeter({ status: "overdue", daysUntilDue: -2, ...old }), electricity: readMeter(old) }),
+    room("3", {
+      hasActiveResident: false,
+      water: readMeter({ lastReading: null, lastReadAt: null, status: "no_reading" })
+    })
   ];
-  assert.deepEqual(
-    sortRooms(rows, true).map((item) => item.houseNumber),
-    ["A10", "A2", "A3"]
-  );
-  assert.equal(roomStatus(rows[1], true), "overdue");
-  assert.equal(roomStatus(rows[1], false), "ok");
-  assert.equal(describeDue(rows[1].water), "Overdue 2 days");
-  assert.equal(describeDue(rows[2].electricity), "Due tomorrow");
+
+  assert.deepEqual(sortRooms(rows).map((item) => item.houseNumber), ["1", "2", "3", "10"]);
+  assert.equal(roomNeedsReading(rows[0], now), false);
+  assert.equal(roomNeedsReading(rows[1], now), true);
+  assert.equal(roomNeedsReading(rows[3], now), false);
+  assert.deepEqual(filterRooms(rows, "unread", now).map((item) => item.houseNumber), ["1", "2"]);
+  assert.deepEqual(filterRooms(rows, "all", now).map((item) => item.houseNumber), ["1", "2", "3", "10"]);
+  assert.equal(describeDue(rows[2].water), "Overdue 2 days");
 });

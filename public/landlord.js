@@ -1,6 +1,6 @@
 import { initResponsiveTables } from "./mobile-table.js?v=3e39d752dc";
 import { notifyError, notifyStatus } from "./notifications.js?v=62acc56b74";
-import { createMeterReadingsView } from "./meter-readings.js?v=300b45915f";
+import { createMeterReadingsView } from "./meter-readings.js?v=563a1b0043";
 import { createBalancesView } from "./balances-view.js?v=64dc0b9624";
 import { createUploadedImageGallery, renderSelectedImagePreviews, uploadImageFiles, validateImageFiles } from "./media-upload.js?v=549f6d7675";
 import { applyDocumentBranding, getLandlordPortalTitle, getLandlordShellBrand } from "./portal-branding.js?v=9b283694b2";
@@ -5751,7 +5751,7 @@ function renderApplications(rows) {
 }
 function renderRentStatus(rows) {
     rentStatusBodyEl.replaceChildren();
-    const visibleRows = getRowsForFocusedBuilding(rows);
+    const visibleRows = [...getRowsForFocusedBuilding(rows)].sort(compareStableRoomOrder);
     if (visibleRows.length === 0) {
         const row = document.createElement("tr");
         row.innerHTML = '<td colspan="14">No rent status data for the current building.</td>';

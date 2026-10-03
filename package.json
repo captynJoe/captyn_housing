@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "dev:local": "bash scripts/dev-local.sh",
-    "build": "tsc -p tsconfig.json && npm run build:public",
+    "build": "tsc -p tsconfig.json && npm run build:resident && npm run build:public",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --import tsx --test tests/*.test.ts",

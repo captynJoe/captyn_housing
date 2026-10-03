@@ -35,6 +35,24 @@ step "Type checks and tests"
   || { tail -30 /tmp/captyn-housing-deploy-tests.log; fail "tests failed"; }
 grep -E "^# (pass|fail)" /tmp/captyn-housing-deploy-tests.log
 
+step "Checking the committed resident bundle matches its source"
+# public/resident-app is served straight from the repo, so a source change that was
+# never rebuilt would ship stale. Build into a temp folder and compare, ignoring the
+# ?v= tags that stamp-public-assets adds afterwards.
+RESIDENT_TMP="$(mktemp -d)"
+docker run --rm --network none -v "$PWD":/app -v "$RESIDENT_TMP":/out -w /app node:22-alpine \
+  sh -c 'node node_modules/vite/bin/vite.js build --config vite.resident.config.ts --outDir /out --emptyOutDir >/dev/null 2>&1; status=$?; rm -rf node_modules/.vite-temp; chown -R '"$(id -u):$(id -g)"' /out; exit $status' \
+  || fail "resident bundle build failed"
+normalize() { sed -E 's/\?v=[A-Za-z0-9]+/?v=/g' "$1" | sha256sum | cut -d' ' -f1; }
+for asset in resident.css resident.js; do
+  if [ "$(normalize "public/resident-app/assets/$asset")" != "$(normalize "$RESIDENT_TMP/assets/$asset")" ]; then
+    rm -rf "$RESIDENT_TMP"
+    fail "public/resident-app/assets/$asset is out of date with src/resident: run 'npm run build' and commit"
+  fi
+done
+rm -rf "$RESIDENT_TMP"
+echo "Resident bundle is up to date."
+
 step "Checking the commit is pushed"
 git fetch -q origin main
 LOCAL_HEAD="$(git rev-parse HEAD)"

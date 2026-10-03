@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="/landlord.css?v=0bb29b0442" />
     <script src="/captyn-theme.js?v=6944e37fb6"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=38fd7f7c91" />
-    <link rel="stylesheet" href="/landlord-shell.css?v=5125cb3825" />
+    <link rel="stylesheet" href="/landlord-shell.css?v=49978bcfb2" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -1123,9 +1123,9 @@
           <div class="panel-head mr-head">
             <h2>Balances</h2>
             <div class="mr-toggle bal-filters" role="group" aria-label="Show">
-              <button type="button" data-balance-filter="unchecked" aria-pressed="true">Not checked</button>
+              <button type="button" data-balance-filter="all" aria-pressed="true">All</button>
+              <button type="button" data-balance-filter="unchecked" aria-pressed="false">Not checked</button>
               <button type="button" data-balance-filter="owing" aria-pressed="false">Owing</button>
-              <button type="button" data-balance-filter="all" aria-pressed="false">All</button>
             </div>
           </div>
           <div id="balances-summary" class="mr-summary"></div>
@@ -1140,8 +1140,8 @@
           <div class="panel-head mr-head">
             <h2>Meters</h2>
             <div class="mr-toggle bal-filters" role="group" aria-label="Show">
-              <button type="button" data-meter-filter="unread" aria-pressed="true">Not read</button>
-              <button type="button" data-meter-filter="all" aria-pressed="false">All</button>
+              <button type="button" data-meter-filter="all" aria-pressed="true">All</button>
+              <button type="button" data-meter-filter="unread" aria-pressed="false">Not read</button>
             </div>
           </div>
           <select id="registry-building-select" class="hidden" aria-hidden="true" tabindex="-1"></select>
@@ -2064,6 +2064,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=2131403707"></script>
+    <script type="module" src="/landlord.js?v=b5ffc844ed"></script>
   </body>
 </html>

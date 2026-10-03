@@ -181,7 +181,7 @@ export function createMeterReadingsView(deps) {
     const filterButtons = [
         ...deps.root.querySelectorAll("[data-meter-filter]")
     ];
-    let filter = "unread";
+    let filter = "all";
     let buildingId = "";
     let billingMode = "metered";
     let buildingCharges = undefined;
@@ -336,6 +336,15 @@ export function createMeterReadingsView(deps) {
             placeholder="Start" aria-label="${UTILITY_LABEL[utility]} starting reading for ${escapeHtml(row.houseNumber)}"
             value="${escapeHtml(draft?.previousReading ?? "")}" />`
             : "";
+        if (!row.hasActiveResident && !isMetered()) {
+            return `<div class="mr-utility is-vacant">
+        <div class="mr-utility-head">
+          <span class="mr-utility-name">${UTILITY_LABEL[utility]}</span>
+          <span class="mr-last">${last}</span>
+        </div>
+        <p class="mr-locked">Vacant: readings open when a tenant moves in.</p>
+      </div>`;
+        }
         return `<div class="mr-utility is-${info.status}">
       <div class="mr-utility-head">
         <span class="mr-utility-name">${UTILITY_LABEL[utility]}</span>

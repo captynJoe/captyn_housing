@@ -331,7 +331,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
     ...deps.root.querySelectorAll<HTMLButtonElement>("[data-meter-filter]")
   ];
 
-  let filter: MeterRoomFilter = "unread";
+  let filter: MeterRoomFilter = "all";
   let buildingId = "";
   let billingMode = "metered";
   let buildingCharges: MeterReadingsResponse["buildingCharges"] = undefined;
@@ -519,6 +519,17 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
             placeholder="Start" aria-label="${UTILITY_LABEL[utility]} starting reading for ${escapeHtml(row.houseNumber)}"
             value="${escapeHtml(draft?.previousReading ?? "")}" />`
         : "";
+    // On flat-fee buildings a reading is charged on the room's monthly bill, which a
+    // vacant room doesn't have, so the boxes stay closed until someone moves in.
+    if (!row.hasActiveResident && !isMetered()) {
+      return `<div class="mr-utility is-vacant">
+        <div class="mr-utility-head">
+          <span class="mr-utility-name">${UTILITY_LABEL[utility]}</span>
+          <span class="mr-last">${last}</span>
+        </div>
+        <p class="mr-locked">Vacant: readings open when a tenant moves in.</p>
+      </div>`;
+    }
     return `<div class="mr-utility is-${info.status}">
       <div class="mr-utility-head">
         <span class="mr-utility-name">${UTILITY_LABEL[utility]}</span>

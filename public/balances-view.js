@@ -58,7 +58,7 @@ export function createBalancesView(deps) {
     const filterButtons = [...deps.root.querySelectorAll("[data-balance-filter]")];
     let buildingId = "";
     let rows = [];
-    let filter = "unchecked";
+    let filter = "all";
     let openPanel = null;
     let adjustmentsAvailable = true;
     const busy = new Set();

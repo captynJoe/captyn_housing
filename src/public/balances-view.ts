@@ -120,7 +120,7 @@ export function createBalancesView(deps: BalancesViewDeps) {
 
   let buildingId = "";
   let rows: BalanceRow[] = [];
-  let filter: BalanceFilter = "unchecked";
+  let filter: BalanceFilter = "all";
   let openPanel: OpenPanel = null;
   let adjustmentsAvailable = true;
   const busy = new Set<string>();

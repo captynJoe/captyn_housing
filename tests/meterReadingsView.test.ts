@@ -4,6 +4,7 @@ import {
   buildRoomSavePayload,
   describeDue,
   filterRooms,
+  isBaselineOnly,
   previewDraft,
   roomNeedsReading,
   sortRooms,
@@ -127,4 +128,30 @@ test("rooms stay in house-number order and the 30-day filter shows unread rooms"
   assert.deepEqual(filterRooms(rows, "unread", now).map((item) => item.houseNumber), ["1", "2"]);
   assert.deepEqual(filterRooms(rows, "all", now).map((item) => item.houseNumber), ["1", "2", "3", "10"]);
   assert.equal(describeDue(rows[2].water), "Overdue 2 days");
+});
+
+test("vacant or paused rooms take a starting reading with no charge", () => {
+  const vacant = room("V1", {
+    hasActiveResident: false,
+    water: readMeter({ lastReading: null, lastReadAt: null, status: "no_reading" })
+  });
+  const paused = room("P1", {
+    billingHold: { id: "h", startMonth: "2026-09", endMonth: "2099-12", reason: "", auto: true }
+  });
+  assert.equal(isBaselineOnly(vacant), true);
+  assert.equal(isBaselineOnly(paused), true);
+  assert.equal(isBaselineOnly(room("A1")), false);
+
+  assert.deepEqual(previewDraft(vacant.water, { reading: "20.99" }, 150, 2.5, true), {
+    hasReading: true,
+    baseline: true,
+    amountKsh: 0,
+    units: undefined
+  });
+  assert.equal(previewDraft(paused.water, { reading: "90" }, 150, 2.5, true).error, "Lower than the last reading.");
+
+  assert.deepEqual(
+    buildRoomSavePayload(vacant, { water: { reading: "20.99" } }, RATES, { water: 2.5, electricity: 10 }).entries,
+    [{ houseNumber: "V1", utilityType: "water", reading: 20.99 }]
+  );
 });

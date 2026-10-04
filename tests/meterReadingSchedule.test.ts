@@ -238,3 +238,62 @@ test("next month's flat bill uses the room amount, else the building default", (
   assert.equal(byHouse.get("A-1"), 500);
   assert.equal(byHouse.get("A-2"), 800);
 });
+
+test("baseline readings count as the latest reading, survive export/import and purge", () => {
+  const service = new UtilityBillingService();
+  service.recordBaselineReading({
+    utilityType: "water",
+    buildingId: BUILDING_A,
+    houseNumber: "V-1",
+    reading: 20.99,
+    recordedAt: "2026-10-04T08:00:00.000Z"
+  });
+
+  let latest = service.listLatestMeterReadings(BUILDING_A);
+  assert.equal(latest.length, 1);
+  assert.equal(latest[0].currentReading, 20.99);
+  assert.equal(latest[0].unitsConsumed, 0);
+  assert.equal(service.listBills({ buildingId: BUILDING_A }).length, 0);
+
+  const restored = new UtilityBillingService();
+  restored.importState(service.exportState());
+  latest = restored.listLatestMeterReadings(BUILDING_A);
+  assert.equal(latest[0].currentReading, 20.99);
+
+  restored.purgeHouse(BUILDING_A, "V-1");
+  assert.equal(restored.listLatestMeterReadings(BUILDING_A).length, 0);
+});
+
+test("a charged reading after a baseline is measured from the baseline", () => {
+  const service = new UtilityBillingService();
+  service.recordBaselineReading({
+    utilityType: "water",
+    buildingId: BUILDING_A,
+    houseNumber: "V-2",
+    reading: 100,
+    recordedAt: "2026-09-10T08:00:00.000Z"
+  });
+  service.createBill("water", BUILDING_A, "V-2", {
+    billingMonth: "2026-10",
+    fixedChargeKsh: 500,
+    dueDate: new Date(Date.now() + 3 * 864e5).toISOString(),
+    note: "Combined utility fee (water, electricity & trash) for 2026-10."
+  });
+  const start = service
+    .listLatestMeterReadings(BUILDING_A)
+    .find((item) => item.utilityType === "water")!;
+  const { charge } = service.recordUsageReading({
+    utilityType: "water",
+    billUtilityType: "water",
+    buildingId: BUILDING_A,
+    houseNumber: "V-2",
+    billingMonth: "2026-10",
+    previousReading: start.currentReading,
+    currentReading: 104,
+    includedUnits: 2.5,
+    ratePerUnitKsh: 150
+  });
+  assert.equal(charge.unitsConsumed, 4);
+  assert.equal(charge.amountKsh, 225);
+  assert.equal(service.listLatestMeterReadings(BUILDING_A)[0].currentReading, 104);
+});

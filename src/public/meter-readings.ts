@@ -48,6 +48,7 @@ export interface RoomDraft {
 export interface MeterDraftPreview {
   units?: number;
   extraUnits?: number;
+  baseline?: boolean;
   amountKsh?: number;
   error?: string;
   hasReading: boolean;
@@ -142,13 +143,20 @@ export function filterRooms(
   return filter === "unread" ? ordered.filter((row) => roomNeedsReading(row, now)) : ordered;
 }
 
+// Vacant rooms and rooms with billing paused take readings too, but nobody is
+// charged: the figure becomes the starting reading for the next charged one.
+export function isBaselineOnly(row: Pick<MeterReadingRow, "hasActiveResident" | "billingHold">) {
+  return !row.hasActiveResident || Boolean(row.billingHold);
+}
+
 // includedUnits: undefined on metered buildings (every unit is billed); a number on
 // flat-fee buildings (only units above it are charged); null when it isn't set yet.
 export function previewDraft(
   info: MeterInfo,
   draft: MeterDraft | undefined,
   rate: number | null,
-  includedUnits?: number | null
+  includedUnits?: number | null,
+  baseline = false
 ): MeterDraftPreview {
   const reading = parseFigure(draft?.reading);
   if (reading === undefined) {
@@ -156,6 +164,19 @@ export function previewDraft(
   }
   if (Number.isNaN(reading) || reading < 0) {
     return { hasReading: true, error: "Enter a valid number." };
+  }
+
+  if (baseline) {
+    if (info.lastReading != null && reading < info.lastReading) {
+      return { hasReading: true, error: "Lower than the last reading." };
+    }
+    return {
+      hasReading: true,
+      baseline: true,
+      amountKsh: 0,
+      units:
+        info.lastReading != null ? Number((reading - info.lastReading).toFixed(3)) : undefined
+    };
   }
 
   const start =
@@ -231,11 +252,13 @@ export function buildRoomSavePayload(
     const info = row[utility];
     const meterNumber = String(meterDraft.meterNumber ?? "").trim();
     const meterChanged = meterNumber !== "" && meterNumber !== info.meterNumber;
+    const baseline = isBaselineOnly(row);
     const preview = previewDraft(
       info,
       meterDraft,
       rates[utility],
-      includedUnits ? includedUnits[utility] : undefined
+      includedUnits ? includedUnits[utility] : undefined,
+      baseline
     );
 
     if (preview.hasReading && preview.error) {
@@ -252,7 +275,7 @@ export function buildRoomSavePayload(
     }
     if (preview.hasReading) {
       entry.reading = parseFigure(meterDraft.reading);
-      if (info.lastReading == null) {
+      if (info.lastReading == null && !baseline) {
         entry.previousReading = parseFigure(meterDraft.previousReading);
       }
     }
@@ -395,12 +418,18 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
         row[utility],
         draft?.[utility],
         rates[utility],
-        allowanceFor(utility)
+        allowanceFor(utility),
+        isBaselineOnly(row)
       );
       previewEl.classList.toggle("is-error", Boolean(preview.error));
       let text = "";
       if (preview.error) {
         text = preview.error;
+      } else if (preview.hasReading && preview.baseline) {
+        text =
+          preview.units != null
+            ? `${formatFigure(preview.units)} units since last · no charge`
+            : "Starting reading · no charge";
       } else if (preview.hasReading && preview.units != null) {
         if (preview.extraUnits === undefined) {
           text = `${formatFigure(preview.units)} units · ${deps.formatCurrency(preview.amountKsh ?? 0)}`;
@@ -527,21 +556,21 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
             placeholder="Start" aria-label="${UTILITY_LABEL[utility]} starting reading for ${escapeHtml(row.houseNumber)}"
             value="${escapeHtml(draft?.previousReading ?? "")}" />`
         : "";
-    // Readings are refused while billing is paused, and on flat-fee buildings a vacant
-    // room has no monthly bill to charge them on. Meter numbers can still be keyed in.
-    const lockedReason = row.billingHold
-      ? "Billing is paused: resume it above to enter readings."
-      : !row.hasActiveResident && !isMetered()
-        ? "Vacant: readings open when a tenant moves in."
-        : "";
-    if (lockedReason) {
+    // Vacant or paused rooms: the reading is kept as the starting figure, no charge.
+    if (isBaselineOnly(row)) {
       return `<div class="mr-utility is-vacant">
         <div class="mr-utility-head">
           <span class="mr-utility-name">${UTILITY_LABEL[utility]}</span>
-          <span class="mr-last">${last}</span>
+          <span class="mr-last">${info.lastReading != null ? last : "No reading yet"}</span>
         </div>
-        <p class="mr-locked">${lockedReason}</p>
+        <div class="mr-inputs">
+          <input class="mr-input" data-path="${utility}.reading" type="text" inputmode="decimal"
+            pattern="[0-9]*[.]?[0-9]*" autocomplete="off" placeholder="Reading"
+            aria-label="${UTILITY_LABEL[utility]} reading for ${escapeHtml(row.houseNumber)}"
+            value="${escapeHtml(draft?.reading ?? "")}" />
+        </div>
         <div class="mr-utility-foot">
+          <span class="mr-preview" data-preview="${utility}" aria-live="polite"></span>
           <span class="mr-meter">${renderMeterNumber(row.houseNumber, utility, info)}</span>
         </div>
       </div>`;
@@ -799,7 +828,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
       deps.onStatus(
         failures.length > 0
           ? `Room ${houseNumber}: ${failures.length} item${failures.length === 1 ? "" : "s"} need attention.`
-          : saved.length > 0
+          : saved.length > 0 && totalKsh > 0
             ? `Saved room ${houseNumber} (${deps.formatCurrency(totalKsh)} billed).`
             : `Saved room ${houseNumber}.`
       );

@@ -6069,8 +6069,13 @@ async function bootstrap() {
     }
 
     const now = new Date();
+    // Only occupied rooms are due: a vacant room's starting reading shouldn't nag.
     const activeHouses = Array.isArray(building.houseNumbers)
-      ? new Set(building.houseNumbers.map((item) => normalizeHouseNumber(item)).filter(Boolean))
+      ? new Set(
+          (await buildLandlordUtilityRegistryRows(building.id, building.houseNumbers))
+            .filter((row) => row.hasActiveResident)
+            .map((row) => normalizeHouseNumber(row.houseNumber))
+        )
       : null;
     const dueReadings = utilityBillingService
       .listLatestMeterReadings(building.id)
@@ -18258,7 +18263,7 @@ async function bootstrap() {
       const billingMode = configuration?.utilityBillingMode ?? "metered";
       const rates = getMeterReadingRates(building.id);
       const occupiedHouses =
-        billingMode === "metered" || parsed.entries.length === 0
+        parsed.entries.length === 0
           ? new Set<string>()
           : new Set(
               (await buildLandlordUtilityRegistryRows(building.id, building.houseNumbers ?? []))
@@ -18290,6 +18295,46 @@ async function bootstrap() {
           }
 
           const previous = latestByKey.get(`${utilityType}:${houseNumber}`);
+
+          // Nobody is billed for a vacant room or while billing is paused: keep the
+          // figure as the starting reading for the next charged one, with no bill.
+          const currentMonth = billingMonthFromDate(now);
+          const pausedNow =
+            isRoomBillingHeld({
+              buildingId: building.id,
+              houseNumber,
+              kind: "utility",
+              utilityType: billingMode === "combined_charge" ? "water" : utilityType,
+              billingMonth: currentMonth
+            }) ||
+            isRoomBillingHeld({
+              buildingId: building.id,
+              houseNumber,
+              kind: "utility",
+              utilityType,
+              billingMonth: currentMonth
+            });
+          if (!occupiedHouses.has(houseNumber) || pausedNow) {
+            if (previous && entry.reading < previous.currentReading) {
+              fail("Current reading must be greater than or equal to previous reading.");
+              continue;
+            }
+            utilityBillingService.recordBaselineReading({
+              utilityType,
+              buildingId: building.id,
+              houseNumber,
+              reading: entry.reading,
+              recordedAt: now.toISOString()
+            });
+            saved.push({
+              houseNumber,
+              utilityType,
+              billingMonth: currentMonth,
+              unitsConsumed: previous ? Number((entry.reading - previous.currentReading).toFixed(3)) : 0,
+              amountKsh: 0
+            });
+            continue;
+          }
           if (!previous && entry.previousReading == null) {
             fail("First reading for this meter needs the starting reading.");
             continue;
@@ -18401,7 +18446,7 @@ async function bootstrap() {
           const input = createUtilityBillSchema.parse(
             resolveUtilityBillInput(utilityType, building.id, houseNumber, {
               billingMonth,
-              previousReading: previous ? undefined : entry.previousReading,
+              previousReading: previous ? previous.currentReading : entry.previousReading,
               currentReading: entry.reading,
               dueDate,
               note: "Meter reading recorded."

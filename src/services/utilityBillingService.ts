@@ -186,10 +186,21 @@ export interface UtilityBillingHoldCheck {
 
 type UtilityBillingHoldPredicate = (input: UtilityBillingHoldCheck) => boolean;
 
+// A reading taken while nobody is billed (vacant room or billing paused). It is the
+// starting figure for the next charged reading and creates no bill.
+export interface UtilityBaselineReading {
+  utilityType: UtilityType;
+  buildingId: string;
+  houseNumber: string;
+  reading: number;
+  recordedAt: string;
+}
+
 export interface UtilityBillingPersistedState {
   meters: UtilityMeterRecord[];
   bills: UtilityBillSnapshot[];
   pendingPayments?: UtilityPaymentEvent[];
+  baselineReadings?: UtilityBaselineReading[];
 }
 
 export interface UtilityRoomBalanceSummary {
@@ -450,6 +461,8 @@ export class UtilityBillingService {
   private readonly meters = new Map<string, UtilityMeterRecord>();
   private readonly billsByLedger = new Map<string, UtilityBillRecord[]>();
   private readonly pendingPayments = new Map<string, UtilityPaymentEvent[]>();
+  // Latest baseline reading per utility + building + room.
+  private readonly baselineReadings = new Map<string, UtilityBaselineReading>();
   private readonly paymentReferenceIndex = new Map<
     string,
     UtilityPaymentReferenceIndexEntry
@@ -564,7 +577,9 @@ export class UtilityBillingService {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map((item) => ({ ...item }));
 
-    return { meters, bills, pendingPayments };
+    const baselineReadings = [...this.baselineReadings.values()].map((item) => ({ ...item }));
+
+    return { meters, bills, pendingPayments, baselineReadings };
   }
 
   importState(state: UtilityBillingPersistedState | null | undefined): boolean {
@@ -572,6 +587,7 @@ export class UtilityBillingService {
     this.billsByLedger.clear();
     this.pendingPayments.clear();
     this.paymentReferenceIndex.clear();
+    this.baselineReadings.clear();
 
     let normalizedLegacyPlaceholders = false;
 
@@ -671,6 +687,30 @@ export class UtilityBillingService {
 
         records.push(record);
         this.billsByLedger.set(key, records);
+      }
+    }
+
+    if (Array.isArray(state.baselineReadings)) {
+      for (const item of state.baselineReadings) {
+        if (
+          !item ||
+          (item.utilityType !== "water" && item.utilityType !== "electricity") ||
+          !item.houseNumber ||
+          !Number.isFinite(Number(item.reading))
+        ) {
+          continue;
+        }
+        const baseline: UtilityBaselineReading = {
+          utilityType: item.utilityType,
+          buildingId: normalizeBuildingId(item.buildingId),
+          houseNumber: normalizeHouseNumber(item.houseNumber),
+          reading: Number(item.reading),
+          recordedAt: item.recordedAt || nowIso()
+        };
+        this.baselineReadings.set(
+          ledgerKey(baseline.utilityType, baseline.buildingId, baseline.houseNumber),
+          baseline
+        );
       }
     }
 
@@ -799,6 +839,13 @@ export class UtilityBillingService {
     const normalizedHouse = normalizeHouseNumber(houseNumber);
     let changed = false;
 
+    for (const [key, baseline] of this.baselineReadings.entries()) {
+      if (baseline.buildingId === normalizedBuildingId && baseline.houseNumber === normalizedHouse) {
+        this.baselineReadings.delete(key);
+        changed = true;
+      }
+    }
+
     for (const [key, meter] of this.meters.entries()) {
       if (
         meter.buildingId === normalizedBuildingId &&
@@ -844,6 +891,13 @@ export class UtilityBillingService {
   purgeBuilding(buildingId: string): boolean {
     const normalizedBuildingId = normalizeBuildingId(buildingId);
     let changed = false;
+
+    for (const [key, baseline] of this.baselineReadings.entries()) {
+      if (baseline.buildingId === normalizedBuildingId) {
+        this.baselineReadings.delete(key);
+        changed = true;
+      }
+    }
 
     for (const [key, meter] of this.meters.entries()) {
       if (meter.buildingId === normalizedBuildingId) {
@@ -1407,7 +1461,57 @@ export class UtilityBillingService {
       }
     }
 
+    for (const baseline of this.baselineReadings.values()) {
+      if (baseline.buildingId !== normalizedBuildingId) {
+        continue;
+      }
+      const candidate: UtilityReadingSnapshot = {
+        utilityType: baseline.utilityType,
+        buildingId: normalizedBuildingId,
+        houseNumber: baseline.houseNumber,
+        billingMonth: billingMonthFromDate(new Date(baseline.recordedAt)),
+        meterNumber:
+          this.getMeter(baseline.utilityType, normalizedBuildingId, baseline.houseNumber)
+            ?.meterNumber ?? "",
+        previousReading: baseline.reading,
+        currentReading: baseline.reading,
+        unitsConsumed: 0,
+        recordedAt: baseline.recordedAt
+      };
+      const key = `${candidate.utilityType}:${candidate.houseNumber}`;
+      const current = ownLatest.get(key);
+      if (!current || candidate.recordedAt > current.recordedAt) {
+        ownLatest.set(key, candidate);
+      }
+    }
+
     return [...ownLatest.values()];
+  }
+
+  recordBaselineReading(input: {
+    utilityType: UtilityType;
+    buildingId: string;
+    houseNumber: string;
+    reading: number;
+    recordedAt?: string;
+  }): UtilityBaselineReading {
+    const reading = Number(input.reading);
+    if (!Number.isFinite(reading) || reading < 0) {
+      throw new Error("Reading must be a number of zero or more.");
+    }
+    const baseline: UtilityBaselineReading = {
+      utilityType: input.utilityType,
+      buildingId: normalizeBuildingId(input.buildingId),
+      houseNumber: normalizeHouseNumber(input.houseNumber),
+      reading,
+      recordedAt: input.recordedAt ?? nowIso()
+    };
+    this.baselineReadings.set(
+      ledgerKey(baseline.utilityType, baseline.buildingId, baseline.houseNumber),
+      baseline
+    );
+    this.emitStateChange();
+    return { ...baseline };
   }
 
   // Records a reading against the room's flat-fee bill for the month and charges

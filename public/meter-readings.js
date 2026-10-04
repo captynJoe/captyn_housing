@@ -192,6 +192,7 @@ export function createMeterReadingsView(deps) {
     const serverErrors = new Map();
     const editingMeters = new Set();
     const savingRooms = new Set();
+    const resumingRooms = new Set();
     const savedThisVisit = new Set();
     const isMetered = () => billingMode === "metered";
     const readsMeters = () => billingMode !== "disabled";
@@ -336,13 +337,21 @@ export function createMeterReadingsView(deps) {
             placeholder="Start" aria-label="${UTILITY_LABEL[utility]} starting reading for ${escapeHtml(row.houseNumber)}"
             value="${escapeHtml(draft?.previousReading ?? "")}" />`
             : "";
-        if (!row.hasActiveResident && !isMetered()) {
+        const lockedReason = row.billingHold
+            ? "Billing is paused: resume it above to enter readings."
+            : !row.hasActiveResident && !isMetered()
+                ? "Vacant: readings open when a tenant moves in."
+                : "";
+        if (lockedReason) {
             return `<div class="mr-utility is-vacant">
         <div class="mr-utility-head">
           <span class="mr-utility-name">${UTILITY_LABEL[utility]}</span>
           <span class="mr-last">${last}</span>
         </div>
-        <p class="mr-locked">Vacant: readings open when a tenant moves in.</p>
+        <p class="mr-locked">${lockedReason}</p>
+        <div class="mr-utility-foot">
+          <span class="mr-meter">${renderMeterNumber(row.houseNumber, utility, info)}</span>
+        </div>
       </div>`;
         }
         return `<div class="mr-utility is-${info.status}">
@@ -364,6 +373,53 @@ export function createMeterReadingsView(deps) {
         <span class="mr-meter">${renderMeterNumber(row.houseNumber, utility, info)}</span>
       </div>
     </div>`;
+    }
+    function formatMonth(value) {
+        const match = /^(\d{4})-(\d{2})$/.exec(value);
+        if (!match) {
+            return value;
+        }
+        return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1)).toLocaleDateString("en-GB", { month: "short", year: "numeric", timeZone: "UTC" });
+    }
+    function renderHoldBanner(row) {
+        const hold = row.billingHold;
+        if (!hold) {
+            return "";
+        }
+        const resuming = resumingRooms.has(row.houseNumber);
+        return `<div class="mr-hold">
+      <div>
+        <strong>Billing paused since ${escapeHtml(formatMonth(hold.startMonth))}</strong>
+        ${hold.reason ? `<span>${escapeHtml(hold.reason)}</span>` : ""}
+      </div>
+      <button type="button" class="ghost-btn" data-action="resume-billing"${resuming ? " disabled" : ""}>${resuming ? "Resuming..." : "Resume billing"}</button>
+    </div>`;
+    }
+    async function resumeBilling(houseNumber) {
+        const row = rowFor(houseNumber);
+        const hold = row?.billingHold;
+        if (!row || !hold || resumingRooms.has(houseNumber)) {
+            return;
+        }
+        resumingRooms.add(houseNumber);
+        render();
+        try {
+            await deps.requestJson(`/api/landlord/buildings/${encodeURIComponent(buildingId)}/rooms/${encodeURIComponent(houseNumber)}/billing-holds/${encodeURIComponent(hold.id)}/cancel`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ reason: "Resumed from the Meters page." })
+            });
+            deps.onStatus(`Billing resumed for room ${houseNumber}.`);
+            deps.onSaved?.();
+            await load();
+        }
+        catch (error) {
+            deps.onError(error, `Unable to resume billing for room ${houseNumber}.`);
+        }
+        finally {
+            resumingRooms.delete(houseNumber);
+            render();
+        }
     }
     function renderCards() {
         if (!listEl) {
@@ -416,6 +472,7 @@ export function createMeterReadingsView(deps) {
                 value="${escapeHtml(membersValue)}" />
             </label>
           </header>
+          ${renderHoldBanner(row)}
           ${flatField}
           ${metered ? METER_UTILITIES.map((utility) => renderUtilityBlock(row, utility)).join("") : ""}
           <p class="mr-card-error" role="alert"></p>
@@ -587,6 +644,10 @@ export function createMeterReadingsView(deps) {
         }
         if (target.dataset.action === "save-room") {
             void saveRoom(houseNumber);
+            return;
+        }
+        if (target.dataset.action === "resume-billing") {
+            void resumeBilling(houseNumber);
             return;
         }
         if (target.dataset.action === "edit-meter") {

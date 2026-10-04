@@ -83,6 +83,9 @@ if ! git diff --quiet HEAD@{1} HEAD -- package.json package-lock.json 2>/dev/nul
   docker exec "$container" sh -c 'npm ci --include=dev'
 fi
 docker exec "$container" sh -c 'npm run prisma:generate >/dev/null && npm run build'
+# The container builds as root; hand compiled files back to the repo owner so the
+# next git pull can replace them.
+docker exec "$container" chown -R "$(stat -c %u:%g package.json)" /app/public
 REMOTE
 
 step "Restarting the API"
@@ -90,6 +93,10 @@ ssh -o BatchMode=yes "$VPS2_SSH_TARGET" "docker restart $VPS2_HOUSING_CONTAINER"
 
 for _ in $(seq 1 60); do
   if curl -fsS -m 5 "$HOUSING_HEALTH_URL" >/dev/null 2>&1; then
+    # The restart rebuilt public/ as root again; give it back to the repo owner.
+    ssh -o BatchMode=yes "$VPS2_SSH_TARGET" \
+      "cd '$VPS2_HOUSING_PATH' && docker exec $VPS2_HOUSING_CONTAINER chown -R \$(stat -c %u:%g package.json) /app/public" \
+      || echo "warning: could not reset ownership of public/ on VPS2"
     step "Healthy: $(curl -fsS -m 5 "$HOUSING_HEALTH_URL")"
     exit 0
   fi

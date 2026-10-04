@@ -17795,15 +17795,49 @@ async function bootstrap() {
 
   const METER_READING_BILL_DUE_DAYS = 7;
 
+  // Active billing pauses that stop utility bills this month, one per room.
+  const listActiveUtilityHoldsByHouse = async (buildingId: string, billingMonth: string) => {
+    const byHouse = new Map<
+      string,
+      { id: string; startMonth: string; endMonth: string; reason: string; auto: boolean }
+    >();
+    if (!repositoryContext.prisma) {
+      return byHouse;
+    }
+    const holds = await repositoryContext.prisma.roomBillingHold.findMany({
+      where: {
+        buildingId,
+        canceledAt: null,
+        scope: { in: ["all", "utilities"] },
+        startMonth: { lte: billingMonth },
+        endMonth: { gte: billingMonth }
+      },
+      orderBy: { createdAt: "asc" }
+    });
+    for (const hold of holds) {
+      const house = normalizeHouseNumber(hold.houseNumber);
+      if (!byHouse.has(house)) {
+        byHouse.set(house, {
+          id: hold.id,
+          startMonth: hold.startMonth,
+          endMonth: hold.endMonth,
+          reason: hold.reason ?? "",
+          auto: isAutoRoomBillingHoldReason(hold.reason)
+        });
+      }
+    }
+    return byHouse;
+  };
+
   const buildMeterReadingRows = async (building: {
     id: string;
     houseNumbers?: string[];
   }) => {
     const now = new Date();
-    const registryRows = await buildLandlordUtilityRegistryRows(
-      building.id,
-      building.houseNumbers ?? []
-    );
+    const [registryRows, holdsByHouse] = await Promise.all([
+      buildLandlordUtilityRegistryRows(building.id, building.houseNumbers ?? []),
+      listActiveUtilityHoldsByHouse(building.id, billingMonthFromDate(now))
+    ]);
     const latestByKey = new Map(
       utilityBillingService
         .listLatestMeterReadings(building.id)
@@ -17831,6 +17865,7 @@ async function bootstrap() {
       hasActiveResident: Boolean(row.hasActiveResident),
       householdMembers: Number(row.householdMembers ?? 0),
       flatAmountKsh: Math.max(0, Number(row.combinedUtilityChargeKsh ?? 0)),
+      billingHold: holdsByHouse.get(normalizeHouseNumber(row.houseNumber)) ?? null,
       water: describeMeter("water", row.houseNumber, row.waterMeterNumber),
       electricity: describeMeter("electricity", row.houseNumber, row.electricityMeterNumber)
     }));

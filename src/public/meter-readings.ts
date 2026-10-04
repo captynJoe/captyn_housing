@@ -21,6 +21,13 @@ export interface MeterReadingRow {
   hasActiveResident: boolean;
   householdMembers?: number;
   flatAmountKsh?: number;
+  billingHold?: {
+    id: string;
+    startMonth: string;
+    endMonth: string;
+    reason: string;
+    auto: boolean;
+  } | null;
   water: MeterInfo;
   electricity: MeterInfo;
 }
@@ -342,6 +349,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
   const serverErrors = new Map<string, string>();
   const editingMeters = new Set<string>();
   const savingRooms = new Set<string>();
+  const resumingRooms = new Set<string>();
   // Rooms saved during this visit stay in the "Not read" list so nothing jumps away.
   const savedThisVisit = new Set<string>();
 
@@ -519,15 +527,23 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
             placeholder="Start" aria-label="${UTILITY_LABEL[utility]} starting reading for ${escapeHtml(row.houseNumber)}"
             value="${escapeHtml(draft?.previousReading ?? "")}" />`
         : "";
-    // On flat-fee buildings a reading is charged on the room's monthly bill, which a
-    // vacant room doesn't have, so the boxes stay closed until someone moves in.
-    if (!row.hasActiveResident && !isMetered()) {
+    // Readings are refused while billing is paused, and on flat-fee buildings a vacant
+    // room has no monthly bill to charge them on. Meter numbers can still be keyed in.
+    const lockedReason = row.billingHold
+      ? "Billing is paused: resume it above to enter readings."
+      : !row.hasActiveResident && !isMetered()
+        ? "Vacant: readings open when a tenant moves in."
+        : "";
+    if (lockedReason) {
       return `<div class="mr-utility is-vacant">
         <div class="mr-utility-head">
           <span class="mr-utility-name">${UTILITY_LABEL[utility]}</span>
           <span class="mr-last">${last}</span>
         </div>
-        <p class="mr-locked">Vacant: readings open when a tenant moves in.</p>
+        <p class="mr-locked">${lockedReason}</p>
+        <div class="mr-utility-foot">
+          <span class="mr-meter">${renderMeterNumber(row.houseNumber, utility, info)}</span>
+        </div>
       </div>`;
     }
     return `<div class="mr-utility is-${info.status}">
@@ -549,6 +565,64 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
         <span class="mr-meter">${renderMeterNumber(row.houseNumber, utility, info)}</span>
       </div>
     </div>`;
+  }
+
+  function formatMonth(value: string): string {
+    const match = /^(\d{4})-(\d{2})$/.exec(value);
+    if (!match) {
+      return value;
+    }
+    return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1)).toLocaleDateString(
+      "en-GB",
+      { month: "short", year: "numeric", timeZone: "UTC" }
+    );
+  }
+
+  function renderHoldBanner(row: MeterReadingRow) {
+    const hold = row.billingHold;
+    if (!hold) {
+      return "";
+    }
+    const resuming = resumingRooms.has(row.houseNumber);
+    return `<div class="mr-hold">
+      <div>
+        <strong>Billing paused since ${escapeHtml(formatMonth(hold.startMonth))}</strong>
+        ${hold.reason ? `<span>${escapeHtml(hold.reason)}</span>` : ""}
+      </div>
+      <button type="button" class="ghost-btn" data-action="resume-billing"${resuming ? " disabled" : ""}>${
+        resuming ? "Resuming..." : "Resume billing"
+      }</button>
+    </div>`;
+  }
+
+  async function resumeBilling(houseNumber: string) {
+    const row = rowFor(houseNumber);
+    const hold = row?.billingHold;
+    if (!row || !hold || resumingRooms.has(houseNumber)) {
+      return;
+    }
+    resumingRooms.add(houseNumber);
+    render();
+    try {
+      await deps.requestJson(
+        `/api/landlord/buildings/${encodeURIComponent(buildingId)}/rooms/${encodeURIComponent(
+          houseNumber
+        )}/billing-holds/${encodeURIComponent(hold.id)}/cancel`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ reason: "Resumed from the Meters page." })
+        }
+      );
+      deps.onStatus(`Billing resumed for room ${houseNumber}.`);
+      deps.onSaved?.();
+      await load();
+    } catch (error) {
+      deps.onError(error, `Unable to resume billing for room ${houseNumber}.`);
+    } finally {
+      resumingRooms.delete(houseNumber);
+      render();
+    }
   }
 
   function renderCards() {
@@ -607,6 +681,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
                 value="${escapeHtml(membersValue)}" />
             </label>
           </header>
+          ${renderHoldBanner(row)}
           ${flatField}
           ${metered ? METER_UTILITIES.map((utility) => renderUtilityBlock(row, utility)).join("") : ""}
           <p class="mr-card-error" role="alert"></p>
@@ -801,6 +876,11 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
 
     if (target.dataset.action === "save-room") {
       void saveRoom(houseNumber);
+      return;
+    }
+
+    if (target.dataset.action === "resume-billing") {
+      void resumeBilling(houseNumber);
       return;
     }
 

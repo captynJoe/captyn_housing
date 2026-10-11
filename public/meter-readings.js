@@ -431,12 +431,12 @@ export function createMeterReadingsView(deps) {
                 headers: { "content-type": "application/json" },
                 body: JSON.stringify({ reason: "Resumed from the Meters page." })
             });
-            deps.onStatus(`Billing resumed for room ${houseNumber}.`);
+            deps.onStatus(`Billing resumed for house ${houseNumber}.`);
             deps.onSaved?.();
             await load();
         }
         catch (error) {
-            deps.onError(error, `Unable to resume billing for room ${houseNumber}.`);
+            deps.onError(error, `Unable to resume billing for house ${houseNumber}.`);
         }
         finally {
             resumingRooms.delete(houseNumber);
@@ -452,7 +452,7 @@ export function createMeterReadingsView(deps) {
             return;
         }
         if (rows.length === 0) {
-            listEl.innerHTML = `<p class="mr-empty">No rooms in this building yet.</p>`;
+            listEl.innerHTML = `<p class="mr-empty">No houses in this building yet.</p>`;
             return;
         }
         const metered = readsMeters();
@@ -460,7 +460,7 @@ export function createMeterReadingsView(deps) {
             ? sortRooms(rows).filter((row) => filter === "all" || roomNeedsReading(row) || savedThisVisit.has(row.houseNumber))
             : sortRooms(rows);
         if (visible.length === 0) {
-            listEl.innerHTML = `<p class="mr-empty">Every occupied room has been read in the last ${READING_WINDOW_DAYS} days.</p>`;
+            listEl.innerHTML = `<p class="mr-empty">Every occupied house has been read in the last ${READING_WINDOW_DAYS} days.</p>`;
             return;
         }
         listEl.innerHTML = visible
@@ -523,7 +523,7 @@ export function createMeterReadingsView(deps) {
             return;
         }
         if (listEl && rows.length === 0) {
-            listEl.innerHTML = `<p class="mr-empty">Loading rooms...</p>`;
+            listEl.innerHTML = `<p class="mr-empty">Loading houses...</p>`;
         }
         const payload = await deps.requestJson(`/api/landlord/buildings/${encodeURIComponent(buildingId)}/meter-readings`, { cache: "no-store" });
         rows = Array.isArray(payload.data) ? payload.data : [];
@@ -592,15 +592,15 @@ export function createMeterReadingsView(deps) {
             const saved = Array.isArray(response.saved) ? response.saved : [];
             const totalKsh = saved.reduce((sum, item) => sum + item.amountKsh, 0);
             deps.onStatus(failures.length > 0
-                ? `Room ${houseNumber}: ${failures.length} item${failures.length === 1 ? "" : "s"} need attention.`
+                ? `House No. ${houseNumber}: ${failures.length} item${failures.length === 1 ? "" : "s"} need attention.`
                 : saved.length > 0 && totalKsh > 0
-                    ? `Saved room ${houseNumber} (${deps.formatCurrency(totalKsh)} billed).`
-                    : `Saved room ${houseNumber}.`);
+                    ? `Saved house ${houseNumber} (${deps.formatCurrency(totalKsh)} billed).`
+                    : `Saved house ${houseNumber}.`);
             savedThisVisit.add(houseNumber);
             deps.onSaved?.();
         }
         catch (error) {
-            deps.onError(error, `Unable to save room ${houseNumber}.`);
+            deps.onError(error, `Unable to save house ${houseNumber}.`);
         }
         finally {
             savingRooms.delete(houseNumber);

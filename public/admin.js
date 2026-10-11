@@ -845,7 +845,7 @@ function renderAdminUtilityRegistry(rows) {
     }
     adminUtilityRegistryBodyEl.replaceChildren();
     if (!Array.isArray(rows) || rows.length === 0) {
-        appendEmptyRow(adminUtilityRegistryBodyEl, 6, "No rooms found for the selected building.");
+        appendEmptyRow(adminUtilityRegistryBodyEl, 6, "No houses found for the selected building.");
         return;
     }
     rows
@@ -867,7 +867,7 @@ function renderAdminUtilityRegistry(rows) {
         <td><input data-field="combinedUtilityChargeKsh" type="number" min="0" step="1" value="${escapeHtml(numberToInputString(item.combinedUtilityChargeKsh))}" /></td>
         <td>
           <button type="button" data-action="save-room-billing" data-house-number="${escapeHtml(item.houseNumber)}">
-            Save Room
+            Save House
           </button>
         </td>
       `;
@@ -892,7 +892,7 @@ function renderAdminBillingSummary() {
         ? state.adminUtilityPayments.length
         : 0;
     adminBillingSummaryEl.textContent =
-        `${getBuildingDisplayName(building)} has ${roomCount} room billing row(s) in view and ${paymentCount} recent utility payment(s) loaded.`;
+        `${getBuildingDisplayName(building)} has ${roomCount} house billing row(s) in view and ${paymentCount} recent utility payment(s) loaded.`;
 }
 function syncAdminBillingBuildingOptions() {
     if (!(adminBillingBuildingSelectEl instanceof HTMLSelectElement)) {
@@ -1400,7 +1400,7 @@ if (adminUtilityRegistryBodyEl instanceof HTMLElement) {
         const houseNumber = normalizeHouse(target.dataset.houseNumber);
         const row = target.closest("tr");
         if (!buildingId || !houseNumber || !(row instanceof HTMLTableRowElement)) {
-            showError("Select a building and room before saving room billing.");
+            showError("Select a building and house before saving house billing.");
             return;
         }
         const waterInput = row.querySelector('input[data-field="waterFixedChargeKsh"]');
@@ -1433,11 +1433,11 @@ if (adminUtilityRegistryBodyEl instanceof HTMLElement) {
                         rateDefaults: {}
                     })
                 });
-                setStatus(`Room billing defaults saved for house ${houseNumber} in ${buildingId}.`);
+                setStatus(`Billing defaults saved for house ${houseNumber} in ${buildingId}.`);
                 await loadAdminUtilityRegistry();
             }
             catch (error) {
-                handleAdminError(error, "Failed to save room billing defaults.");
+                handleAdminError(error, "Failed to save house billing defaults.");
             }
             finally {
                 target.disabled = false;

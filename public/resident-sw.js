@@ -12,7 +12,7 @@ const APP_ASSETS = [
     "/captyn-theme.css?v=38fd7f7c91",
     "/captyn-theme.js?v=6944e37fb6",
     "/resident-app/assets/resident.css?v=5a3ecb0293",
-    "/resident-app/assets/resident.js?v=47c546fa72",
+    "/resident-app/assets/resident.js?v=64289e8b1e",
     "/users.js",
     "/user.js",
     "/landlord.js",

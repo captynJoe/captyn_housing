@@ -17,8 +17,8 @@
 
 set -euo pipefail
 
-VPS2_SSH_TARGET="${VPS2_SSH_TARGET:-byg@62.84.183.255}"
-VPS2_HOUSING_PATH="${VPS2_HOUSING_PATH:-/home/byg/captyn-housing}"
+VPS2_SSH_TARGET="${VPS2_SSH_TARGET:-joe@169.58.91.25}"
+VPS2_HOUSING_PATH="${VPS2_HOUSING_PATH:-/home/joe/captyn-housing}"
 VPS2_HOUSING_CONTAINER="${VPS2_HOUSING_CONTAINER:-captyn_vps2-housing_api-1}"
 HOUSING_HEALTH_URL="${HOUSING_HEALTH_URL:-http://10.8.0.1:4100/health}"
 NODE_BIN="${NODE_BIN:-node}"

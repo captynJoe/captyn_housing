@@ -60,7 +60,7 @@ type ActivityItem = {
 };
 
 const metrics: Metric[] = [
-  { label: "Occupied rooms", value: "184", detail: "+12 this month", tone: "good", icon: Building2 },
+  { label: "Occupied houses", value: "184", detail: "+12 this month", tone: "good", icon: Building2 },
   { label: "Rent collected", value: "KES 4.8M", detail: "91% of August target", tone: "good", icon: WalletCards },
   { label: "Wi-Fi subscribers", value: "139", detail: "27 auto-renew today", tone: "info", icon: Wifi },
   { label: "Open issues", value: "18", detail: "6 need owner review", tone: "watch", icon: LifeBuoy }
@@ -74,15 +74,15 @@ const rooms: Room[] = [
 ];
 
 const activities: ActivityItem[] = [
-  { title: "Wi-Fi entitlement activated", meta: "Room A-104 - receipt WHF-2841", tone: "good" },
-  { title: "Payment promise logged", meta: "Room B-217 - owner reminder queued", tone: "watch" },
+  { title: "Wi-Fi entitlement activated", meta: "House A-104 - receipt WHF-2841", tone: "good" },
+  { title: "Payment promise logged", meta: "House B-217 - owner reminder queued", tone: "watch" },
   { title: "Router projection pending", meta: "Mombasa Road - RADIUS sync waiting", tone: "info" },
-  { title: "Deposit refund approved", meta: "Room D-112 - payout review complete", tone: "good" }
+  { title: "Deposit refund approved", meta: "House D-112 - payout review complete", tone: "good" }
 ];
 
 const navItems = [
   { label: "Dashboard", icon: Home, active: true },
-  { label: "Rooms", icon: KeyRound },
+  { label: "Houses", icon: KeyRound },
   { label: "Residents", icon: UserRoundCheck },
   { label: "Billing", icon: ReceiptText },
   { label: "Wi-Fi", icon: Router },
@@ -148,7 +148,7 @@ function App() {
           </div>
           <label className="search-field">
             <Search size={18} />
-            <input type="search" placeholder="Search room, resident, receipt" />
+            <input type="search" placeholder="Search house, resident, receipt" />
           </label>
           <div className="topbar-actions">
             <IconButton label="Notifications">

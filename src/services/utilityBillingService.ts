@@ -761,7 +761,7 @@ export class UtilityBillingService {
     const meterNumber = normalizeConfiguredMeterNumber(input.meterNumber);
     if (!meterNumber) {
       throw new Error(
-        "Enter the actual meter number. Leave the field blank for rooms without a meter."
+        "Enter the actual meter number. Leave the field blank for houses without a meter."
       );
     }
     const meter: UtilityMeterRecord = {
@@ -1543,7 +1543,7 @@ export class UtilityBillingService {
     if (!record) {
       if (!input.createBillIfMissing) {
         throw new Error(
-          `${normalizedHouse} has no ${input.billingMonth} utility bill (vacant room?), so the reading wasn't saved.`
+          `${normalizedHouse} has no ${input.billingMonth} utility bill (vacant house?), so the reading wasn't saved.`
         );
       }
       this.createBill(input.billUtilityType, normalizedBuildingId, normalizedHouse, {

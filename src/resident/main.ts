@@ -74,7 +74,7 @@ function setAuthHeroCopy() {
     if (!heroCopy.querySelector(".resident-auth-subtitle")) {
       const subtitle = document.createElement("p");
       subtitle.className = "resident-auth-subtitle";
-      subtitle.textContent = "Access your room account, rent, utilities, support requests, notices, and Wi-Fi from one secure place.";
+      subtitle.textContent = "Access your house account, rent, utilities, support requests, notices, and Wi-Fi from one secure place.";
       heroCopy.append(subtitle);
     }
   }
@@ -96,7 +96,7 @@ function enhanceAuthForm() {
   const children = Array.from(form.children);
   const roomDetailsIndex = children.findIndex((child) => {
     const heading = child.querySelector?.("h2");
-    return heading?.textContent?.trim().toLowerCase() === "room details";
+    return heading?.textContent?.trim().toLowerCase() === "house details";
   });
 
   if (roomDetailsIndex <= 0) {
@@ -110,7 +110,7 @@ function enhanceAuthForm() {
   const accessCard = document.createElement("section");
   accessCard.className = "resident-access-card";
   accessCard.id = "resident-access-card";
-  accessCard.setAttribute("aria-label", "Room access request details");
+  accessCard.setAttribute("aria-label", "House access request details");
   wrapNodes(accessCard, children.slice(roomDetailsIndex));
 
   const accessToggle = document.createElement("button");
@@ -119,12 +119,12 @@ function enhanceAuthForm() {
   accessToggle.type = "button";
   accessToggle.setAttribute("aria-controls", "resident-access-card");
   accessToggle.setAttribute("aria-expanded", "false");
-  accessToggle.textContent = "Request room access";
+  accessToggle.textContent = "Request house access";
 
   const setExpanded = (expanded: boolean) => {
     panel.classList.toggle("resident-access-expanded", expanded);
     accessToggle.setAttribute("aria-expanded", String(expanded));
-    accessToggle.textContent = expanded ? "Hide access request" : "Request room access";
+    accessToggle.textContent = expanded ? "Hide access request" : "Request house access";
   };
 
   accessToggle.addEventListener("click", () => {

@@ -268,10 +268,10 @@ export function createBalancesView(deps: BalancesViewDeps) {
       ? visible.map(renderCard).join("")
       : `<p class="mr-empty">${
           filter === "unchecked"
-            ? "Every occupied room has been checked today."
+            ? "Every occupied house has been checked today."
             : filter === "owing"
-              ? "No room owes anything."
-              : "No rooms in this building yet."
+              ? "No house owes anything."
+              : "No houses in this building yet."
         }</p>`;
     const focusInput = listEl.querySelector<HTMLInputElement>(".bal-panel input");
     focusInput?.focus();
@@ -289,7 +289,7 @@ export function createBalancesView(deps: BalancesViewDeps) {
       return;
     }
     if (listEl && rows.length === 0) {
-      listEl.innerHTML = `<p class="mr-empty">Loading rooms...</p>`;
+      listEl.innerHTML = `<p class="mr-empty">Loading houses...</p>`;
     }
     const payload = await deps.requestJson(
       `/api/landlord/buildings/${encodeURIComponent(buildingId)}/balances`,
@@ -332,9 +332,9 @@ export function createBalancesView(deps: BalancesViewDeps) {
           }
         );
         replaceRow(payload.data as BalanceRow);
-        deps.onStatus(`Room ${houseNumber} marked as checked.`);
+        deps.onStatus(`House No. ${houseNumber} marked as checked.`);
       } catch (error) {
-        deps.onError(error, `Unable to mark room ${houseNumber} as checked.`);
+        deps.onError(error, `Unable to mark house ${houseNumber} as checked.`);
       }
     });
   }
@@ -376,10 +376,10 @@ export function createBalancesView(deps: BalancesViewDeps) {
         );
         replaceRow(payload.data as BalanceRow);
         openPanel = null;
-        deps.onStatus(`Room ${houseNumber} balance saved.`);
+        deps.onStatus(`House No. ${houseNumber} balance saved.`);
         deps.onSaved?.();
       } catch (error) {
-        deps.onError(error, `Unable to adjust room ${houseNumber}.`);
+        deps.onError(error, `Unable to adjust house ${houseNumber}.`);
       }
     });
   }
@@ -442,11 +442,11 @@ export function createBalancesView(deps: BalancesViewDeps) {
           }
         }
         openPanel = null;
-        deps.onStatus(`Recorded ${money(amount)} ${target === "rent" ? "rent" : "utility"} payment for room ${houseNumber}.`);
+        deps.onStatus(`Recorded ${money(amount)} ${target === "rent" ? "rent" : "utility"} payment for house ${houseNumber}.`);
         deps.onSaved?.();
         await load();
       } catch (error) {
-        deps.onError(error, `Unable to record the payment for room ${houseNumber}.`);
+        deps.onError(error, `Unable to record the payment for house ${houseNumber}.`);
       }
     });
   }

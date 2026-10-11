@@ -643,11 +643,11 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
           body: JSON.stringify({ reason: "Resumed from the Meters page." })
         }
       );
-      deps.onStatus(`Billing resumed for room ${houseNumber}.`);
+      deps.onStatus(`Billing resumed for house ${houseNumber}.`);
       deps.onSaved?.();
       await load();
     } catch (error) {
-      deps.onError(error, `Unable to resume billing for room ${houseNumber}.`);
+      deps.onError(error, `Unable to resume billing for house ${houseNumber}.`);
     } finally {
       resumingRooms.delete(houseNumber);
       render();
@@ -663,7 +663,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
       return;
     }
     if (rows.length === 0) {
-      listEl.innerHTML = `<p class="mr-empty">No rooms in this building yet.</p>`;
+      listEl.innerHTML = `<p class="mr-empty">No houses in this building yet.</p>`;
       return;
     }
 
@@ -675,7 +675,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
         )
       : sortRooms(rows);
     if (visible.length === 0) {
-      listEl.innerHTML = `<p class="mr-empty">Every occupied room has been read in the last ${READING_WINDOW_DAYS} days.</p>`;
+      listEl.innerHTML = `<p class="mr-empty">Every occupied house has been read in the last ${READING_WINDOW_DAYS} days.</p>`;
       return;
     }
     listEl.innerHTML = visible
@@ -743,7 +743,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
     }
 
     if (listEl && rows.length === 0) {
-      listEl.innerHTML = `<p class="mr-empty">Loading rooms...</p>`;
+      listEl.innerHTML = `<p class="mr-empty">Loading houses...</p>`;
     }
     const payload = await deps.requestJson(
       `/api/landlord/buildings/${encodeURIComponent(buildingId)}/meter-readings`,
@@ -827,15 +827,15 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
       const totalKsh = saved.reduce((sum, item) => sum + item.amountKsh, 0);
       deps.onStatus(
         failures.length > 0
-          ? `Room ${houseNumber}: ${failures.length} item${failures.length === 1 ? "" : "s"} need attention.`
+          ? `House No. ${houseNumber}: ${failures.length} item${failures.length === 1 ? "" : "s"} need attention.`
           : saved.length > 0 && totalKsh > 0
-            ? `Saved room ${houseNumber} (${deps.formatCurrency(totalKsh)} billed).`
-            : `Saved room ${houseNumber}.`
+            ? `Saved house ${houseNumber} (${deps.formatCurrency(totalKsh)} billed).`
+            : `Saved house ${houseNumber}.`
       );
       savedThisVisit.add(houseNumber);
       deps.onSaved?.();
     } catch (error) {
-      deps.onError(error, `Unable to save room ${houseNumber}.`);
+      deps.onError(error, `Unable to save house ${houseNumber}.`);
     } finally {
       savingRooms.delete(houseNumber);
       render();

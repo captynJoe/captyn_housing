@@ -1211,7 +1211,7 @@ function updateRentPaymentGuidance() {
 
   if (!state.rentDue) {
     rentPaymentRemainingEl.textContent =
-      "Rent payment will appear here once your room is configured for billing.";
+      "Rent payment will appear here once your house is configured for billing.";
     return;
   }
 
@@ -2390,7 +2390,7 @@ function applyPaymentAccessUi() {
   rentPaymentStateEl.textContent = rentEnabled
     ? "Use the payment instructions above. Management will record or confirm your rent payment after it is received."
     : state.paymentAccess?.rentConfigured === false
-      ? "Rent payment will appear once rent is configured for your room."
+      ? "Rent payment will appear once rent is configured for your house."
       : "Rent payment is currently disabled by your landlord.";
   syncRentPaymentButtonUi();
 
@@ -3551,7 +3551,7 @@ function renderNotifications(notifications) {
 function formatRentSetupSourceLabel(source) {
   const normalized = String(source ?? "").trim();
   if (normalized === "room_default") {
-    return "Room Default";
+    return "House Default";
   }
   if (normalized === "building_default") {
     return "Building Default";

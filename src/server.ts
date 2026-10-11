@@ -3325,7 +3325,7 @@ async function bootstrap() {
       }));
       roomBillingHoldCacheLoadedAt = now;
     } catch (error) {
-      console.warn("Failed to refresh room billing hold cache:", error);
+      console.warn("Failed to refresh house billing hold cache:", error);
       roomBillingHoldCacheLoadedAt = now;
     }
   };
@@ -4183,7 +4183,7 @@ async function bootstrap() {
     if (!activeTenancy) {
       res.status(403).json({
         error: userSession.residentTenancyId
-          ? "This resident session is no longer active for that room. Sign in again."
+          ? "This resident session is no longer active for that house. Sign in again."
           : "Tenant approval required before resident access."
       });
       return null;
@@ -4204,7 +4204,7 @@ async function bootstrap() {
 
     if (verificationStatus === "rejected") {
       res.status(403).json({
-        error: "Resident access for this room was rejected. Contact management."
+        error: "Resident access for this house was rejected. Contact management."
       });
       return null;
     }
@@ -4552,7 +4552,7 @@ async function bootstrap() {
 
     if (channel === "rent" && !rentConfigured) {
       res.status(403).json({
-        error: "Rent payments are not available until rent is configured for this room."
+        error: "Rent payments are not available until rent is configured for this house."
       });
       return false;
     }
@@ -5917,7 +5917,7 @@ async function bootstrap() {
         .split(/\s+/)[0]
         ?.slice(0, 24) || "there";
     const houseNumber = normalizeHouseNumber(String(input.houseNumber ?? "room"));
-    const fullMessage = `Resident Account: Hi ${firstName}, your room ${houseNumber} account is ready. Sign in at ${input.residentUrl}. Temporary password: your ID number.`;
+    const fullMessage = `Resident Account: Hi ${firstName}, your house ${houseNumber} account is ready. Sign in at ${input.residentUrl}. Temporary password: your ID number.`;
     if (fullMessage.length <= 160) {
       return fullMessage;
     }
@@ -6113,7 +6113,7 @@ async function bootstrap() {
       ])
     ];
 
-    const roomWord = dueHouses.length === 1 ? "room" : "rooms";
+    const roomWord = dueHouses.length === 1 ? "house" : "houses";
     const sample = dueHouses.slice(0, 5).join(", ");
     const dueLabel = earliestDueAt
       ? new Date(earliestDueAt).toLocaleDateString("en-GB", {
@@ -6425,7 +6425,7 @@ async function bootstrap() {
       null;
 
     if (!room) {
-      throw new Error("Room not found");
+      throw new Error("House not found");
     }
 
     const utilityBills = utilityBillingService
@@ -6897,8 +6897,8 @@ async function bootstrap() {
         rentDue: null as Record<string, unknown> | null,
         message:
           rentSetup.source === "room_disabled"
-            ? "Rent is not charged for this room."
-            : "Rent setup is not configured yet for this room."
+            ? "Rent is not charged for this house."
+            : "Rent setup is not configured yet for this house."
       };
     }
 
@@ -9413,7 +9413,7 @@ async function bootstrap() {
       }
       if (message === "TENANCY_ALREADY_ACTIVE") {
         return res.status(409).json({
-          error: "This tenant is already approved for that room. Use sign in instead."
+          error: "This tenant is already approved for that house. Use sign in instead."
         });
       }
       if (message === "ACCOUNT_DISABLED") {
@@ -9475,13 +9475,13 @@ async function bootstrap() {
       if (message === "RESIDENT_TENANCY_SELECTION_REQUIRED") {
         return res.status(409).json({
           error:
-            "This phone is linked to more than one active room. Select the building and house number to sign in."
+            "This phone is linked to more than one active house. Select the building and house number to sign in."
         });
       }
       if (message === "TENANCY_NOT_FOUND") {
         return res.status(404).json({
           error:
-            "No active resident room is linked to those credentials. Confirm the phone number or request access."
+            "No active resident house is linked to those credentials. Confirm the phone number or request access."
         });
       }
       if (message === "RESIDENT_PASSWORD_INCORRECT") {
@@ -10742,7 +10742,7 @@ async function bootstrap() {
       const parsed = landlordMessageSendSchema.parse(req.body ?? {});
       if (context.role === "caretaker" && parsed.recipientScope === "phone") {
         return res.status(403).json({
-          error: "House manager accounts can send messages only to assigned rooms or buildings."
+          error: "House manager accounts can send messages only to assigned houses or buildings."
         });
       }
 
@@ -10776,7 +10776,7 @@ async function bootstrap() {
           error:
             parsed.recipientScope === "building"
               ? "No active resident phone numbers were found for this building."
-              : "No active resident phone number was found for this room."
+              : "No active resident phone number was found for this house."
         });
       }
 
@@ -12193,7 +12193,7 @@ async function bootstrap() {
           return res.status(409).json({ error: "Tenant is already active for this unit" });
         }
         if (message === "HOUSE_OCCUPIED") {
-          return res.status(409).json({ error: "This room is already occupied." });
+          return res.status(409).json({ error: "This house is already occupied." });
         }
         throw error;
       }
@@ -12340,7 +12340,7 @@ async function bootstrap() {
           return res.status(404).json({ error: "House number is no longer active for this application" });
         }
         if (message === "HOUSE_OCCUPIED") {
-          return res.status(409).json({ error: "This room is already occupied." });
+          return res.status(409).json({ error: "This house is already occupied." });
         }
         throw error;
       }
@@ -12776,7 +12776,7 @@ async function bootstrap() {
             !registeredHouseNumbers.has(houseNumber) &&
             !visibleHouseNumbers.has(houseNumber)
           ) {
-            return res.status(404).json({ error: "Room not found" });
+            return res.status(404).json({ error: "House not found" });
           }
 
           targetDirectorySegments = [
@@ -15484,13 +15484,13 @@ async function bootstrap() {
 
         if (context.role === "caretaker") {
           return res.status(403).json({
-            error: "House manager accounts cannot change room rent setup."
+            error: "House manager accounts cannot change house rent setup."
           });
         }
 
         if (!buildingConfigurationService || !repositoryContext.prisma) {
           return res.status(503).json({
-            error: "Room rent setup requires database-backed building configuration."
+            error: "House rent setup requires database-backed building configuration."
           });
         }
 
@@ -15662,7 +15662,7 @@ async function bootstrap() {
               dueDate: existing && monthlyRentKsh <= 0 ? existing.dueDate : dueDate,
               note:
                 parsed.note?.trim() ||
-                `Room Default saved for ${building.name} ${houseNumber}.`
+                `House Default saved for ${building.name} ${houseNumber}.`
             });
           }
 
@@ -15759,8 +15759,8 @@ async function bootstrap() {
             action: "rent.room_default.updated",
             summary:
               refreshed.rentSetupSource === "room_disabled"
-                ? "Room rent charging disabled."
-                : `Room Default saved at KSh ${monthlyRentKsh.toLocaleString("en-US")}.`,
+                ? "House rent charging disabled."
+                : `House Default saved at KSh ${monthlyRentKsh.toLocaleString("en-US")}.`,
             actor,
             metadata: {
               rentSetupSource: refreshed.rentSetupSource,
@@ -17133,7 +17133,7 @@ async function bootstrap() {
           );
           if (emptyRoomSummary.totalOutstandingKsh > 0) {
             return res.status(409).json({
-              error: `House ${normalizedHouseNumber} still has KSh ${emptyRoomSummary.totalOutstandingKsh.toLocaleString("en-US")} in open balances. Clear the room balance before adding a new tenant.`
+              error: `House ${normalizedHouseNumber} still has KSh ${emptyRoomSummary.totalOutstandingKsh.toLocaleString("en-US")} in open balances. Clear the house balance before adding a new tenant.`
             });
           }
         }
@@ -17332,7 +17332,7 @@ async function bootstrap() {
           if (message === "HOUSE_OCCUPIED") {
             return res.status(409).json({
               error:
-                "This room is already tied to a different resident phone number."
+                "This house is already tied to a different resident phone number."
             });
           }
           if (message === "ACCOUNT_DISABLED") {
@@ -17394,7 +17394,7 @@ async function bootstrap() {
             .map((item) => normalizeHouseNumber(item))
             .includes(normalizeHouseNumber(normalizedHouseNumber))
         ) {
-          return res.status(404).json({ error: "Room not found" });
+          return res.status(404).json({ error: "House not found" });
         }
 
         const data = await buildLandlordRoomLedgerPayload(
@@ -17454,7 +17454,7 @@ async function bootstrap() {
 
         if (context.role === "caretaker") {
           return res.status(403).json({
-            error: "House manager accounts cannot pause room billing."
+            error: "House manager accounts cannot pause house billing."
           });
         }
 
@@ -17488,7 +17488,7 @@ async function bootstrap() {
           !registeredHouseNumbers.has(normalizedHouseNumber) &&
           !visibleHouseNumbers.has(normalizedHouseNumber)
         ) {
-          return res.status(404).json({ error: "Room not found" });
+          return res.status(404).json({ error: "House not found" });
         }
 
         const parsed = createRoomBillingHoldSchema.parse(req.body ?? {});
@@ -17547,7 +17547,7 @@ async function bootstrap() {
 
       if (context.role === "caretaker") {
         return res.status(403).json({
-          error: "House manager accounts cannot resume room billing."
+          error: "House manager accounts cannot resume house billing."
         });
       }
 
@@ -18366,7 +18366,7 @@ async function bootstrap() {
                 billingMonth: usageMonth
               })
             ) {
-              fail("Utility billing is paused for this room.");
+              fail("Utility billing is paused for this house.");
               continue;
             }
 
@@ -18439,7 +18439,7 @@ async function bootstrap() {
               billingMonth
             })
           ) {
-            fail("Utility billing is paused for this room.");
+            fail("Utility billing is paused for this house.");
             continue;
           }
 
@@ -18637,7 +18637,7 @@ async function bootstrap() {
         ) {
           return res.status(409).json({
             error:
-              "Utility billing is paused for this room and month. Resume billing from the room account before posting this charge."
+              "Utility billing is paused for this house and month. Resume billing from the house account before posting this charge."
           });
         }
         const data = utilityBillingService.createBill(
@@ -19272,7 +19272,7 @@ async function bootstrap() {
       ) {
         return res.status(409).json({
           error:
-            "Utility billing is paused for this room and month. Resume billing from the room account before posting this charge."
+            "Utility billing is paused for this house and month. Resume billing from the house account before posting this charge."
         });
       }
       const data = utilityBillingService.createBill(
@@ -19628,7 +19628,7 @@ async function bootstrap() {
         (!parsed.houseNumbers || parsed.houseNumbers.length === 0)
       ) {
         return res.status(400).json({
-          error: "Building creation requires room numbers."
+          error: "Building creation requires house numbers."
         });
       }
 
@@ -19771,7 +19771,7 @@ async function bootstrap() {
 
       if (context.role === "caretaker") {
         return res.status(403).json({
-          error: "House manager accounts cannot add rooms."
+          error: "House manager accounts cannot add houses."
         });
       }
 
@@ -19817,7 +19817,7 @@ async function bootstrap() {
 
       if (context.role === "caretaker") {
         return res.status(403).json({
-          error: "House manager accounts cannot remove rooms."
+          error: "House manager accounts cannot remove houses."
         });
       }
 
@@ -19849,7 +19849,7 @@ async function bootstrap() {
         );
         if (selfCaretakerRoom) {
           return res.status(403).json({
-            error: "You cannot remove your own assigned room while signed in."
+            error: "You cannot remove your own assigned house while signed in."
           });
         }
       }
@@ -19859,13 +19859,13 @@ async function bootstrap() {
         parsed.confirmHouseNumber.trim().toUpperCase() !== houseNumber
       ) {
         return res.status(400).json({
-          error: "Confirmation house number does not match the selected room."
+          error: "Confirmation house number does not match the selected house."
         });
       }
 
       const updated = await store.removeHouseUnit(buildingId, houseNumber);
       if (!updated) {
-        return res.status(404).json({ error: "Room not found." });
+        return res.status(404).json({ error: "House not found." });
       }
 
       purgeRuntimeStateForHouse(buildingId, houseNumber);
@@ -19873,7 +19873,7 @@ async function bootstrap() {
         buildingId,
         houseNumber,
         action: "room.removed",
-        summary: `Room ${houseNumber} removed from ${updated.building.name}.`,
+        summary: `House ${houseNumber} removed from ${updated.building.name}.`,
         actor: actorFromLandlordContext(context),
         metadata: {
           removedHouseNumber: updated.removedHouseNumber
@@ -19906,13 +19906,13 @@ async function bootstrap() {
 
         if (context.role === "caretaker") {
           return res.status(403).json({
-            error: "House manager accounts cannot clear room balances."
+            error: "House manager accounts cannot clear house balances."
           });
         }
 
         if (!repositoryContext.prisma) {
           return res.status(503).json({
-            error: "Room balance write-off requires database connection."
+            error: "House balance write-off requires database connection."
           });
         }
 
@@ -19948,7 +19948,7 @@ async function bootstrap() {
           !registeredHouseNumbers.has(houseNumber) &&
           !visibleHouseNumbers.has(houseNumber)
         ) {
-          return res.status(404).json({ error: "Room not found" });
+          return res.status(404).json({ error: "House not found" });
         }
 
         const activeTenancy = await repositoryContext.prisma.tenancy.findFirst({
@@ -19967,7 +19967,7 @@ async function bootstrap() {
         if (activeTenancy) {
           return res.status(409).json({
             error:
-              "This room has an active resident. Use Clear Resident so the settlement is tied to that resident."
+              "This house has an active resident. Use Clear Resident so the settlement is tied to that resident."
           });
         }
 
@@ -19991,12 +19991,12 @@ async function bootstrap() {
           building.id,
           houseNumber,
           "write_off",
-          "Written off when empty room balance was cleared."
+          "Written off when empty house balance was cleared."
         );
         const record = await recordResidentMoveOutSettlement({
           summary,
           action: "write_off",
-          reason: parsed.reason || "Empty room balance cleared",
+          reason: parsed.reason || "Empty house balance cleared",
           actor,
           settlement
         });
@@ -20005,7 +20005,7 @@ async function bootstrap() {
           buildingId: building.id,
           houseNumber,
           action: "room.balance.writeoff",
-          summary: `KSh ${settlement.totalSettledKsh.toLocaleString("en-US")} in pending room balances written off for empty room ${houseNumber}.`,
+          summary: `KSh ${settlement.totalSettledKsh.toLocaleString("en-US")} in pending house balances written off for empty house ${houseNumber}.`,
           actor,
           metadata: {
             settlementRecordId: record?.id,
@@ -20175,7 +20175,7 @@ async function bootstrap() {
           actor,
           startMonth: billingMonthFromDate(new Date(data.removedAt)),
           endMonth: AUTO_ROOM_BILLING_HOLD_END_MONTH,
-          reason: "Auto-paused because the room is vacant after resident move-out."
+          reason: "Auto-paused because the house is vacant after resident move-out."
         });
         const depositApplication = {
           tenancyId: settlementSummary.tenancyId,
@@ -20286,7 +20286,7 @@ async function bootstrap() {
               : "resident.balance.writeoff",
             summary: transferred
               ? `KSh ${billingSettlement.totalSettledKsh.toLocaleString("en-US")} moved to resident debt when ${data.user.fullName} was removed.`
-              : `KSh ${billingSettlement.totalSettledKsh.toLocaleString("en-US")} in pending room balances written off when ${data.user.fullName} was removed.`,
+              : `KSh ${billingSettlement.totalSettledKsh.toLocaleString("en-US")} in pending house balances written off when ${data.user.fullName} was removed.`,
             actor,
             metadata: {
               removedUserId: data.user.id,

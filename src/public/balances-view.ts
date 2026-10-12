@@ -109,12 +109,14 @@ export interface BalancesViewDeps {
   onStatus: (message: string) => void;
   onError: (error: unknown, fallback: string) => void;
   onSaved?: () => void;
+  // Show a single house (the quick-action modal) instead of the whole building.
+  onlyHouse?: () => string;
 }
 
 type OpenPanel = { houseNumber: string; panel: "pay" | "adjust" } | null;
 
 export function createBalancesView(deps: BalancesViewDeps) {
-  const listEl = deps.root.querySelector<HTMLElement>("#balances-list");
+  const listEl = deps.root.querySelector<HTMLElement>("[data-balances-list]");
   const summaryEl = deps.root.querySelector<HTMLElement>("#balances-summary");
   const filterButtons = [...deps.root.querySelectorAll<HTMLButtonElement>("[data-balance-filter]")];
 
@@ -182,7 +184,7 @@ export function createBalancesView(deps: BalancesViewDeps) {
       return `<p class="bal-note">Adjustments need the database connection, which is unavailable right now.</p>`;
     }
     return `<form class="bal-panel" data-panel="adjust">
-      <p class="bal-note">Enter what the tenant actually owes now. The change is saved with your reason and shown to the tenant as "Manually adjusted".</p>
+      <p class="bal-note">The tenant will see this as "Manually adjusted" with your reason.</p>
       <div class="bal-fields">
         ${
           row.rent
@@ -263,7 +265,10 @@ export function createBalancesView(deps: BalancesViewDeps) {
       listEl.innerHTML = `<p class="mr-empty">Choose a building at the top.</p>`;
       return;
     }
-    const visible = filterRows(rows, filter);
+    const onlyHouse = deps.onlyHouse?.() ?? "";
+    const visible = onlyHouse
+      ? rows.filter((row) => row.houseNumber.toUpperCase() === onlyHouse.toUpperCase())
+      : filterRows(rows, filter);
     listEl.innerHTML = visible.length
       ? visible.map(renderCard).join("")
       : `<p class="mr-empty">${
@@ -511,5 +516,16 @@ export function createBalancesView(deps: BalancesViewDeps) {
     }
   });
 
-  return { load };
+  async function open(houseNumber: string, panel: "pay" | "adjust" | null = null) {
+    rows = [];
+    openPanel = panel ? { houseNumber: houseNumber.toUpperCase(), panel } : null;
+    await load();
+    const row = rows.find((item) => item.houseNumber.toUpperCase() === houseNumber.toUpperCase());
+    if (row && panel) {
+      openPanel = { houseNumber: row.houseNumber, panel };
+      render();
+    }
+  }
+
+  return { load, open };
 }

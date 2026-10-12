@@ -1182,3 +1182,127 @@ body.landlord-rooms-route .lh-workspace {
   padding: 0 12px;
   font-size: 0.82rem;
 }
+
+/* House quick actions (tap a row in Houses To Watch) */
+.landlord-sheet-modal.house-actions-modal {
+  inset: auto;
+  top: 50%;
+  left: 50%;
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  grid-template-rows: none;
+  gap: 12px;
+  border-radius: 16px !important;
+  transform: translate(-50%, -50%);
+}
+
+.house-actions-modal .landlord-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.house-actions-modal .landlord-drawer-head h2 {
+  margin: 0;
+}
+
+.dashboard-watch-table tr.is-clickable {
+  cursor: pointer;
+}
+
+/* House Ledger toolbar: secondary actions in one menu */
+.lh-more-menu {
+  position: relative;
+}
+
+.lh-more-menu > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--captyn-line);
+  border-radius: 10px;
+  background: var(--captyn-panel-strong);
+  color: var(--captyn-ink-strong);
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+.lh-more-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.lh-more-menu-list {
+  position: absolute;
+  right: 0;
+  z-index: 30;
+  display: grid;
+  gap: 4px;
+  min-width: 190px;
+  margin-top: 6px;
+  padding: 6px;
+  border: 1px solid var(--captyn-line);
+  border-radius: 12px;
+  background: var(--captyn-panel-strong);
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.16);
+}
+
+.lh-more-menu-list button {
+  justify-content: flex-start;
+  width: 100%;
+  text-align: left;
+}
+
+.resident-overview-card.is-zero {
+  opacity: 0.55;
+}
+
+/* Section headers read left to right, like House Accounts */
+.secondary-ledger-panel > summary {
+  justify-content: flex-start;
+}
+
+.lh-more-menu-list button {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  color: var(--captyn-ink-strong) !important;
+  box-shadow: none !important;
+  font-weight: 600;
+}
+
+.lh-more-menu-list button:hover,
+.lh-more-menu-list button:focus-visible {
+  background: var(--captyn-panel-soft) !important;
+}
+
+/* House Ledger toolbar layout */
+#residents-section > .panel-head {
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+#residents-section > .panel-head .action-row {
+  flex: 1 1 520px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+#residents-section > .panel-head .action-row > button,
+.lh-more-menu > summary {
+  white-space: nowrap;
+}
+
+#residents-section .resident-search-field {
+  flex: 1 1 220px;
+}
+
+#residents-building-select {
+  min-width: 150px;
+}

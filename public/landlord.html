@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="/landlord.css?v=0bb29b0442" />
     <script src="/captyn-theme.js?v=6944e37fb6"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=38fd7f7c91" />
-    <link rel="stylesheet" href="/landlord-shell.css?v=9e5fe07928" />
+    <link rel="stylesheet" href="/landlord-shell.css?v=b4dc3f1525" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -194,7 +194,7 @@
                   <th>Latest Payment</th>
                   <th>Latest Covers</th>
                   <th>Latest Recorded</th>
-                  <th>Last Receipt</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody id="overview-collections-body"></tbody>
@@ -771,7 +771,7 @@
           data-landlord-view-panel="rent"
           id="overview-rent-status-section"
         >
-          <summary>Rent Setup + Collection</summary>
+          <summary>Rent</summary>
           <div class="panel-head">
             <h2>Rent Collection Status</h2>
             <div class="action-row">
@@ -1021,7 +1021,7 @@
                 Building
                 <select id="residents-building-select"></select>
               </label>
-              <label>
+              <label class="hidden">
                 Filter
                 <select id="residents-status-filter">
                   <option value="all">All houses</option>
@@ -1045,23 +1045,28 @@
                 />
               </label>
               <button id="open-direct-tenant-drawer-btn" type="button">Add Tenant</button>
-              <button id="residents-open-rent-sheet-btn" type="button">Rent Setup Sheet</button>
-              <button id="house-sheet-export-btn" type="button">Export Excel</button>
-              <button id="house-sheet-import-btn" type="button">Import Excel</button>
+              <details class="lh-more-menu">
+                <summary>More</summary>
+                <div class="lh-more-menu-list">
+                  <button id="residents-open-rent-sheet-btn" type="button">Rent Setup Sheet</button>
+                  <button id="residents-open-match-btn" type="button">Open Account</button>
+                  <button id="house-sheet-export-btn" type="button">Export Excel</button>
+                  <button id="house-sheet-import-btn" type="button">Import Excel</button>
+                </div>
+              </details>
               <input
                 id="house-sheet-file"
                 type="file"
                 accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
                 hidden
               />
-              <button id="residents-open-match-btn" type="button">Open Account</button>
-              <button id="refresh-residents" type="button">Refresh</button>
+              <button id="refresh-residents" type="button" class="hidden">Refresh</button>
             </div>
           </div>
           <div id="residents-overview" class="resident-overview-cards"></div>
           <p id="residents-search-summary" class="status-text"></p>
 
-          <details id="room-ledger-section" class="secondary-ledger-panel utility-summary-card room-ledger-card">
+          <details id="room-ledger-section" class="secondary-ledger-panel utility-summary-card room-ledger-card" open>
             <summary class="room-ledger-toggle">
               <span>House Accounts</span>
             </summary>
@@ -1131,7 +1136,7 @@
             </div>
           </div>
           <div id="balances-summary" class="mr-summary"></div>
-          <div id="balances-list" class="mr-list"></div>
+          <div id="balances-list" class="mr-list" data-balances-list></div>
         </section>
 
         <section
@@ -1671,6 +1676,21 @@
         </form>
       </aside>
 
+      <div id="house-actions-backdrop" class="landlord-drawer-backdrop hidden"></div>
+      <aside
+        id="house-actions-modal"
+        class="landlord-sheet-modal house-actions-modal hidden"
+        role="dialog"
+        aria-labelledby="house-actions-title"
+      >
+        <header class="landlord-drawer-head">
+          <h2 id="house-actions-title">House</h2>
+          <button id="close-house-actions-btn" type="button" class="ghost-btn">Close</button>
+        </header>
+        <div class="mr-list" data-balances-list></div>
+        <button id="house-actions-open-page-btn" type="button" class="ghost-btn">Open house page</button>
+      </aside>
+
       <div id="move-out-settlement-backdrop" class="landlord-drawer-backdrop hidden"></div>
       <aside
         id="move-out-settlement-modal"
@@ -2012,6 +2032,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=cd290d5f23"></script>
+    <script type="module" src="/landlord.js?v=3136932205"></script>
   </body>
 </html>

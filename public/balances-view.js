@@ -53,7 +53,7 @@ function wholeNumber(value) {
     return Number.isFinite(parsed) ? parsed : null;
 }
 export function createBalancesView(deps) {
-    const listEl = deps.root.querySelector("#balances-list");
+    const listEl = deps.root.querySelector("[data-balances-list]");
     const summaryEl = deps.root.querySelector("#balances-summary");
     const filterButtons = [...deps.root.querySelectorAll("[data-balance-filter]")];
     let buildingId = "";
@@ -116,7 +116,7 @@ export function createBalancesView(deps) {
             return `<p class="bal-note">Adjustments need the database connection, which is unavailable right now.</p>`;
         }
         return `<form class="bal-panel" data-panel="adjust">
-      <p class="bal-note">Enter what the tenant actually owes now. The change is saved with your reason and shown to the tenant as "Manually adjusted".</p>
+      <p class="bal-note">The tenant will see this as "Manually adjusted" with your reason.</p>
       <div class="bal-fields">
         ${row.rent
             ? `<label>Rent owed (KSh)
@@ -182,7 +182,10 @@ export function createBalancesView(deps) {
             listEl.innerHTML = `<p class="mr-empty">Choose a building at the top.</p>`;
             return;
         }
-        const visible = filterRows(rows, filter);
+        const onlyHouse = deps.onlyHouse?.() ?? "";
+        const visible = onlyHouse
+            ? rows.filter((row) => row.houseNumber.toUpperCase() === onlyHouse.toUpperCase())
+            : filterRows(rows, filter);
         listEl.innerHTML = visible.length
             ? visible.map(renderCard).join("")
             : `<p class="mr-empty">${filter === "unchecked"
@@ -409,5 +412,15 @@ export function createBalancesView(deps) {
             void saveAdjustment(houseNumber, form);
         }
     });
-    return { load };
+    async function open(houseNumber, panel = null) {
+        rows = [];
+        openPanel = panel ? { houseNumber: houseNumber.toUpperCase(), panel } : null;
+        await load();
+        const row = rows.find((item) => item.houseNumber.toUpperCase() === houseNumber.toUpperCase());
+        if (row && panel) {
+            openPanel = { houseNumber: row.houseNumber, panel };
+            render();
+        }
+    }
+    return { load, open };
 }

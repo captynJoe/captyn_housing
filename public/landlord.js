@@ -2398,10 +2398,8 @@ async function openResidentLookup(query, buildingId = "all") {
 function sortResidentsForDirectory(rows) {
     return [...rows].sort(compareStableRoomOrder);
 }
-function getResidentOverviewTargetSection(filter) {
-    return filter === "awaiting_readings"
-        ? "utility-room-status-section"
-        : "room-ledger-section";
+function getResidentOverviewTargetSection(_filter) {
+    return "room-ledger-section";
 }
 function renderResidentsOverview(rows) {
     if (!(residentsOverviewEl instanceof HTMLElement)) {
@@ -4483,8 +4481,7 @@ function syncRentPaymentBuildingOptions() {
         rentPaymentBuildingSelectEl.append(option);
     });
     if (rentPaymentHelpEl instanceof HTMLElement) {
-        rentPaymentHelpEl.textContent =
-            "Record a landlord-side rent payment only for buildings that still use rent billing.";
+        rentPaymentHelpEl.textContent = "";
     }
 }
 function getRentEnabledBuildings() {

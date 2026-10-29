@@ -9000,7 +9000,18 @@ paymentAccessBodyEl.addEventListener("click", (event) => {
                     "content-type": "application/json"
                 },
                 body: JSON.stringify({
-                    ...nextValue,
+                    rentEnabled: nextValue.rentEnabled,
+                    waterEnabled: nextValue.waterEnabled,
+                    electricityEnabled: nextValue.electricityEnabled,
+                    ...(nextValue.rentGraceDays !== Math.max(0, Math.round(Number(current.rentGraceDays ?? 0)))
+                        ? { rentGraceDays: nextValue.rentGraceDays }
+                        : {}),
+                    ...(nextValue.lateRentPenaltyEnabled !== Boolean(current.lateRentPenaltyEnabled)
+                        ? { lateRentPenaltyEnabled: nextValue.lateRentPenaltyEnabled }
+                        : {}),
+                    ...(nextValue.lateRentPenaltyAmountKsh !== Math.max(0, Math.round(Number(current.lateRentPenaltyAmountKsh ?? 0)))
+                        ? { lateRentPenaltyAmountKsh: nextValue.lateRentPenaltyAmountKsh }
+                        : {}),
                     acknowledgeImpact: true,
                     note
                 })

@@ -3648,14 +3648,14 @@ async function bootstrap() {
       return;
     }
 
-    await buildingConfigurationService.ensureDefaultsForBuildings(buildings);
-
     const legacyPaymentAccessState = paymentAccessService.exportState();
     if (legacyPaymentAccessState.records.length > 0) {
       await buildingConfigurationService.syncLegacyPaymentAccess(
         legacyPaymentAccessState.records
       );
     }
+
+    await buildingConfigurationService.ensureDefaultsForBuildings(buildings);
 
     const configs = await buildingConfigurationService.listForBuildings(
       buildings.map((item) => item.id)
@@ -5476,6 +5476,13 @@ async function bootstrap() {
       const config = configByBuildingId.get(building.id);
       return {
         ...paymentAccessService.getForBuilding(building.id),
+        ...(config
+          ? {
+              rentEnabled: config.rentEnabled,
+              waterEnabled: config.waterEnabled,
+              electricityEnabled: config.electricityEnabled
+            }
+          : {}),
         buildingName: building.name,
         rentGraceDays: Math.max(0, Number(config?.rentGraceDays ?? 0)),
         lateRentPenaltyEnabled: Boolean(config?.lateRentPenaltyEnabled),

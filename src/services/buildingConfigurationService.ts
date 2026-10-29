@@ -258,14 +258,8 @@ export class BuildingConfigurationService {
       validRecords.map((row) =>
         this.prisma.buildingConfiguration.upsert({
           where: { buildingId: row.buildingId },
-          update: {
-            rentEnabled: row.rentEnabled,
-            waterEnabled: row.waterEnabled,
-            electricityEnabled: row.electricityEnabled,
-            updatedByRole: row.updatedByRole ?? null,
-            updatedByUserId: row.updatedByUserId ?? null,
-            note: row.note ?? null
-          },
+          // Existing database settings are canonical; legacy data only seeds new rows.
+          update: {},
           create: {
             buildingId: row.buildingId,
             ...DEFAULT_CONFIG,

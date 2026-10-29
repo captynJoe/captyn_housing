@@ -636,7 +636,8 @@ test("keeps legacy house-only rent records visible after building scoping", () =
   assert.equal(fetched.balanceKsh, 3000);
 });
 
-test("a payment made just after the month turns clears last month's overdue rent", () => {
+test("a payment made just after the month turns clears last month's overdue rent", (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-01T08:00:00.000Z") });
   const service = new RentLedgerService();
   service.upsertRentDue(BUILDING_A, "MT-1", {
     monthlyRentKsh: 5000,
@@ -657,7 +658,8 @@ test("a payment made just after the month turns clears last month's overdue rent
   assert.equal(result.snapshot?.balanceKsh, 0);
 });
 
-test("a payment labelled with its own month pays what is owed first, and is held once nothing is owed", () => {
+test("a payment labelled with its own month pays what is owed first, and is held once nothing is owed", (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-01T08:00:00.000Z") });
   const service = new RentLedgerService();
   service.upsertRentDue(BUILDING_A, "MT-2", {
     monthlyRentKsh: 5000,

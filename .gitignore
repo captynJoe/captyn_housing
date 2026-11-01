@@ -12,5 +12,6 @@ yarn-error.log*
 # Prisma client output is generated locally by `npm run prisma:generate`.
 generated/prisma/
 
-# Runtime payment access state is mutated by the app and should stay local.
-data/payment-access-controls.json
+# Runtime payment records and uploaded customer media must stay out of Git.
+/data/
+/uploads/

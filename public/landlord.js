@@ -232,6 +232,13 @@ const landlordTicketsBodyEl = document.getElementById("landlord-tickets-body");
 const refreshLandlordTicketsBtnEl = document.getElementById("refresh-landlord-tickets");
 const rentStatusBodyEl = document.getElementById("rent-status-body");
 const refreshRentStatusBtnEl = document.getElementById("refresh-rent-status");
+const collectionsReportBuildingEl = document.getElementById("collections-report-building");
+const collectionsReportFromEl = document.getElementById("collections-report-from");
+const collectionsReportToEl = document.getElementById("collections-report-to");
+const collectionsReportBodyEl = document.getElementById("collections-report-body");
+const collectionsReportSummaryEl = document.getElementById("collections-report-summary");
+const refreshCollectionsReportBtnEl = document.getElementById("refresh-collections-report");
+const exportCollectionsReportBtnEl = document.getElementById("export-collections-report");
 const paymentCorrectionBuildingSelectEl = document.getElementById("payment-correction-building-select");
 const paymentCorrectionHouseEl = document.getElementById("payment-correction-house");
 const paymentCorrectionUtilityTypeEl = document.getElementById("payment-correction-utility-type");
@@ -454,6 +461,7 @@ const state = {
     utilityRoomSummaryByKey: new Map(),
     payments: [],
     rentPayments: [],
+    collectionsReportPayments: [],
     selectedPaymentCorrectionBuildingId: "all",
     expenditures: [],
     moveOutSettlements: [],
@@ -675,7 +683,8 @@ function isLandlordViewAvailableForRole(view) {
             normalizedView === "meters" ||
             normalizedView === "rent" ||
             normalizedView === "balances" ||
-            normalizedView === "applications");
+            normalizedView === "applications" ||
+            normalizedView === "reports");
     }
     if (isStaffRole()) {
         return normalizedView !== "settings";
@@ -1092,7 +1101,8 @@ function setActiveLandlordView(nextView, options = {}) {
         normalizedView === "meters" ||
         normalizedView === "rent" ||
         normalizedView === "expenses" ||
-        normalizedView === "balances"
+        normalizedView === "balances" ||
+        normalizedView === "reports"
         ? normalizedView
         : "overview";
     const targetView = isLandlordViewAvailableForRole(requestedTargetView)
@@ -1123,6 +1133,12 @@ function setActiveLandlordView(nextView, options = {}) {
     if (targetView === "balances" && previousView !== "balances" && !options.skipLoad) {
         void balancesView.load().catch((error) => {
             handleLandlordError(error, "Unable to load balances.");
+        });
+    }
+    if (targetView === "reports" && (previousView !== "reports" || options.forceLoad) && !options.skipLoad) {
+        syncCollectionsReportBuildingOptions();
+        void loadCollectionsReport().catch((error) => {
+            handleLandlordError(error, "Unable to load the collections report.");
         });
     }
     if (targetView === "settings" && previousView !== "settings" && !options.skipLoad) {
@@ -7408,6 +7424,113 @@ function syncPaymentCorrectionBuildingOptions() {
             : fallback;
     });
 }
+function syncCollectionsReportBuildingOptions() {
+    if (!(collectionsReportBuildingEl instanceof HTMLSelectElement)) {
+        return;
+    }
+    const previous = String(collectionsReportBuildingEl.value || "");
+    collectionsReportBuildingEl.replaceChildren();
+    const allOption = document.createElement("option");
+    allOption.value = "";
+    allOption.textContent = "All assigned buildings";
+    collectionsReportBuildingEl.append(allOption);
+    state.buildings.forEach((building) => {
+        const option = document.createElement("option");
+        option.value = building.id;
+        option.textContent = building.name || building.id;
+        collectionsReportBuildingEl.append(option);
+    });
+    collectionsReportBuildingEl.value = [...collectionsReportBuildingEl.options].some((option) => option.value === previous)
+        ? previous
+        : "";
+}
+function getCollectionsReportRows() {
+    const from = String(collectionsReportFromEl?.value || "");
+    const to = String(collectionsReportToEl?.value || "");
+    return state.collectionsReportPayments
+        .filter((item) => {
+        const paidDate = String(item.paidAt || "").slice(0, 10);
+        return (!from || paidDate >= from) && (!to || paidDate <= to);
+    })
+        .sort((a, b) => String(b.paidAt || "").localeCompare(String(a.paidAt || "")));
+}
+function renderCollectionsReport() {
+    if (!(collectionsReportBodyEl instanceof HTMLElement)) {
+        return;
+    }
+    const rows = getCollectionsReportRows();
+    const totalKsh = rows.reduce((sum, item) => sum + Number(item.amountKsh || 0), 0);
+    if (collectionsReportSummaryEl instanceof HTMLElement) {
+        collectionsReportSummaryEl.textContent = `${rows.length} payment${rows.length === 1 ? "" : "s"} recorded · ${formatCurrency(totalKsh)} collected`;
+    }
+    collectionsReportBodyEl.replaceChildren();
+    if (!rows.length) {
+        const row = document.createElement("tr");
+        row.innerHTML = '<td colspan="7">No rent payments found for this report period.</td>';
+        collectionsReportBodyEl.append(row);
+        return;
+    }
+    rows.forEach((item) => {
+        const row = document.createElement("tr");
+        const resident = item.tenantName || item.phoneNumber || "Not recorded";
+        row.innerHTML = `
+      <td>${escapeHtml(getBuildingDisplayNameById(item.buildingId, item.buildingId || "-"))}</td>
+      <td>${escapeHtml(item.houseNumber || "-")}</td>
+      <td>${escapeHtml(resident)}</td>
+      <td>${escapeHtml(formatCurrency(item.amountKsh))}</td>
+      <td>${escapeHtml(formatDateTime(item.paidAt))}</td>
+      <td>${escapeHtml(String(item.provider || "-").toUpperCase())}</td>
+      <td>${escapeHtml(item.providerReference || "-")}</td>
+    `;
+        collectionsReportBodyEl.append(row);
+    });
+}
+async function loadCollectionsReport() {
+    if (!(collectionsReportBuildingEl instanceof HTMLSelectElement)) {
+        return;
+    }
+    syncCollectionsReportBuildingOptions();
+    if (collectionsReportFromEl instanceof HTMLInputElement && !collectionsReportFromEl.value) {
+        const now = new Date();
+        collectionsReportFromEl.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+    }
+    if (collectionsReportToEl instanceof HTMLInputElement && !collectionsReportToEl.value) {
+        const now = new Date();
+        collectionsReportToEl.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    }
+    const selectedBuildingId = String(collectionsReportBuildingEl.value || "");
+    const buildingIds = selectedBuildingId ? [selectedBuildingId] : state.buildings.map((item) => item.id);
+    const payments = await Promise.all(buildingIds.map(async (buildingId) => {
+        const params = new URLSearchParams({ buildingId, limit: "2000" });
+        const payload = await requestJson(`/api/landlord/rent-payments?${params.toString()}`);
+        return Array.isArray(payload.data) ? payload.data : [];
+    }));
+    state.collectionsReportPayments = payments.flat();
+    renderCollectionsReport();
+}
+function exportCollectionsReportCsv() {
+    const rows = getCollectionsReportRows();
+    const escapeCsv = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const lines = [
+        ["Building", "House", "Resident", "Amount KSh", "Paid on", "Method", "Reference"],
+        ...rows.map((item) => [
+            getBuildingDisplayNameById(item.buildingId, item.buildingId || "-"),
+            item.houseNumber || "",
+            item.tenantName || item.phoneNumber || "Not recorded",
+            Number(item.amountKsh || 0),
+            item.paidAt || "",
+            item.provider || "",
+            item.providerReference || ""
+        ])
+    ].map((line) => line.map(escapeCsv).join(","));
+    const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `collections-report-${collectionsReportFromEl?.value || "all"}-to-${collectionsReportToEl?.value || "all"}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+}
 async function loadPaymentCorrections() {
     const buildingId = getSelectedPaymentCorrectionBuildingId();
     const houseNumber = normalizeHouse(paymentCorrectionHouseEl?.value);
@@ -10555,6 +10678,19 @@ refreshPaymentsBtnEl.addEventListener("click", () => {
         handleLandlordError(error, "Unable to refresh payments.");
     });
 });
+refreshCollectionsReportBtnEl?.addEventListener("click", () => {
+    void loadCollectionsReport().catch((error) => {
+        handleLandlordError(error, "Unable to refresh the collections report.");
+    });
+});
+collectionsReportBuildingEl?.addEventListener("change", () => {
+    void loadCollectionsReport().catch((error) => {
+        handleLandlordError(error, "Unable to load the collections report.");
+    });
+});
+collectionsReportFromEl?.addEventListener("change", renderCollectionsReport);
+collectionsReportToEl?.addEventListener("change", renderCollectionsReport);
+exportCollectionsReportBtnEl?.addEventListener("click", exportCollectionsReportCsv);
 refreshPaymentCorrectionsBtnEl?.addEventListener("click", () => {
     void loadPaymentCorrections().catch((error) => {
         handleLandlordError(error, "Unable to refresh payment corrections.");

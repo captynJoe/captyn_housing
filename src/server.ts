@@ -557,6 +557,7 @@ interface LandlordUtilityRegistryRow {
   roomDefaultActive: boolean;
   rentSetupSource: "room_default" | "building_default" | "agreement_legacy" | "room_disabled" | "unset";
   depositKsh: number;
+  depositRequiredKsh?: number;
   depositPaidKsh?: number;
   rentPaymentStatus?: string;
   rentBalanceKsh: number;
@@ -5355,6 +5356,10 @@ async function bootstrap() {
         roomDefaultActive,
         rentSetupSource,
         depositKsh,
+        depositRequiredKsh:
+          agreement?.depositKsh == null
+            ? undefined
+            : Math.max(0, Number(agreement.depositKsh)),
         depositPaidKsh,
         rentPaymentStatus: visibleRentPaymentStatus,
         rentBalanceKsh: visibleRentBalanceKsh,
@@ -15412,8 +15417,11 @@ async function bootstrap() {
         roomDefaultGraceDays: row.roomDefaultGraceDays ?? null,
         roomDefaultActive: row.roomDefaultActive,
         monthlyRentKsh: row.monthlyRentKsh,
-        depositKsh: row.depositKsh,
-        balanceKsh: row.rentBalanceKsh,
+        depositKsh: row.depositRequiredKsh,
+        depositPaidKsh: row.depositPaidKsh,
+        // Setup shows only a posted rent balance. A monthly rate alone is not a charge.
+        balanceKsh:
+          rentLedgerService.getRentDue(building.id, row.houseNumber)?.balanceKsh ?? 0,
         currentMonthOutstandingKsh: row.currentMonthRentOutstandingKsh,
         currentMonthLatePenaltyKsh: row.currentMonthLatePenaltyKsh,
         totalLatePenaltyKsh: row.totalLatePenaltyKsh,
@@ -15653,15 +15661,20 @@ async function bootstrap() {
             0,
             Number(existing?.currentMonthPaidKsh ?? 0)
           );
+          const requestedBalanceKsh = normalizeOptionalNonNegativeInteger(
+            sourceRow?.balanceKsh
+          );
           const balanceKsh =
-            currentMonthPaidKsh == null
-              ? Math.max(0, Number(existing?.balanceKsh ?? monthlyRentKsh))
-              : existingArrearsKsh + Math.max(0, monthlyRentKsh - currentMonthPaidKsh);
+            requestedBalanceKsh != null
+              ? requestedBalanceKsh
+              : currentMonthPaidKsh == null
+                ? Math.max(0, Number(existing?.balanceKsh ?? 0))
+                : existingArrearsKsh + Math.max(0, monthlyRentKsh - currentMonthPaidKsh);
           let rentSnapshot = existing;
           if (
             refreshed.hasActiveResident &&
             paymentAccessService.isEnabled(building.id, "rent") &&
-            (existing || monthlyRentKsh > 0)
+            (existing || monthlyRentKsh > 0 || requestedBalanceKsh != null)
           ) {
             rentSnapshot = rentLedgerService.upsertRentDue(building.id, houseNumber, {
               monthlyRentKsh,
@@ -15676,12 +15689,28 @@ async function bootstrap() {
           if (userAccountService && refreshed.hasActiveResident) {
             const rowDepositKsh = normalizeOptionalNonNegativeInteger(sourceRow?.depositKsh);
             const depositKsh =
-              rowDepositKsh ?? buildingDefaultDepositKsh ?? refreshed.depositKsh ?? null;
+              rowDepositKsh ??
+              buildingDefaultDepositKsh ??
+              refreshed.depositRequiredKsh ??
+              refreshed.depositKsh ??
+              null;
+            const requestedDepositPaidKsh = normalizeOptionalNonNegativeInteger(
+              sourceRow?.depositPaidKsh
+            );
             const activeAgreement = await userAccountService.getActiveTenantAgreement({
               buildingId: building.id,
               houseNumber
             });
             const currentAgreement = activeAgreement.agreement;
+            if (
+              requestedDepositPaidKsh != null &&
+              depositKsh != null &&
+              requestedDepositPaidKsh > depositKsh
+            ) {
+              return res.status(400).json({
+                error: `Deposit paid for ${houseNumber} cannot exceed the required deposit.`
+              });
+            }
             await userAccountService.upsertActiveTenantAgreement({
               buildingId: building.id,
               houseNumber,
@@ -15703,12 +15732,13 @@ async function bootstrap() {
                 monthlyRentKsh,
                 depositKsh: depositKsh ?? undefined,
                 depositPaidKsh:
-                  depositKsh == null
+                  requestedDepositPaidKsh ??
+                  (depositKsh == null
                     ? currentAgreement?.depositPaidKsh
                     : Math.min(
                         Math.max(0, Number(currentAgreement?.depositPaidKsh ?? 0)),
                         Math.max(0, Number(depositKsh))
-                      ),
+                      )),
                 paymentDueDay: refreshed.configuredPaymentDueDay,
                 specialTerms: currentAgreement?.specialTerms
               }
@@ -15773,8 +15803,24 @@ async function bootstrap() {
               rentSetupSource: refreshed.rentSetupSource,
               monthlyRentKsh,
               depositKsh: normalizeOptionalNonNegativeInteger(sourceRow?.depositKsh),
+              depositPaidKsh: normalizeOptionalNonNegativeInteger(sourceRow?.depositPaidKsh),
+              depositDueKsh: Math.max(
+                0,
+                Number(
+                  normalizeOptionalNonNegativeInteger(sourceRow?.depositKsh) ??
+                    buildingDefaultDepositKsh ??
+                    refreshed.depositRequiredKsh ??
+                    0
+                ) -
+                  Number(
+                    normalizeOptionalNonNegativeInteger(sourceRow?.depositPaidKsh) ??
+                      refreshed.depositPaidKsh ??
+                      0
+                  )
+              ),
               buildingDefaultDepositKsh,
               currentMonthPaidKsh,
+              balanceKsh: rentSnapshot?.balanceKsh ?? null,
               rentChargeStartDate,
               paymentDueDay: refreshed.configuredPaymentDueDay,
               graceDays: refreshed.configuredRentGraceDays

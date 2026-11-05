@@ -821,12 +821,12 @@
                   id="rent-payment-reference"
                   type="text"
                   maxlength="120"
-                  placeholder="Optional for cash"
+                  placeholder="Required for M-PESA, bank, and card; optional for cash"
                 />
               </label>
               <button id="rent-payment-submit" type="submit">Record Rent Payment</button>
             </form>
-            <p id="rent-payment-help" class="status-text">Manual rent payment.</p>
+            <p id="rent-payment-help" class="status-text">Enter the transaction reference for M-PESA, bank, or card payments. Cash payments can omit it.</p>
           </div>
 
           <div class="table-wrap">
@@ -1607,6 +1607,9 @@
             />
           </label>
 
+          <p class="status-text">
+            Monthly rent sets the recurring amount. Current Balance is what is owed now. Deposit Required, Deposit Paid, and Deposit Due track the tenant agreement; changing rent alone will not add a charge.
+          </p>
           <div class="table-wrap utility-sheet-table-wrap rent-sheet-table-wrap">
             <table class="utility-sheet-table">
               <thead>
@@ -1616,11 +1619,13 @@
                   <th>Source</th>
                   <th>Resolved Rent</th>
                   <th>House Default Rent</th>
-                  <th>Deposit</th>
+                  <th>Deposit Required</th>
+                  <th>Deposit Paid</th>
+                  <th>Deposit Due</th>
                   <th>Due Day</th>
                   <th>Grace</th>
                   <th>Charge Rent</th>
-                  <th>Current Balance</th>
+                  <th>Current Balance (KSh)</th>
                   <th>Paid This Month</th>
                   <th>Arrears</th>
                 </tr>
@@ -2061,6 +2066,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=d860825aca"></script>
+    <script type="module" src="\g<1>fe3e163146"></script>
   </body>
 </html>

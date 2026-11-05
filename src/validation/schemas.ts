@@ -397,6 +397,8 @@ export const landlordRentSetupSheetSchema = z.object({
         houseNumber: nonEmptyString.max(24),
         monthlyRentKsh: optionalRentAmountSchema,
         depositKsh: optionalRentAmountSchema,
+        depositPaidKsh: optionalRentAmountSchema,
+        balanceKsh: optionalRentAmountSchema,
         currentMonthPaidKsh: optionalRentAmountSchema,
         paymentDueDay: optionalRentDueDaySchema,
         graceDays: optionalRentGraceDaysSchema,

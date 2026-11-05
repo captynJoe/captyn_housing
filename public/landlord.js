@@ -4616,7 +4616,7 @@ function renderRentSheetRows(rows) {
     rentSheetBodyEl.replaceChildren();
     if (!Array.isArray(rows) || rows.length === 0) {
         const row = document.createElement("tr");
-        row.innerHTML = '<td colspan="13">No houses found for this building.</td>';
+        row.innerHTML = '<td colspan="14">No houses found for this building.</td>';
         rentSheetBodyEl.append(row);
         return;
     }
@@ -4627,9 +4627,9 @@ function renderRentSheetRows(rows) {
         const currentMonthPaidKsh = Math.max(0, Math.round(Number(item.currentMonthPaidKsh ?? 0)));
         const arrearsKsh = Math.max(0, Math.round(Number(item.arrearsKsh ?? 0)));
         const roomDefaultMonthlyRentKsh = optionalInputValue(item.roomDefaultMonthlyRentKsh);
-        const depositKsh = Math.max(0, Math.round(Number(item.depositKsh ?? 0))) > 0
-            ? optionalInputValue(item.depositKsh)
-            : "";
+        const depositKsh = item.depositKsh == null ? "" : optionalInputValue(item.depositKsh);
+        const resolvedDepositKsh = Math.max(0, Math.round(Number(item.depositKsh ?? state.rentSheetDefaults.depositKsh ?? 0)));
+        const depositPaidKsh = Math.max(0, Math.round(Number(item.depositPaidKsh ?? 0)));
         const roomDefaultDueDay = optionalInputValue(item.roomDefaultDueDay);
         const roomDefaultGraceDays = optionalInputValue(item.roomDefaultGraceDays);
         const rentPlaceholder = rentDefaultPlaceholder(state.rentSheetDefaults.monthlyRentKsh, formatCurrency);
@@ -4648,6 +4648,10 @@ function renderRentSheetRows(rows) {
         row.dataset.hasActiveResident = item.hasActiveResident ? "true" : "false";
         row.dataset.resolvedMonthlyRentKsh = String(resolvedMonthlyRentKsh);
         row.dataset.originalCurrentMonthPaidKsh = String(currentMonthPaidKsh);
+        row.dataset.originalBalanceKsh = String(balanceKsh);
+        row.dataset.originalDepositKsh = String(Math.max(0, Math.round(Number(item.depositKsh ?? 0))));
+        row.dataset.originalDepositPaidKsh = String(depositPaidKsh);
+        row.dataset.resolvedDepositKsh = String(resolvedDepositKsh);
         row.innerHTML = `
       <td><strong>${escapeHtml(houseNumber)}</strong></td>
       <td>
@@ -4684,6 +4688,18 @@ function renderRentSheetRows(rows) {
       <td>
         <input
           class="registry-table-input utility-sheet-input"
+          data-field="depositPaidKsh"
+          type="number"
+          min="0"
+          step="1"
+          value="${escapeHtml(depositPaidKsh)}"
+          aria-label="Deposit paid for house ${escapeHtml(houseNumber)}"
+        />
+      </td>
+      <td><span data-field="depositDueKsh">${formatCurrency(Math.max(0, resolvedDepositKsh - depositPaidKsh))}</span></td>
+      <td>
+        <input
+          class="registry-table-input utility-sheet-input"
           data-field="paymentDueDay"
           type="number"
           min="1"
@@ -4713,7 +4729,17 @@ function renderRentSheetRows(rows) {
           ${roomDefaultActive ? "checked" : ""}
         />
       </td>
-      <td>${formatCurrency(balanceKsh)}</td>
+      <td>
+        <input
+          class="registry-table-input utility-sheet-input"
+          data-field="balanceKsh"
+          type="number"
+          min="0"
+          step="1"
+          value="${escapeHtml(balanceKsh)}"
+          aria-label="Current rent balance for house ${escapeHtml(houseNumber)}"
+        />
+      </td>
       <td>
         <input
           class="registry-table-input utility-sheet-input"
@@ -4727,6 +4753,22 @@ function renderRentSheetRows(rows) {
       </td>
       <td>${formatCurrency(arrearsKsh)}</td>
     `;
+        const depositTotalInput = row.querySelector('input[data-field="depositKsh"]');
+        const depositPaidInput = row.querySelector('input[data-field="depositPaidKsh"]');
+        const depositDueValue = row.querySelector('[data-field="depositDueKsh"]');
+        const updateDepositDue = () => {
+            const total = depositTotalInput instanceof HTMLInputElement
+                ? toOptionalNumber(depositTotalInput.value) ?? Number(row.dataset.resolvedDepositKsh ?? state.rentSheetDefaults.depositKsh ?? 0)
+                : Number(row.dataset.resolvedDepositKsh ?? 0);
+            const paid = depositPaidInput instanceof HTMLInputElement
+                ? toOptionalNumber(depositPaidInput.value) ?? 0
+                : 0;
+            if (depositDueValue instanceof HTMLElement) {
+                depositDueValue.textContent = formatCurrency(Math.max(0, total - paid));
+            }
+        };
+        depositTotalInput?.addEventListener("input", updateDepositDue);
+        depositPaidInput?.addEventListener("input", updateDepositDue);
         rentSheetBodyEl.append(row);
     });
 }
@@ -4766,9 +4808,11 @@ function buildRentSheetPayload() {
         const houseNumber = normalizeHouse(tr.dataset.houseNumber);
         const rentInput = tr.querySelector('input[data-field="monthlyRentKsh"]');
         const depositInput = tr.querySelector('input[data-field="depositKsh"]');
+        const depositPaidInput = tr.querySelector('input[data-field="depositPaidKsh"]');
         const dueDayInput = tr.querySelector('input[data-field="paymentDueDay"]');
         const graceDaysInput = tr.querySelector('input[data-field="graceDays"]');
         const activeInput = tr.querySelector('input[data-field="active"]');
+        const currentBalanceInput = tr.querySelector('input[data-field="balanceKsh"]');
         const currentMonthPaidInput = tr.querySelector('input[data-field="currentMonthPaidKsh"]');
         if (!(rentInput instanceof HTMLInputElement)) {
             return;
@@ -4781,6 +4825,18 @@ function buildRentSheetPayload() {
         if (depositKsh != null && depositKsh < 0) {
             throw new Error(`Deposit for ${houseNumber} cannot be negative.`);
         }
+        const depositPaidKsh = depositPaidInput instanceof HTMLInputElement
+            ? toOptionalNumber(depositPaidInput.value)
+            : null;
+        if (depositPaidKsh != null && depositPaidKsh < 0) {
+            throw new Error(`Deposit paid for ${houseNumber} cannot be negative.`);
+        }
+        const resolvedDepositKsh = Math.max(0, Math.round(Number(depositKsh ?? buildingDefaultDepositKsh ?? tr.dataset.resolvedDepositKsh ?? 0)));
+        if (depositPaidKsh != null && depositPaidKsh > resolvedDepositKsh) {
+            throw new Error(`Deposit paid for ${houseNumber} cannot exceed the required deposit.`);
+        }
+        const originalDepositPaidKsh = Math.max(0, Math.round(Number(tr.dataset.originalDepositPaidKsh ?? 0)));
+        const depositPaidChanged = depositPaidKsh != null && Math.round(depositPaidKsh) !== originalDepositPaidKsh;
         const paymentDueDay = dueDayInput instanceof HTMLInputElement ? toOptionalNumber(dueDayInput.value) : null;
         if (paymentDueDay != null && (paymentDueDay < 1 || paymentDueDay > 31)) {
             throw new Error(`Due day for ${houseNumber} must be from 1 to 31.`);
@@ -4791,6 +4847,14 @@ function buildRentSheetPayload() {
         if (graceDays != null && (graceDays < 0 || graceDays > 31)) {
             throw new Error(`Grace days for ${houseNumber} must be from 0 to 31.`);
         }
+        const balanceKsh = currentBalanceInput instanceof HTMLInputElement
+            ? toOptionalNumber(currentBalanceInput.value)
+            : null;
+        if (balanceKsh != null && balanceKsh < 0) {
+            throw new Error(`Current balance for ${houseNumber} cannot be negative.`);
+        }
+        const originalBalanceKsh = Math.max(0, Math.round(Number(tr.dataset.originalBalanceKsh ?? 0)));
+        const balanceChanged = balanceKsh != null && Math.round(balanceKsh) !== originalBalanceKsh;
         const currentMonthPaidKsh = currentMonthPaidInput instanceof HTMLInputElement
             ? toOptionalNumber(currentMonthPaidInput.value)
             : null;
@@ -4811,6 +4875,8 @@ function buildRentSheetPayload() {
             houseNumber,
             monthlyRentKsh: monthlyRentKsh == null ? null : Math.round(monthlyRentKsh),
             depositKsh: depositKsh == null ? null : Math.round(depositKsh),
+            depositPaidKsh: depositPaidChanged ? Math.round(depositPaidKsh) : null,
+            balanceKsh: balanceChanged ? Math.round(balanceKsh) : null,
             currentMonthPaidKsh: paidChanged ? Math.round(currentMonthPaidKsh) : null,
             paymentDueDay: paymentDueDay == null ? null : Math.round(paymentDueDay),
             graceDays: graceDays == null ? null : Math.round(graceDays),
@@ -7440,9 +7506,7 @@ function syncCollectionsReportBuildingOptions() {
         option.textContent = building.name || building.id;
         collectionsReportBuildingEl.append(option);
     });
-    collectionsReportBuildingEl.value = [...collectionsReportBuildingEl.options].some((option) => option.value === previous)
-        ? previous
-        : "";
+    collectionsReportBuildingEl.value = [...collectionsReportBuildingEl.options].some((option) => option.value === previous) ? previous : "";
 }
 function getCollectionsReportRows() {
     const from = String(collectionsReportFromEl?.value || "");
@@ -8023,7 +8087,7 @@ function createRentPaymentPayload() {
             billingMonth: toBillingMonth(rentPaymentMonthEl?.value) || undefined,
             amountKsh: Number(rentPaymentAmountEl?.value),
             provider: String(rentPaymentProviderEl?.value ?? "cash"),
-            providerReference: String(rentPaymentReferenceEl?.value ?? "").trim(),
+            providerReference: String(rentPaymentReferenceEl?.value ?? "").trim() || undefined,
             paidAt: toIsoFromDateTimeLocal(rentPaymentPaidAtEl?.value) || undefined
         }
     };

@@ -12754,10 +12754,15 @@ rentPaymentFormEl?.addEventListener("submit", (event) => {
     (requiresReference && !rentPayment.payload.providerReference)
   ) {
     showError(
-      requiresReference
-        ? "Rent payment requires building, house, amount, and reference."
-        : "Rent payment requires building, house, and amount."
+      requiresReference && !rentPayment.payload.providerReference
+        ? `Enter the ${rentPayment.payload.provider} transaction reference to record this payment. Choose cash if no transaction reference is available.`
+        : requiresReference
+          ? "Rent payment requires building, house, and amount."
+          : "Rent payment requires building, house, and amount."
     );
+    if (requiresReference && !rentPayment.payload.providerReference) {
+      rentPaymentReferenceEl?.focus();
+    }
     return;
   }
 

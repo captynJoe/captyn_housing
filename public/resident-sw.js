@@ -6,7 +6,7 @@ const APP_ASSETS = [
     RESIDENT_SHELL_URL,
     PROFILE_SHELL_URL,
     LANDLORD_SHELL_URL,
-    "/users.css?v=165ecf3575",
+    "/users.css?v=de72d557ba",
     "/user.css?v=a915007ac6",
     "/landlord.css?v=219787e7a6",
     "/captyn-theme.css?v=d9fd4fe626",

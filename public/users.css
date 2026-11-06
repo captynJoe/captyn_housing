@@ -2081,3 +2081,40 @@ input[type="radio"] {
 .payment-instructions-grid dd {
   color: #101c28;
 }
+
+.rv-home-updates {
+  display: block;
+}
+
+.rv-home-updates-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.rv-home-updates-summary::-webkit-details-marker {
+  display: none;
+}
+
+.rv-updates-toggle {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(32, 73, 118, 0.16);
+  border-radius: 50%;
+  transition: transform 0.18s ease;
+}
+
+.rv-home-updates[open] .rv-updates-toggle {
+  transform: rotate(180deg);
+}
+
+.rv-home-updates > #notification-list {
+  margin-top: 10px;
+}

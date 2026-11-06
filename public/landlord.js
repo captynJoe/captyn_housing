@@ -7254,6 +7254,8 @@ function renderPaymentInstructions() {
       </td>
       <td>
         <div class="payment-instruction-fields">
+          <input data-setting="bankPaybillNumber" type="text" maxlength="40" value="${escapeHtml(item.bankPaybillNumber || "")}" placeholder="Bank PayBill number" ${canEdit ? "" : "disabled"} />
+          <input data-setting="bankPaybillAccountReference" type="text" maxlength="80" value="${escapeHtml(item.bankPaybillAccountReference || "")}" placeholder="Bank PayBill account / house no." ${canEdit ? "" : "disabled"} />
           <input data-setting="bankName" type="text" maxlength="120" value="${escapeHtml(item.bankName || "")}" placeholder="Bank name" ${canEdit ? "" : "disabled"} />
           <input data-setting="bankAccountName" type="text" maxlength="120" value="${escapeHtml(item.bankAccountName || "")}" placeholder="Account name" ${canEdit ? "" : "disabled"} />
           <input data-setting="bankAccountNumber" type="text" maxlength="80" value="${escapeHtml(item.bankAccountNumber || "")}" placeholder="Account number" ${canEdit ? "" : "disabled"} />
@@ -9454,6 +9456,8 @@ paymentInstructionsBodyEl?.addEventListener("click", (event) => {
                     mpesaAccountReference: valueFor("mpesaAccountReference"),
                     mpesaAccountName: valueFor("mpesaAccountName"),
                     bankName: valueFor("bankName"),
+                    bankPaybillNumber: valueFor("bankPaybillNumber"),
+                    bankPaybillAccountReference: valueFor("bankPaybillAccountReference"),
                     bankAccountName: valueFor("bankAccountName"),
                     bankAccountNumber: valueFor("bankAccountNumber"),
                     bankBranch: valueFor("bankBranch"),

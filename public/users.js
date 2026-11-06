@@ -249,7 +249,7 @@ const PAYMENT_SYNC_INTERVAL_MS = 2500;
 const PAYMENT_SYNC_MAX_ATTEMPTS = 6;
 const BUILDINGS_FETCH_MAX_ATTEMPTS = 3;
 const BUILDINGS_FETCH_RETRY_DELAYS_MS = [250, 750];
-const RESIDENT_ONLINE_RENT_PAYMENT_ENABLED = false;
+const RESIDENT_ONLINE_RENT_PAYMENT_ENABLED = true;
 const REQUIRED_DOM_BINDINGS = Object.freeze([
     ["api-status", apiStatusEl],
     ["auth-state", authStateEl],
@@ -1273,7 +1273,7 @@ function setResidentPayMode(mode, options = {}) {
     residentPayPhoneFieldEl?.classList.toggle("hidden", isRent && !RESIDENT_ONLINE_RENT_PAYMENT_ENABLED);
     const balance = getResidentPayModeBalance(requestedMode);
     const canPayUtility = !isRent && balance > 0 && isUtilityPaymentEnabled(residentPayUtilityTypeEl?.value || "water");
-    const canPayRentOnline = isRent && RESIDENT_ONLINE_RENT_PAYMENT_ENABLED && balance > 0;
+    const canPayRentOnline = isRent && RESIDENT_ONLINE_RENT_PAYMENT_ENABLED && isRentPaymentEnabled() && balance > 0;
     if (!options.preserveAmount && residentPayAmountEl instanceof HTMLInputElement) {
         residentPayAmountEl.value = balance > 0 ? formatAmountValue(balance) : "";
     }
@@ -1287,9 +1287,9 @@ function setResidentPayMode(mode, options = {}) {
         if (state.residentSession && !canResidentAccessBilling()) {
             residentPayNoteEl.textContent = getPendingReviewBillingMessage();
         }
-        else if (isRent && !RESIDENT_ONLINE_RENT_PAYMENT_ENABLED) {
+        else if (isRent && (!RESIDENT_ONLINE_RENT_PAYMENT_ENABLED || !isRentPaymentEnabled())) {
             residentPayNoteEl.textContent = balance > 0
-                ? `Rent balance is ${formatCurrency(balance)}. Use the payment instructions and include your house number.`
+                ? `Rent balance is ${formatCurrency(balance)}. Use the other payment options below and include your house number.`
                 : "Rent is clear right now. Payment instructions are available if needed.";
         }
         else if (isRent) {
@@ -1303,8 +1303,8 @@ function setResidentPayMode(mode, options = {}) {
         }
     }
     if (residentPaySubmitEl instanceof HTMLButtonElement) {
-        residentPaySubmitEl.textContent = isRent && !RESIDENT_ONLINE_RENT_PAYMENT_ENABLED ? "View instructions" : "Send M-PESA Prompt";
-        residentPaySubmitEl.disabled = Boolean(state.residentSession && !canResidentAccessBilling()) || (!canPayUtility && !canPayRentOnline && !(isRent && !RESIDENT_ONLINE_RENT_PAYMENT_ENABLED));
+        residentPaySubmitEl.textContent = isRent && (!RESIDENT_ONLINE_RENT_PAYMENT_ENABLED || !isRentPaymentEnabled()) ? "View instructions" : "Send M-PESA Prompt";
+        residentPaySubmitEl.disabled = Boolean(state.residentSession && !canResidentAccessBilling()) || (!canPayUtility && !canPayRentOnline && !(isRent && (!RESIDENT_ONLINE_RENT_PAYMENT_ENABLED || !isRentPaymentEnabled())));
     }
 }
 function openResidentPaySheet(mode = "auto") {
@@ -1344,7 +1344,7 @@ function submitResidentPaySheet() {
         residentPayAmountEl?.focus();
         return;
     }
-    if (mode === "rent" && !RESIDENT_ONLINE_RENT_PAYMENT_ENABLED) {
+    if (mode === "rent" && (!RESIDENT_ONLINE_RENT_PAYMENT_ENABLED || !isRentPaymentEnabled())) {
         rentPaymentAmountEl.value = formatAmountValue(amountKsh);
         updateRentPaymentGuidance();
         showFeedback("Use the payment instructions and include your house number as the reference.", "info");
@@ -1400,66 +1400,47 @@ function appendPaymentInstructionDetail(label, value) {
     return true;
 }
 function renderPaymentInstructions() {
-    if (!(paymentInstructionsCardEl instanceof HTMLElement) ||
-        !(paymentInstructionsListEl instanceof HTMLElement)) {
+    if (!(paymentInstructionsCardEl instanceof HTMLElement) || !(paymentInstructionsListEl instanceof HTMLElement))
         return;
-    }
     const instructions = state.paymentInstructions;
     paymentInstructionsListEl.replaceChildren();
     if (!instructions) {
         paymentInstructionsTitleEl.textContent = "Payment instructions";
         paymentInstructionsMethodEl.textContent = "-";
-        paymentInstructionsNoteEl.textContent =
-            "Payment instructions will appear after your building details load.";
+        paymentInstructionsNoteEl.textContent = "Payment instructions will appear after your building details load.";
         return;
     }
-    const method = String(instructions.primaryMethod || "mpesa");
     const effective = instructions.effective || {};
-    paymentInstructionsTitleEl.textContent = instructions.buildingName
-        ? `${instructions.buildingName} payment details`
-        : "Payment instructions";
-    paymentInstructionsMethodEl.textContent = instructions.methodLabel || method.toUpperCase();
-    let hasDetail = false;
-    hasDetail =
-        appendPaymentInstructionDetail("House Number", state.residentSession?.houseNumber) ||
-            hasDetail;
-    if (method === "bank") {
-        hasDetail =
-            appendPaymentInstructionDetail("Bank Name", effective.bankName || instructions.bankName) ||
-                hasDetail;
-        hasDetail =
-            appendPaymentInstructionDetail("Bank Account Name", effective.bankAccountName || instructions.bankAccountName) || hasDetail;
-        hasDetail =
-            appendPaymentInstructionDetail("Bank Account Number", effective.bankAccountNumber || instructions.bankAccountNumber) || hasDetail;
-        hasDetail =
-            appendPaymentInstructionDetail("Bank Branch", effective.bankBranch || instructions.bankBranch) ||
-                hasDetail;
-        hasDetail =
-            appendPaymentInstructionDetail("SWIFT / Bank Code", effective.bankSwiftCode || instructions.bankSwiftCode) || hasDetail;
+    paymentInstructionsTitleEl.textContent = instructions.buildingName ? `${instructions.buildingName} payment details` : "Payment instructions";
+    paymentInstructionsMethodEl.textContent = instructions.methodLabel || String(instructions.primaryMethod || "M-PESA").toUpperCase();
+    appendPaymentInstructionDetail("House / account reference", state.residentSession?.houseNumber);
+    const mpesaNumber = effective.mpesaBusinessNumber || instructions.mpesaBusinessNumber;
+    const mpesaAccount = effective.mpesaAccountReference || instructions.mpesaAccountReference;
+    const mpesaName = effective.mpesaAccountName || instructions.mpesaAccountName;
+    if (mpesaNumber) {
+        appendPaymentInstructionDetail("M-PESA PayBill / Till", mpesaNumber);
+        appendPaymentInstructionDetail("Account number", mpesaAccount || state.residentSession?.houseNumber);
+        appendPaymentInstructionDetail("Account name", mpesaName);
     }
-    else if (method === "cash") {
-        hasDetail =
-            appendPaymentInstructionDetail("Cash Payment Point", effective.cashLocation || instructions.cashLocation) || hasDetail;
+    const bankPaybill = effective.bankPaybillNumber || instructions.bankPaybillNumber;
+    if (bankPaybill) {
+        appendPaymentInstructionDetail("Bank PayBill", bankPaybill);
+        appendPaymentInstructionDetail("Bank PayBill account", effective.bankPaybillAccountReference || instructions.bankPaybillAccountReference || state.residentSession?.houseNumber);
     }
-    else if (method === "manual") {
-        hasDetail =
-            appendPaymentInstructionDetail("Payment Instructions", effective.instructions || instructions.instructions) || hasDetail;
+    const bankName = effective.bankName || instructions.bankName;
+    const bankAccount = effective.bankAccountNumber || instructions.bankAccountNumber;
+    if (bankName || bankAccount) {
+        appendPaymentInstructionDetail("Bank", bankName);
+        appendPaymentInstructionDetail("Account name", effective.bankAccountName || instructions.bankAccountName);
+        appendPaymentInstructionDetail("Account number", bankAccount);
+        appendPaymentInstructionDetail("Branch", effective.bankBranch || instructions.bankBranch);
+        appendPaymentInstructionDetail("SWIFT / bank code", effective.bankSwiftCode || instructions.bankSwiftCode);
     }
-    else {
-        hasDetail =
-            appendPaymentInstructionDetail("Buy Goods Till Number", effective.mpesaBusinessNumber || instructions.mpesaBusinessNumber) || hasDetail;
-        hasDetail =
-            appendPaymentInstructionDetail("M-PESA Account Name", effective.mpesaAccountName || instructions.mpesaAccountName) || hasDetail;
-        hasDetail =
-            appendPaymentInstructionDetail("House / Account Reference", effective.mpesaAccountReference || instructions.mpesaAccountReference) || hasDetail;
-    }
-    const notes = [
-        method !== "manual" ? effective.instructions || instructions.instructions : "",
-        effective.proofInstructions || instructions.proofInstructions
-    ].filter(Boolean);
+    appendPaymentInstructionDetail("Cash payment point", effective.cashLocation || instructions.cashLocation);
+    const notes = [effective.instructions || instructions.instructions, effective.proofInstructions || instructions.proofInstructions].filter(Boolean);
     paymentInstructionsNoteEl.textContent = notes.join(" ");
-    if (!hasDetail) {
-        appendPaymentInstructionDetail("Status", "Payment details are not set yet. Contact management before sending rent.");
+    if (paymentInstructionsListEl.children.length === 0) {
+        appendPaymentInstructionDetail("Status", "Payment details are not set yet. Contact management before sending a payment.");
     }
 }
 function getPublicBuildingLabel(building, fallback = "Assigned building") {
@@ -1950,7 +1931,7 @@ function applyPaymentAccessUi() {
         setSectionInteractive(rentPaymentFormEl, false);
     }
     rentPaymentStateEl.textContent = rentEnabled
-        ? "Use the payment instructions above. Management will record or confirm your rent payment after it is received."
+        ? "Pay rent with an M-PESA prompt, or use another payment option below. Off-site payments need management confirmation."
         : state.paymentAccess?.rentConfigured === false
             ? "Rent payment will appear once rent is configured for your house."
             : "Rent payment is currently disabled by your landlord.";
@@ -2803,7 +2784,7 @@ function renderNotifications(notifications) {
         notificationListEl.append(empty);
         return;
     }
-    notifications.forEach((notification) => {
+    const makeNotification = (notification) => {
         const fragment = notificationItemTemplate.content.cloneNode(true);
         const chipEl = fragment.querySelector(".item-chip");
         fragment.querySelector(".item-title").textContent = notification.title;
@@ -2811,8 +2792,20 @@ function renderNotifications(notifications) {
         chipEl.classList.add(`chip-${notification.level}`);
         fragment.querySelector(".item-details").textContent = notification.message;
         fragment.querySelector(".item-meta").textContent = formatDateTime(notification.createdAt);
-        notificationListEl.append(fragment);
-    });
+        return fragment;
+    };
+    notifications.slice(0, 3).forEach((notification) => notificationListEl.append(makeNotification(notification)));
+    if (notifications.length > 3) {
+        const older = document.createElement("details");
+        older.className = "resident-older-alerts";
+        const summary = document.createElement("summary");
+        summary.textContent = `Show ${notifications.length - 3} older alert${notifications.length - 3 === 1 ? "" : "s"}`;
+        const list = document.createElement("section");
+        list.className = "stack-list";
+        notifications.slice(3).forEach((notification) => list.append(makeNotification(notification)));
+        older.append(summary, list);
+        notificationListEl.append(older);
+    }
 }
 function formatRentSetupSourceLabel(source) {
     const normalized = String(source ?? "").trim();

@@ -1033,3 +1033,271 @@ html[data-captyn-ui-runtime="typescript"] body {
     min-width: 0;
   }
 }
+
+/* Resident workspace: keep the four main destinations within thumb reach. */
+.resident-session-mode .resident-content {
+  padding-bottom: 76px;
+}
+
+.resident-session-mode .hero-workspace {
+  min-width: 0;
+}
+
+.resident-session-mode .rv-home-address {
+  margin: 0;
+  color: var(--resident-muted);
+  font-weight: 700;
+}
+
+.resident-session-mode .rv-home-updates,
+.resident-session-mode .rv-alert-settings,
+.resident-session-mode .resident-bills-panel,
+.resident-session-mode .resident-payment-report-card {
+  border: 1px solid var(--resident-line);
+  border-radius: 16px;
+  background: var(--resident-panel);
+  padding: 18px;
+}
+
+.resident-session-mode .rv-home-updates .section-head,
+.resident-session-mode .resident-bills-panel .section-head {
+  margin-bottom: 10px;
+}
+
+.resident-session-mode .rv-home-updates h2,
+.resident-session-mode .resident-bills-panel h2,
+.resident-session-mode .resident-bills-panel h3 {
+  margin: 0;
+}
+
+.resident-session-mode .rv-alert-settings > summary,
+.resident-session-mode .resident-online-payment-details > summary,
+.resident-session-mode .resident-payment-note > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--resident-teal-dark);
+  font-weight: 800;
+}
+
+.resident-session-mode .rv-alert-settings[open],
+.resident-session-mode .resident-online-payment-details[open] {
+  display: grid;
+  gap: 12px;
+}
+
+.resident-session-mode .rv-alert-settings .notification-control-card {
+  margin: 0;
+}
+
+.resident-session-mode .resident-bills-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.resident-session-mode .resident-rent-bill,
+.resident-session-mode .resident-utilities-bills {
+  border-top: 1px solid var(--resident-line);
+  padding-top: 16px;
+}
+
+.resident-session-mode .rv-inline-link {
+  justify-self: start;
+  border: 0 !important;
+  padding: 0 !important;
+  color: var(--resident-teal-dark) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.resident-session-mode .resident-payment-report-card {
+  margin-bottom: 16px;
+  box-shadow: none !important;
+}
+
+.resident-session-mode .resident-online-payment-details {
+  border-top: 1px solid var(--resident-line);
+  padding-top: 10px;
+}
+
+.resident-session-mode .resident-online-payment-details .payment-summary-card {
+  margin-top: 12px;
+}
+
+.resident-session-mode .resident-payment-note label {
+  margin: 8px 0;
+}
+
+@media (max-width: 680px) {
+  .resident-session-mode .shell {
+    padding-bottom: 78px;
+  }
+
+  .resident-session-mode .hero-workspace {
+    position: fixed;
+    z-index: 60;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    padding: 8px 10px max(8px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--resident-line);
+    background: var(--resident-panel);
+    box-shadow: 0 -8px 24px #0b1a3a1a;
+  }
+
+  .resident-session-mode .hero-workspace-label {
+    display: none;
+  }
+
+  .resident-session-mode .hero-workspace-nav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    max-width: 560px;
+    margin: 0 auto;
+    padding: 3px;
+  }
+
+  .resident-session-mode .hero-workspace-btn {
+    min-height: 44px;
+    padding: 0 5px;
+    font-size: 0.78rem;
+  }
+
+  .resident-session-mode .rv-hero {
+    padding: 22px;
+  }
+
+  .resident-session-mode .rv-home-updates,
+  .resident-session-mode .rv-alert-settings,
+  .resident-session-mode .resident-bills-panel,
+  .resident-session-mode .resident-payment-report-card {
+    padding: 14px;
+  }
+}
+
+/* Payment view: due amount and primary payment stay above secondary actions. */
+.resident-session-mode .resident-pay-card {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 18px;
+  border-radius: 18px;
+}
+
+.resident-session-mode .resident-pay-card-main {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.resident-session-mode .resident-pay-card .payment-summary-copy h3 {
+  margin: 4px 0 8px;
+  font-size: clamp(1.7rem, 4vw, 2.2rem);
+}
+
+.resident-session-mode .payment-month-paid {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 2px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid #ffffff26;
+  color: #d4e6df;
+  font-size: 0.88rem;
+}
+
+.resident-session-mode .payment-month-paid strong {
+  color: #fff;
+}
+
+.resident-session-mode .resident-balance-breakdown {
+  border-top: 1px solid #ffffff26;
+  padding-top: 4px;
+}
+
+.resident-session-mode .resident-balance-breakdown > summary,
+.resident-session-mode .resident-report-payment > summary,
+.resident-session-mode .resident-other-payment-methods > summary {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--resident-teal-dark);
+  font-weight: 800;
+}
+
+.resident-session-mode .resident-balance-breakdown > summary {
+  color: #d4e6df;
+  font-size: 0.84rem;
+}
+
+.resident-session-mode .resident-balance-breakdown .payment-summary-grid {
+  margin-top: 8px;
+}
+
+.resident-session-mode .resident-payment-report-card {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.resident-session-mode .resident-report-payment {
+  border-top: 1px solid var(--resident-line);
+  padding-top: 4px;
+}
+
+.resident-session-mode .resident-report-payment > p {
+  margin: 4px 0 10px;
+}
+
+.resident-session-mode .resident-payment-report-history {
+  margin-top: 10px;
+}
+
+.resident-session-mode .resident-payment-report-history h4 {
+  margin: 0 0 8px;
+}
+
+.resident-session-mode .resident-other-payment-methods[open] {
+  display: grid;
+  gap: 12px;
+}
+
+.resident-session-mode .resident-other-payment-methods {
+  border-top: 1px solid var(--resident-line);
+  padding-top: 6px;
+}
+
+@media (max-width: 680px) {
+  .resident-session-mode .resident-pay-card {
+    padding: 16px;
+  }
+
+  .resident-session-mode .resident-pay-card-main {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .resident-session-mode .resident-pay-card .resident-pay-primary {
+    min-width: 86px;
+    padding: 0 14px;
+  }
+}
+
+.resident-session-mode .resident-report-payment > summary {
+  font-size: 0.9rem;
+}
+
+.resident-session-mode .resident-report-payment .report-form {
+  margin-top: 10px;
+  padding: 14px;
+  border: 1px solid var(--resident-line);
+  border-radius: 14px;
+  background: var(--resident-panel-soft);
+}
+
+.resident-session-mode .resident-other-payment-methods > summary {
+  font-size: 0.86rem;
+}

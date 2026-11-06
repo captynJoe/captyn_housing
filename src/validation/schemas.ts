@@ -493,6 +493,40 @@ export const recordUtilityPaymentSchema = z.object({
   note: z.string().trim().max(280).optional()
 });
 
+export const residentPaymentReportSchema = z
+  .object({
+    paymentType: z.enum(["rent", "utilities"]),
+    utilityType: utilityTypeSchema.optional(),
+    amountKsh: z.number().int().positive().max(500_000),
+    provider: utilityPaymentProviderSchema,
+    providerReference: z.string().trim().max(120).optional(),
+    paidAt: z.string().trim().min(10).max(40),
+    note: z.string().trim().max(500).optional()
+  })
+  .superRefine((value, context) => {
+    if (value.paymentType === "utilities" && !value.utilityType) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["utilityType"],
+        message: "Choose water or electricity for this utility payment."
+      });
+    }
+    if (value.paymentType === "rent" && value.utilityType) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["utilityType"],
+        message: "A utility type is only used for utility payments."
+      });
+    }
+    if (value.provider !== "cash" && !value.providerReference?.trim()) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["providerReference"],
+        message: "Enter the payment reference."
+      });
+    }
+  });
+
 export const ticketStatusSchema = z.enum([
   "open",
   "triaged",
@@ -951,6 +985,8 @@ export const landlordPaymentInstructionsUpdateSchema = z.object({
   mpesaAccountReference: z.string().trim().max(80).optional(),
   mpesaAccountName: z.string().trim().max(120).optional(),
   bankName: z.string().trim().max(120).optional(),
+  bankPaybillNumber: z.string().trim().max(40).optional(),
+  bankPaybillAccountReference: z.string().trim().max(80).optional(),
   bankAccountName: z.string().trim().max(120).optional(),
   bankAccountNumber: z.string().trim().max(80).optional(),
   bankBranch: z.string().trim().max(120).optional(),
@@ -1386,6 +1422,7 @@ export type UtilityTypeInput = z.infer<typeof utilityTypeSchema>;
 export type UpsertUtilityMeterInput = z.infer<typeof upsertUtilityMeterSchema>;
 export type CreateUtilityBillInput = z.infer<typeof createUtilityBillSchema>;
 export type RecordUtilityPaymentInput = z.infer<typeof recordUtilityPaymentSchema>;
+export type ResidentPaymentReportInput = z.infer<typeof residentPaymentReportSchema>;
 export type RecordAdminRentPaymentInput = z.infer<typeof recordAdminRentPaymentSchema>;
 export type ResidentDebtCollectionInput = z.infer<
   typeof residentDebtCollectionSchema

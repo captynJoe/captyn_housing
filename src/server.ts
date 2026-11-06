@@ -173,6 +173,7 @@ import {
   ticketStatusSchema,
   tenantResolveSchema,
   residentTenantProfileUpsertSchema,
+  residentPaymentReportSchema,
   revokeWifiEntitlementSchema,
   ownerStaffCreateSchema,
   ownerStaffDisableSchema,
@@ -508,10 +509,38 @@ interface RuntimeQueuesPersistedState {
     data: PendingUtilityStkRequest;
   }>;
   residentPasswordRecoveryRequests: ResidentPasswordRecoveryRequestRecord[];
+  residentPaymentReports?: ResidentPaymentReportPersistedRecord[];
   accountPasswordRecoveryRequests: AccountPasswordRecoveryRequestRecord[];
   utilityChargeDefaults: UtilityChargeDefaultRecord[];
   utilityRateDefaults: UtilityRateDefaultRecord[];
   monthlyCombinedUtilityCharges: MonthlyCombinedUtilityChargeRecord[];
+}
+
+interface ResidentPaymentReportRecord {
+  id: string;
+  buildingId: string;
+  houseNumber: string;
+  residentUserId: string;
+  residentName: string;
+  residentPhone: string;
+  paymentType: "rent" | "utilities";
+  utilityType?: "water" | "electricity";
+  amountKsh: number;
+  provider: "mpesa" | "cash" | "bank" | "card";
+  providerReference?: string;
+  paidAt: string;
+  note?: string;
+  status: "pending" | "approved" | "rejected";
+  submittedAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  reviewNote?: string;
+  postedPaymentId?: string;
+}
+
+interface ResidentPaymentReportPersistedRecord extends Omit<ResidentPaymentReportRecord, "paymentType" | "utilityType"> {
+  paymentType: "rent" | "utilities" | "water" | "electricity";
+  utilityType?: "water" | "electricity";
 }
 
 interface RoomRentDefaultRecord {
@@ -1358,6 +1387,7 @@ async function bootstrap() {
     string,
     ResidentPasswordRecoveryRequestRecord
   >();
+  const residentPaymentReports = new Map<string, ResidentPaymentReportRecord>();
   const accountPasswordRecoveryRequests = new Map<
     string,
     AccountPasswordRecoveryRequestRecord
@@ -1518,6 +1548,9 @@ async function bootstrap() {
     ),
     residentPasswordRecoveryRequests: [...residentPasswordRecoveryRequests.values()]
       .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
+      .map((item) => ({ ...item })),
+    residentPaymentReports: [...residentPaymentReports.values()]
+      .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
       .map((item) => ({ ...item })),
     accountPasswordRecoveryRequests: [...accountPasswordRecoveryRequests.values()]
       .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
@@ -3107,6 +3140,8 @@ async function bootstrap() {
         mpesaAccountReference,
         mpesaAccountName: record.mpesaAccountName || profile?.name || "",
         bankName: record.bankName || "",
+        bankPaybillNumber: record.bankPaybillNumber || "",
+        bankPaybillAccountReference: record.bankPaybillAccountReference || "",
         bankAccountName: record.bankAccountName || "",
         bankAccountNumber: record.bankAccountNumber || "",
         bankBranch: record.bankBranch || "",
@@ -3894,6 +3929,24 @@ async function bootstrap() {
               continue;
             }
             residentPasswordRecoveryRequests.set(item.id, item);
+          }
+        }
+
+        if (Array.isArray(runtimeQueuesState.residentPaymentReports)) {
+          for (const item of runtimeQueuesState.residentPaymentReports) {
+            if (!item?.id || !item.buildingId || !item.houseNumber || !item.residentUserId) {
+              continue;
+            }
+            const legacyUtilityType = item.paymentType === "water" || item.paymentType === "electricity"
+              ? item.paymentType
+              : undefined;
+            residentPaymentReports.set(item.id, {
+              ...item,
+              paymentType: item.paymentType === "rent" ? "rent" : "utilities",
+              utilityType: item.utilityType ?? legacyUtilityType,
+              buildingId: normalizeBuildingId(item.buildingId),
+              houseNumber: normalizeHouseNumber(item.houseNumber)
+            });
           }
         }
 
@@ -12123,6 +12176,8 @@ async function bootstrap() {
             mpesaAccountReference: parsed.mpesaAccountReference,
             mpesaAccountName: parsed.mpesaAccountName,
             bankName: parsed.bankName,
+            bankPaybillNumber: parsed.bankPaybillNumber,
+            bankPaybillAccountReference: parsed.bankPaybillAccountReference,
             bankAccountName: parsed.bankAccountName,
             bankAccountNumber: parsed.bankAccountNumber,
             bankBranch: parsed.bankBranch,
@@ -13318,6 +13373,9 @@ async function bootstrap() {
           utilityMeters,
           utilityLatestReadings,
           utilityPayments,
+          residentPaymentReports: [...residentPaymentReports.values()]
+            .filter((item) => item.residentUserId === session.userId)
+            .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
           identityRequirement
         },
         messages: {
@@ -13327,6 +13385,67 @@ async function bootstrap() {
           utilityPayments: utilityPaymentsMessage
         }
       });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.post("/api/user/payment-reports", async (req, res, next) => {
+    try {
+      const session = await getResidentSession(req, res);
+      if (!session) return;
+      if (!requireResidentBillingAccess(res, session)) return;
+
+      const parsed = residentPaymentReportSchema.parse(req.body);
+      const paymentType = parsed.paymentType;
+      const utilityType = paymentType === "utilities" ? parsed.utilityType : undefined;
+      const amountKsh = parsed.amountKsh;
+      const provider = parsed.provider;
+      const providerReference = parsed.providerReference?.trim() ?? "";
+      const note = parsed.note?.trim() ?? "";
+      const paidAt = new Date(parsed.paidAt);
+      if (!utilityType && paymentType === "utilities") {
+        return res.status(400).json({ error: "Choose water or electricity for this utility payment." });
+      }
+      if (Number.isNaN(paidAt.getTime()) || paidAt.getTime() > Date.now() + 5 * 60_000) {
+        return res.status(400).json({ error: "Enter a valid payment date." });
+      }
+      const normalizedProviderReference = providerReference || `CASH-REPORT-${randomUUID()}`;
+      const duplicateReport = [...residentPaymentReports.values()].some((item) =>
+        item.buildingId === normalizeBuildingId(session.buildingId) &&
+        item.providerReference?.toLowerCase() === normalizedProviderReference.toLowerCase() &&
+        item.status !== "rejected"
+      );
+      const duplicatePosted = paymentType === "rent"
+        ? rentLedgerService.listPayments({ buildingId: session.buildingId, houseNumber: session.houseNumber }).some((item) => item.providerReference.toLowerCase() === normalizedProviderReference.toLowerCase())
+        : utilityBillingService.listPayments({ buildingId: session.buildingId, houseNumber: session.houseNumber }).some((item) => item.providerReference?.toLowerCase() === normalizedProviderReference.toLowerCase());
+      if (duplicateReport || duplicatePosted) {
+        return res.status(409).json({ error: "That payment reference has already been submitted or recorded." });
+      }
+
+      const account = userAccountService
+        ? await userAccountService.getSession(readUserSessionToken(req))
+        : null;
+      const report: ResidentPaymentReportRecord = {
+        id: randomUUID(),
+        buildingId: normalizeBuildingId(session.buildingId),
+        houseNumber: normalizeHouseNumber(session.houseNumber),
+        residentUserId: session.userId,
+        residentName: account?.fullName || "Resident",
+        residentPhone: session.phoneNumber,
+        paymentType,
+        utilityType,
+        amountKsh,
+        provider: provider as ResidentPaymentReportRecord["provider"],
+        providerReference: normalizedProviderReference,
+        paidAt: paidAt.toISOString(),
+        note: note || undefined,
+        status: "pending",
+        submittedAt: new Date().toISOString()
+      };
+      residentPaymentReports.set(report.id, report);
+      persistRuntimeQueuesState();
+      return res.status(201).json({ data: report, message: "Payment sent to management for confirmation." });
     } catch (error) {
       return next(error);
     }
@@ -16202,6 +16321,121 @@ async function bootstrap() {
       });
 
       return res.json({ data, role: context.role });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.get("/api/landlord/payment-reports", async (req, res, next) => {
+    try {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) return;
+      const visibleHouseNumbers = await listVisibleHouseNumbersForLandlordContext(context);
+      const candidateReports = [...residentPaymentReports.values()].filter((item) =>
+        visibleHouseNumbers.has(normalizeHouseNumber(item.houseNumber))
+      );
+      const scopedReports = await Promise.all(candidateReports.map(async (item) =>
+        (await canManageBuildingFromLandlordContext(context, item.buildingId)) ? item : null
+      ));
+      const data = scopedReports.filter((item): item is ResidentPaymentReportRecord => Boolean(item))
+        .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+      return res.json({ data, role: context.role });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.post("/api/landlord/payment-reports/:reportId/review", async (req, res, next) => {
+    try {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) return;
+      const report = residentPaymentReports.get(req.params.reportId);
+      if (!report) return res.status(404).json({ error: "Payment report not found." });
+      if (!(await canManageBuildingFromLandlordContext(context, report.buildingId))) {
+        return res.status(403).json({ error: "Building access denied" });
+      }
+      const visibleHouseNumbers = await listVisibleHouseNumbersForLandlordContext(context);
+      if (!visibleHouseNumbers.has(normalizeHouseNumber(report.houseNumber))) {
+        return res.status(403).json({ error: "House access denied" });
+      }
+      if (report.status !== "pending") {
+        return res.status(409).json({ error: "This payment report has already been reviewed." });
+      }
+      const decision = String(req.body?.decision ?? "").trim();
+      const reviewNote = String(req.body?.reviewNote ?? "").trim().slice(0, 500);
+      if (decision !== "approve" && decision !== "reject") {
+        return res.status(400).json({ error: "Choose approve or reject." });
+      }
+      if (decision === "reject" && !reviewNote) {
+        return res.status(400).json({ error: "Add a short reason so the resident knows what to correct." });
+      }
+
+      let postedPaymentId: string | undefined;
+      if (decision === "approve") {
+        const reference = report.providerReference || `RESIDENT-${report.id}`;
+        if (report.paymentType === "rent") {
+          const existing = rentLedgerService.listPayments({ buildingId: report.buildingId, houseNumber: report.houseNumber })
+            .some((item) => item.providerReference.toLowerCase() === reference.toLowerCase());
+          if (existing) return res.status(409).json({ error: "This payment reference is already in the rent ledger." });
+          const payment = rentLedgerService.recordPayment({
+            buildingId: report.buildingId,
+            houseNumber: report.houseNumber,
+            amountKsh: report.amountKsh,
+            provider: report.provider,
+            providerReference: reference,
+            paidAt: report.paidAt,
+            billingMonth: report.paidAt.slice(0, 7),
+            tenantUserId: report.residentUserId,
+            tenantName: report.residentName,
+            phoneNumber: report.residentPhone,
+            source: "manual"
+          });
+          postedPaymentId = payment.event.id;
+          await persistRentLedgerStateNow();
+        } else {
+          if (!report.utilityType) {
+            return res.status(409).json({ error: "This utility report has no water/electricity account selected." });
+          }
+          await ensureRecurringUtilityBillsCurrent("resident.payment_report.approval", {
+            buildingId: report.buildingId,
+            houseNumber: report.houseNumber,
+            utilityType: report.utilityType
+          });
+          const existing = utilityBillingService.listPayments({ buildingId: report.buildingId, houseNumber: report.houseNumber })
+            .some((item) => item.providerReference?.toLowerCase() === reference.toLowerCase());
+          if (existing) return res.status(409).json({ error: "This payment reference is already in the utility ledger." });
+          const payment = await recordResidentUtilityPaymentAndNotify(report.utilityType, report.buildingId, report.houseNumber, {
+            amountKsh: report.amountKsh,
+            provider: report.provider,
+            providerReference: reference,
+            paidAt: report.paidAt,
+            note: report.note || "Resident payment confirmed by management",
+            source: "manual"
+          });
+          postedPaymentId = payment.event.id;
+        }
+      }
+
+      const updated: ResidentPaymentReportRecord = {
+        ...report,
+        status: decision === "approve" ? "approved" : "rejected",
+        reviewedAt: new Date().toISOString(),
+        reviewedBy: context.userId,
+        reviewNote: reviewNote || undefined,
+        postedPaymentId
+      };
+      residentPaymentReports.set(report.id, updated);
+      persistRuntimeQueuesState();
+      userSupportService.enqueueSystemNotifications(report.buildingId, report.houseNumber, [{
+        title: decision === "approve" ? "Payment confirmed" : "Payment report needs attention",
+        message: decision === "approve"
+          ? `Management confirmed your ${report.paymentType === "utilities" ? `${report.utilityType ?? "utility"} utility` : "rent"} payment of KSh ${report.amountKsh.toLocaleString("en-KE")}.`
+          : `Management could not confirm your payment report. ${reviewNote}`,
+        level: decision === "approve" ? "success" : "warning",
+        source: "system",
+        dedupeKey: `resident-payment-report-${report.id}-${decision}`
+      }]);
+      return res.json({ data: updated });
     } catch (error) {
       return next(error);
     }

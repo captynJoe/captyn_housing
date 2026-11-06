@@ -1,4 +1,4 @@
-const CACHE_NAME = "captyn-resident-v20260831a";
+const CACHE_NAME = "captyn-resident-v20261106b";
 const RESIDENT_SHELL_URL = "/resident";
 const PROFILE_SHELL_URL = "/user";
 const LANDLORD_SHELL_URL = "/landlord";
@@ -6,13 +6,13 @@ const APP_ASSETS = [
     RESIDENT_SHELL_URL,
     PROFILE_SHELL_URL,
     LANDLORD_SHELL_URL,
-    "/users.css?v=7ebc19a151",
+    "/users.css?v=165ecf3575",
     "/user.css?v=a915007ac6",
-    "/landlord.css?v=c114507d98",
+    "/landlord.css?v=219787e7a6",
     "/captyn-theme.css?v=d9fd4fe626",
     "/captyn-theme.js?v=6944e37fb6",
-    "/resident-app/assets/resident.css?v=5a3ecb0293",
-    "/resident-app/assets/resident.js?v=64289e8b1e",
+    "/resident-app/assets/resident.css?v=88d60570f0",
+    "/resident-app/assets/resident.js?v=1d78626ba2",
     "/users.js",
     "/user.js",
     "/landlord.js",

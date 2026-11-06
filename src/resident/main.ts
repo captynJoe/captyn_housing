@@ -10,13 +10,13 @@ declare global {
   }
 }
 
-const LEGACY_RESIDENT_SCRIPT = "/users.js?v=20260821a";
+const LEGACY_RESIDENT_SCRIPT = "/users.js?v=20261106b";
 
 function markTypeScriptRuntime() {
   document.documentElement.dataset.captynUiRuntime = "typescript";
   document.body.classList.add("resident-ts-shell");
   window.__CAPTYN_RESIDENT_TS_RUNTIME__ = {
-    version: "resident-shell-5",
+    version: "resident-shell-6",
     legacyScript: LEGACY_RESIDENT_SCRIPT,
     loadedAt: new Date().toISOString()
   };
@@ -74,7 +74,7 @@ function setAuthHeroCopy() {
     if (!heroCopy.querySelector(".resident-auth-subtitle")) {
       const subtitle = document.createElement("p");
       subtitle.className = "resident-auth-subtitle";
-      subtitle.textContent = "Access your house account, rent, utilities, support requests, notices, and Wi-Fi from one secure place.";
+      subtitle.textContent = "Check your rent, utility bills, meter readings, and payment history in one place.";
       heroCopy.append(subtitle);
     }
   }

@@ -1341,70 +1341,7 @@ button,
   font-weight: 700;
 }
 
-.wifi-package-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 14px;
-  margin: 14px 0;
-}
 
-.wifi-package-card {
-  display: grid;
-  gap: 10px;
-  padding: 18px;
-  border-radius: 16px !important;
-  border: 1px solid rgba(6, 40, 26, 0.28) !important;
-  background: linear-gradient(150deg, #128a58, #0a5c3a) !important;
-  box-shadow: 0 10px 22px rgba(9, 66, 43, 0.22);
-  text-align: left;
-  cursor: pointer;
-  font: inherit;
-  color: #fff !important;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-
-.wifi-package-card:hover,
-.wifi-package-card:focus-visible {
-  transform: translateY(-2px);
-  box-shadow: 0 14px 28px rgba(9, 66, 43, 0.3);
-  background: linear-gradient(150deg, #159263, #0c6640) !important;
-}
-
-.wifi-package-card.pending {
-  opacity: 0.6;
-  cursor: wait;
-  transform: none;
-}
-
-.wifi-package-card .wifi-package-name {
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.92);
-}
-
-.wifi-package-card .wifi-package-price {
-  font-family: var(--captyn-font-display, "Manrope", sans-serif);
-  font-size: 24px;
-  font-weight: 800;
-  color: #8ff2c4;
-}
-
-.wifi-package-card .wifi-package-meta {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.72);
-}
-
-.wifi-package-card .wifi-package-badge {
-  display: inline-block;
-  width: fit-content;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: #06301f;
-  background: #8ff2c4;
-}
 
 .payment-channel-grid {
   align-items: end;
@@ -2051,4 +1988,96 @@ input[type="radio"] {
   accent-color: #0f5c4a;
   box-shadow: none !important;
   cursor: pointer;
+}
+
+.resident-payment-report-card { margin: 14px 0 20px; }
+.resident-payment-report-card h3, .resident-payment-report-history h4 { margin: 0; }
+.resident-payment-report-history { display: grid; gap: 10px; margin-top: 18px; }
+.resident-payment-report-item { padding: 14px; }
+.resident-report-status.status-pending { color: #8a5b00; }
+.resident-report-status.status-approved { color: #08764e; }
+.resident-report-status.status-rejected { color: #a62b26; }
+
+.utility-billing-history {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--resident-line, #d7e0e8);
+  border-radius: 14px;
+  background: var(--resident-panel-soft, #f6f8fc);
+}
+.utility-billing-history > summary { cursor: pointer; font-weight: 800; }
+.utility-billing-history-list { display: grid; gap: 10px; margin-top: 12px; }
+.utility-billing-history-row { padding: 12px; border-radius: 12px; background: #fff; }
+.utility-history-breakdown { margin-bottom: 0; }
+
+/* Keep resident alerts and offline payment routes compact until requested. */
+.resident-older-alerts,
+.resident-report-payment {
+  margin-top: 10px;
+}
+
+.resident-older-alerts > summary,
+.payment-instructions-summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.resident-older-alerts > summary::-webkit-details-marker,
+.payment-instructions-summary::-webkit-details-marker {
+  display: none;
+}
+
+.resident-older-alerts > summary {
+  padding: 10px 12px;
+  border: 1px solid rgba(32, 73, 118, 0.12);
+  border-radius: 10px;
+  color: var(--ink-600);
+  font-weight: 650;
+}
+
+.payment-instructions-card {
+  display: block;
+  padding: 0;
+  overflow: hidden;
+}
+
+.payment-instructions-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  color: var(--ink-900);
+}
+
+.payment-instructions-summary strong,
+.payment-instructions-summary small {
+  display: block;
+}
+
+.payment-instructions-summary small {
+  margin-top: 3px;
+  color: var(--ink-600);
+}
+
+.payment-instructions-card[open] .payment-instructions-summary > span:last-child {
+  transform: rotate(45deg);
+}
+
+.payment-instructions-content {
+  display: grid;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+.payment-instructions-head h3 {
+  margin: 0;
+}
+
+.payment-instructions-grid div {
+  background: #f5f8f6;
+}
+
+.payment-instructions-grid dd {
+  color: #101c28;
 }

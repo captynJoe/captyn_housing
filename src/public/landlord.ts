@@ -352,6 +352,9 @@ const refreshLandlordTicketsBtnEl = document.getElementById(
 );
 const rentStatusBodyEl = document.getElementById("rent-status-body");
 const refreshRentStatusBtnEl = document.getElementById("refresh-rent-status");
+const residentPaymentReportsListEl = document.getElementById("resident-payment-reports-list");
+const residentPaymentReportsEmptyEl = document.getElementById("resident-payment-reports-empty");
+const refreshResidentPaymentReportsBtnEl = document.getElementById("refresh-resident-payment-reports");
 const rentPaymentCorrectionsBtnEl = document.getElementById("rent-payment-corrections-btn");
 const collectionsReportBuildingEl = document.getElementById("collections-report-building");
 const collectionsReportFromEl = document.getElementById("collections-report-from");
@@ -9110,6 +9113,12 @@ function renderPaymentInstructions() {
       </td>
       <td>
         <div class="payment-instruction-fields">
+          <input data-setting="bankPaybillNumber" type="text" maxlength="40" value="${escapeHtml(
+            item.bankPaybillNumber || ""
+          )}" placeholder="Bank PayBill number" ${canEdit ? "" : "disabled"} />
+          <input data-setting="bankPaybillAccountReference" type="text" maxlength="80" value="${escapeHtml(
+            item.bankPaybillAccountReference || ""
+          )}" placeholder="Bank PayBill account / house no." ${canEdit ? "" : "disabled"} />
           <input data-setting="bankName" type="text" maxlength="120" value="${escapeHtml(
             item.bankName || ""
           )}" placeholder="Bank name" ${canEdit ? "" : "disabled"} />
@@ -10260,6 +10269,49 @@ async function refreshPendingApplicationsIndicator() {
   }
 }
 
+function renderResidentPaymentReports(reports = []) {
+  const rows = Array.isArray(reports) ? reports : [];
+  residentPaymentReportsListEl.replaceChildren();
+  const pending = rows.filter((item) => item.status === "pending");
+  residentPaymentReportsEmptyEl.textContent = pending.length
+    ? `${pending.length} payment report${pending.length === 1 ? "" : "s"} waiting for review.`
+    : "No resident payment reports waiting for review.";
+  rows.forEach((report) => {
+    const card = document.createElement("article");
+    card.className = "resident-payment-report-review-item";
+    const canReview = report.status === "pending";
+    card.innerHTML = `
+      <div class="resident-payment-report-review-main">
+        <strong>${escapeHtml(report.residentName || "Resident")} • House ${escapeHtml(report.houseNumber)}</strong>
+        <span>${escapeHtml(report.paymentType === "utilities" ? `Utilities • ${report.utilityType || "Utility type missing"}` : "Rent")} • ${escapeHtml(formatCurrency(report.amountKsh))} • ${escapeHtml(String(report.provider || "").toUpperCase())}</span>
+        <span>Reference: ${escapeHtml(report.providerReference || "-")} • Paid ${escapeHtml(formatDateTime(report.paidAt))}</span>
+        ${report.note ? `<small>${escapeHtml(report.note)}</small>` : ""}
+        <span class="resident-payment-report-state status-${escapeHtml(report.status)}">${escapeHtml(report.status === "approved" ? "Confirmed" : report.status === "rejected" ? `Needs attention${report.reviewNote ? `: ${report.reviewNote}` : ""}` : "Awaiting review")}</span>
+      </div>
+      ${canReview ? `<div class="resident-payment-report-actions"><button type="button" data-payment-report-decision="approve" data-report-id="${escapeHtml(report.id)}">Confirm and post</button><button type="button" class="ghost-btn" data-payment-report-decision="reject" data-report-id="${escapeHtml(report.id)}">Needs correction</button></div>` : ""}`;
+    residentPaymentReportsListEl.append(card);
+  });
+}
+
+async function loadResidentPaymentReports() {
+  const payload = await requestJson("/api/landlord/payment-reports");
+  renderResidentPaymentReports(payload.data ?? []);
+}
+
+async function reviewResidentPaymentReport(reportId, decision) {
+  let reviewNote = "";
+  if (decision === "reject") {
+    reviewNote = window.prompt("Tell the resident what needs correcting:")?.trim() ?? "";
+    if (!reviewNote) return;
+  }
+  await requestJson(`/api/landlord/payment-reports/${encodeURIComponent(reportId)}/review`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ decision, reviewNote })
+  });
+  await Promise.all([loadRentStatus(), loadBills(), loadPayments()]);
+}
+
 async function loadRentStatus() {
   const payload = await requestJson("/api/landlord/rent-collection-status?limit=1200");
   state.rentStatus = payload.data ?? [];
@@ -10267,6 +10319,7 @@ async function loadRentStatus() {
   renderOverviewCollections(state.rentStatus);
   renderRoomLedger(state.residentDirectory);
   renderKeyedPrices();
+  await loadResidentPaymentReports();
 }
 
 async function loadResidents() {
@@ -11715,6 +11768,8 @@ paymentInstructionsBodyEl?.addEventListener("click", (event) => {
             mpesaAccountReference: valueFor("mpesaAccountReference"),
             mpesaAccountName: valueFor("mpesaAccountName"),
             bankName: valueFor("bankName"),
+            bankPaybillNumber: valueFor("bankPaybillNumber"),
+            bankPaybillAccountReference: valueFor("bankPaybillAccountReference"),
             bankAccountName: valueFor("bankAccountName"),
             bankAccountNumber: valueFor("bankAccountNumber"),
             bankBranch: valueFor("bankBranch"),
@@ -12945,6 +13000,18 @@ document.addEventListener("visibilitychange", () => {
   void refreshPendingApplicationsIndicator().catch((error) => {
     handleLandlordError(error, "Unable to refresh applications.");
   });
+});
+
+refreshResidentPaymentReportsBtnEl?.addEventListener("click", () => {
+  void loadResidentPaymentReports().catch((error) => setStatus(error.message, "error"));
+});
+residentPaymentReportsListEl.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-payment-report-decision]");
+  if (!(button instanceof HTMLButtonElement)) return;
+  button.disabled = true;
+  void reviewResidentPaymentReport(button.dataset.reportId, button.dataset.paymentReportDecision)
+    .catch((error) => setStatus(error.message, "error"))
+    .finally(() => { button.disabled = false; });
 });
 
 refreshRentStatusBtnEl.addEventListener("click", () => {

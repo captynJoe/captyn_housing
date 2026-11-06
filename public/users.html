@@ -15,10 +15,10 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="CAPTYN Housing" />
     <link rel="icon" href="/icons/housing-app.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/users.css?v=7ebc19a151" />
+    <link rel="stylesheet" href="/users.css?v=165ecf3575" />
     <script src="/captyn-theme.js?v=6944e37fb6"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=d9fd4fe626" />
-    <link rel="stylesheet" href="/resident-app/assets/resident.css?v=5a3ecb0293" />
+    <link rel="stylesheet" href="/resident-app/assets/resident.css?v=88d60570f0" />
   </head>
   <body class="app-loading">
     <div class="ambient" aria-hidden="true"></div>
@@ -63,25 +63,21 @@
         </div>
 
         <div class="hero-workspace portal-nav" aria-label="Workspace quick navigation">
-          <p class="hero-workspace-label">Workspace</p>
+          <p class="hero-workspace-label">Your home</p>
           <div class="hero-workspace-nav">
             <button type="button" class="hero-workspace-btn active" data-resident-view="overview">
-              Overview
+              Home
             </button>
-            <button type="button" class="hero-workspace-btn" data-resident-view="support">
-              Support
-              <span class="nav-dot hidden" data-dot="support" aria-hidden="true"></span>
+            <button type="button" class="hero-workspace-btn" data-resident-view="bills">
+              Bills
             </button>
             <button type="button" class="hero-workspace-btn" data-resident-view="payments">
               Payments
               <span class="nav-dot hidden" data-dot="payments" aria-hidden="true"></span>
             </button>
-            <button type="button" class="hero-workspace-btn" data-resident-view="wifi">
-              Wi-Fi
-            </button>
-            <button type="button" class="hero-workspace-btn" data-resident-view="notices">
-              Notices
-              <span class="nav-dot hidden" data-dot="notices" aria-hidden="true"></span>
+            <button type="button" class="hero-workspace-btn" data-resident-view="support">
+              Help
+              <span class="nav-dot hidden" data-dot="support" aria-hidden="true"></span>
             </button>
           </div>
         </div>
@@ -262,25 +258,17 @@
         <section class="resident-content">
           <section class="resident-view rv-overview" data-resident-view-panel="overview">
             <section class="rv-hero">
-              <p class="rv-eyebrow">Today</p>
+              <p class="rv-eyebrow">Your account</p>
               <h1 id="resident-home-balance" class="rv-hero-amount">KSh 0 due</h1>
               <p id="resident-balance-adjusted" class="rv-adjusted hidden"></p>
               <p id="resident-home-summary" class="rv-hero-copy">Your house balance will appear after sign-in.</p>
               <div class="rv-hero-actions">
-                <button id="open-payments-view-btn" type="button" data-resident-pay-open="auto" class="rv-btn-primary">Pay now</button>
+                <button id="open-payments-view-btn" type="button" class="rv-btn-primary">Payments</button>
                 <button id="open-support-view-btn" type="button" class="rv-btn-ghost">Report an issue</button>
               </div>
             </section>
 
-            <section class="rv-stat-grid">
-              <article class="rv-stat">
-                <span class="rv-stat-label">Building</span>
-                <p id="overview-building" class="rv-stat-value">-</p>
-              </article>
-              <article class="rv-stat">
-                <span class="rv-stat-label">House</span>
-                <p id="overview-house-number" class="rv-stat-value">-</p>
-              </article>
+            <section class="rv-stat-grid rv-balance-breakdown" aria-label="Balance breakdown">
               <article class="rv-stat">
                 <span class="rv-stat-label">Rent due</span>
                 <p id="overview-rent-balance" class="rv-stat-value">KSh 0</p>
@@ -289,23 +277,79 @@
                 <span class="rv-stat-label">Utilities due</span>
                 <p id="overview-utility-balance" class="rv-stat-value">KSh 0</p>
               </article>
+              <article id="overview-other-balance-card" class="rv-stat hidden">
+                <span class="rv-stat-label">Other charges</span>
+                <p id="overview-other-balance" class="rv-stat-value">KSh 0</p>
+              </article>
             </section>
 
-            <button id="open-notices-view-btn" type="button" class="rv-quicklink">
-              <span>Building notices</span>
-              <em>See what's new &rarr;</em>
-            </button>
+            <p class="rv-home-address"><span id="overview-building">-</span> · House <span id="overview-house-number">-</span></p>
+            <section class="rv-home-updates" id="resident-notifications"><div class="section-head"><div><h2>Recent updates</h2><p id="notification-count" class="item-details">0 alerts</p></div></div><section id="notification-list" class="stack-list"></section></section>
+<details class="rv-alert-settings"><summary>Notification preferences</summary>
+              <section class="notification-control-card">
+                <div class="notification-control-copy">
+                  <p class="subheading">App & alerts</p>
+                  <p id="install-app-status" class="item-details"></p>
+                  <p id="push-status-text" class="item-details">
+                    Sign in to enable browser alerts for rent, utility, and support updates.
+                  </p>
+                </div>
+                <div class="action-row notification-control-actions">
+                  <button id="install-app-btn" type="button" class="ghost-btn hidden">
+                    Install App
+                  </button>
+                  <button id="push-enable-btn" type="button" class="ghost-btn">
+                    Enable Alerts
+                  </button>
+                  <button id="push-disable-btn" type="button" class="ghost-btn hidden">
+                    Turn Off Alerts
+                  </button>
+                </div>
+              </section>
+              <section class="notification-control-card">
+                <div class="notification-control-copy">
+                  <p class="subheading">SMS updates</p>
+                  <p id="sms-status-text" class="item-details">
+                    Sign in to manage SMS alerts for rent and utility updates.
+                  </p>
+                  <div class="notification-toggle-grid">
+                    <label class="notification-toggle">
+                      <input id="sms-rent-toggle" type="checkbox" />
+                      <span>Rent updates</span>
+                    </label>
+                    <label class="notification-toggle">
+                      <input id="sms-utility-toggle" type="checkbox" />
+                      <span>Utility updates</span>
+                    </label>
+                  </div>
+                </div>
+                <div class="action-row notification-control-actions">
+                  <button id="sms-enable-btn" type="button" class="ghost-btn">
+                    Enable SMS
+                  </button>
+                  <button id="sms-disable-btn" type="button" class="ghost-btn hidden">
+                    Pause SMS
+                  </button>
+                </div>
+              </section>
+</details>
 
             <p id="overview-session-expiry" class="rv-footnote"></p>
+          </section>
+
+          <section class="resident-view hidden" data-resident-view-panel="bills">
+            <article class="panel-card resident-bills-panel">
+              <section class="section-head"><div><h2>Your bills</h2><p class="item-details">Rent and utility charges for your house.</p></div><button id="refresh-all-btn" type="button" class="ghost-btn">Refresh</button></section>
+              <section class="resident-rent-bill"><h3>Rent</h3><section id="rent-due" class="rent-wrap"></section></section>
+              <section class="resident-utilities-bills"><div class="section-head"><div><h3>Utilities</h3><p id="utility-bills-summary" class="item-details">Loading balances...</p></div></div><section id="utility-bills-list" class="stack-list"></section></section>
+              <button type="button" class="rv-inline-link" data-open-resident-view="payments">Payment options and history →</button>
+            </article>
           </section>
 
           <section class="resident-view hidden" data-resident-view-panel="support">
             <article class="panel-card">
               <section class="section-head">
-                <h2>Open a support request</h2>
-                <button id="refresh-all-btn" type="button" class="ghost-btn">
-                  Refresh Data
-                </button>
+                <div><h2>How can we help?</h2><p class="item-details">Report a repair, safety concern, or other house issue.</p></div>
               </section>
 
               <form id="report-form" class="report-form">
@@ -437,7 +481,7 @@
 
             <article class="panel-card">
               <section class="section-head">
-                <h2>Recent support requests</h2>
+                <h2>Your requests</h2>
                 <p id="reports-count">0 tickets</p>
               </section>
               <section id="reports-list" class="stack-list"></section>
@@ -497,50 +541,77 @@
                   </div>
                 </section>
 
-                <dl class="payment-summary-grid">
-                  <div>
-                    <dt>Rent</dt>
-                    <dd id="payments-rent-outstanding">KSh 0</dd>
-                  </div>
-                  <div>
-                    <dt>Utilities</dt>
-                    <dd id="payments-utility-outstanding">KSh 0</dd>
-                  </div>
-                  <div>
-                    <dt>Paid This Month</dt>
-                    <dd id="payments-month-paid">KSh 0</dd>
-                  </div>
-                </dl>
-                <div class="payment-summary-actions">
-                  <button type="button" data-payment-shortcut="utility-full">
-                    Use full utility balance
-                  </button>
-                  <button type="button" data-payment-shortcut="rent-full">
-                    Use full rent balance
-                  </button>
-                </div>
-                <p class="quick-pay-note payment-summary-note">Rent and utilities pay separately.</p>
+                <p class="payment-month-paid">Paid this month <strong id="payments-month-paid">KSh 0</strong></p>
+                <details class="resident-balance-breakdown">
+                  <summary>Rent and utilities breakdown</summary>
+                  <dl class="payment-summary-grid">
+                    <div><dt>Rent</dt><dd id="payments-rent-outstanding">KSh 0</dd></div>
+                    <div><dt>Utilities</dt><dd id="payments-utility-outstanding">KSh 0</dd></div>
+                    <div><dt>Other charges</dt><dd id="payments-other-outstanding">KSh 0</dd></div>
+                  </dl>
+                  <p class="quick-pay-note payment-summary-note">Rent and utilities are paid separately.</p>
+                </details>
               </section>
-              <section id="payment-instructions-card" class="payment-instructions-card">
-                <div class="payment-instructions-head">
-                  <div>
-                    <p class="subheading">Where to pay</p>
+              <details id="payment-instructions-card" class="payment-instructions-card">
+                <summary class="payment-instructions-summary"><span><strong>Other ways to pay</strong><small>Bank, PayBill, or in-person options</small></span><span aria-hidden="true">＋</span></summary>
+                <div class="payment-instructions-content">
+                  <div class="payment-instructions-head">
                     <h3 id="payment-instructions-title">Payment instructions</h3>
+                    <span id="payment-instructions-method" class="item-chip">-</span>
                   </div>
-                  <span id="payment-instructions-method" class="item-chip">-</span>
+                  <dl id="payment-instructions-list" class="payment-instructions-grid"></dl>
+                  <p id="payment-instructions-note" class="item-details"></p>
                 </div>
-                <dl id="payment-instructions-list" class="payment-instructions-grid"></dl>
-                <p id="payment-instructions-note" class="item-details"></p>
+              </details>
+              <section class="resident-payment-report-card">
+                <details class="resident-report-payment">
+                  <summary>Paid outside the site or payment not showing?</summary>
+                  <p class="item-details">Send the receipt details to management. Your balance updates after they confirm the payment.</p>
+                <form id="resident-payment-report-form" class="report-form">
+                  <div class="field-grid">
+                    <label>Payment for
+                      <select id="resident-payment-report-type" required>
+                        <option value="rent">Rent</option>
+                        <option value="utilities">Utilities</option>
+                      </select>
+                    </label>
+                    <label id="resident-payment-report-utility-field" class="hidden">Utility bill
+                      <select id="resident-payment-report-utility-type">
+                        <option value="water">Water</option>
+                        <option value="electricity">Electricity</option>
+                      </select>
+                    </label>
+                    <label>Amount paid (KSh)
+                      <input id="resident-payment-report-amount" type="number" min="1" step="1" inputmode="numeric" required />
+                    </label>
+                    <label>Payment method
+                      <select id="resident-payment-report-provider" required>
+                        <option value="mpesa">M-PESA</option>
+                        <option value="bank">Bank</option>
+                        <option value="cash">Cash</option>
+                        <option value="card">Card</option>
+                      </select>
+                    </label>
+                    <input id="resident-payment-report-date" type="date" class="hidden" aria-hidden="true" />
+                  </div>
+                  <label>Payment reference
+                    <input id="resident-payment-report-reference" type="text" maxlength="120" placeholder="e.g. M-PESA receipt code" required />
+                  </label>
+                  <details class="resident-payment-note"><summary>Add a note (optional)</summary><label>Note<input id="resident-payment-report-note" type="text" maxlength="500" placeholder="Anything management should know" /></label></details>
+                  <div class="action-row"><button id="resident-payment-report-submit" type="submit">Submit payment for confirmation</button></div>
+                </form>
+                </details>
+                <section class="resident-payment-report-history">
+                  <h4>Your reported payments</h4>
+                  <p id="resident-payment-reports-empty" class="item-details">No reported payments yet.</p>
+                  <div id="resident-payment-reports-list" class="stack-list"></div>
+                </section>
               </section>
               <div class="payments-grid">
+                <details class="resident-other-payment-methods">
+                  <summary>Other payment methods</summary>
                 <div class="payments-column">
                   <section class="payment-cluster">
-                    <div class="payment-cluster-head">
-                      <p class="subheading">Utilities</p>
-                      <p id="utility-bills-summary" class="item-details">Loading balances...</p>
-                    </div>
-                    <section id="utility-bills-list" class="stack-list"></section>
-
                     <section id="utility-payment-section" class="payment-section mpesa-section">
                       <div class="payment-priority-bar">
                         <div class="payment-priority-brand">
@@ -632,8 +703,6 @@
                   </section>
 
                   <section class="payment-cluster payment-cluster-rent">
-                    <section id="rent-due" class="rent-wrap"></section>
-
                     <section id="rent-payment-section" class="payment-section manual-payment-section">
                       <p class="subheading">Rent payment instructions</p>
                       <p id="rent-payment-state" class="item-details payment-state">
@@ -693,6 +762,7 @@
                     </section>
                   </section>
                 </div>
+                </details>
 
                 <aside class="payments-column payments-history-column">
                   <section class="payment-history-group">
@@ -715,92 +785,7 @@
             </article>
           </section>
 
-          <section class="resident-view hidden" data-resident-view-panel="wifi">
-            <article class="panel-card">
-              <section class="section-head">
-                <h2>Wi-Fi</h2>
-              </section>
-              <p id="wifi-error" class="feedback hidden"></p>
 
-              <section id="wifi-current-card" class="payment-summary-card hidden">
-                <div class="payment-summary-copy">
-                  <p class="subheading">Your Wi-Fi</p>
-                  <h3 id="wifi-current-plan-name">Active plan</h3>
-                  <p id="wifi-current-expiry" class="item-details"></p>
-                  <p id="wifi-current-usage" class="item-details"></p>
-                </div>
-              </section>
-
-              <p id="wifi-empty" class="item-details hidden">
-                No active Wi-Fi plan right now — see what's available below.
-              </p>
-
-              <p class="subheading">Available on CAPTYN Wi-Fi</p>
-              <section id="wifi-plans" class="wifi-package-grid" aria-label="Wi-Fi plans"></section>
-
-              <div class="action-row">
-                <a id="wifi-buy-link" class="ghost-btn" href="https://captyn.shop/wifi" target="_blank" rel="noopener noreferrer">
-                  Buy Wi-Fi on captyn.shop
-                </a>
-              </div>
-            </article>
-          </section>
-
-          <section class="resident-view hidden" data-resident-view-panel="notices">
-            <article class="panel-card">
-              <section class="section-head">
-                <h2>Building notices</h2>
-                <p id="notification-count">0 alerts</p>
-              </section>
-              <section class="notification-control-card">
-                <div class="notification-control-copy">
-                  <p class="subheading">App & alerts</p>
-                  <p id="install-app-status" class="item-details"></p>
-                  <p id="push-status-text" class="item-details">
-                    Sign in to enable browser alerts for rent, utility, and support updates.
-                  </p>
-                </div>
-                <div class="action-row notification-control-actions">
-                  <button id="install-app-btn" type="button" class="ghost-btn hidden">
-                    Install App
-                  </button>
-                  <button id="push-enable-btn" type="button" class="ghost-btn">
-                    Enable Alerts
-                  </button>
-                  <button id="push-disable-btn" type="button" class="ghost-btn hidden">
-                    Turn Off Alerts
-                  </button>
-                </div>
-              </section>
-              <section class="notification-control-card">
-                <div class="notification-control-copy">
-                  <p class="subheading">SMS updates</p>
-                  <p id="sms-status-text" class="item-details">
-                    Sign in to manage SMS alerts for rent and utility updates.
-                  </p>
-                  <div class="notification-toggle-grid">
-                    <label class="notification-toggle">
-                      <input id="sms-rent-toggle" type="checkbox" />
-                      <span>Rent updates</span>
-                    </label>
-                    <label class="notification-toggle">
-                      <input id="sms-utility-toggle" type="checkbox" />
-                      <span>Utility updates</span>
-                    </label>
-                  </div>
-                </div>
-                <div class="action-row notification-control-actions">
-                  <button id="sms-enable-btn" type="button" class="ghost-btn">
-                    Enable SMS
-                  </button>
-                  <button id="sms-disable-btn" type="button" class="ghost-btn hidden">
-                    Pause SMS
-                  </button>
-                </div>
-              </section>
-              <section id="notification-list" class="stack-list"></section>
-            </article>
-          </section>
         </section>
       </section>
     </main>
@@ -903,6 +888,6 @@
       </article>
     </section>
 
-    <script type="module" src="/resident-app/assets/resident.js?v=1ac979427c"></script>
+    <script type="module" src="/resident-app/assets/resident.js?v=29497ea419"></script>
   </body>
 </html>

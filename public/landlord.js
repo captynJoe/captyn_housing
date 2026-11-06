@@ -5,7 +5,7 @@ import { createMeterReadingsView } from "./meter-readings.js?v=7b27cc6aee";
 import { createBalancesView } from "./balances-view.js?v=59a3d1aef4";
 import { createUploadedImageGallery, renderSelectedImagePreviews, uploadImageFiles, validateImageFiles } from "./media-upload.js?v=549f6d7675";
 import { applyDocumentBranding, getLandlordPortalTitle, getLandlordShellBrand } from "./portal-branding.js?v=9b283694b2";
-const LANDLORD_SW_URL = "/resident-sw.js?v=b3d227fafe";
+const LANDLORD_SW_URL = "/resident-sw.js?v=e21be12315";
 const authStatusEl = document.getElementById("auth-status");
 const landlordRoleEl = document.getElementById("landlord-role");
 const landlordBrandTagEl = document.getElementById("landlord-brand-tag");
@@ -251,6 +251,9 @@ const landlordTicketsBodyEl = document.getElementById("landlord-tickets-body");
 const refreshLandlordTicketsBtnEl = document.getElementById("refresh-landlord-tickets");
 const rentStatusBodyEl = document.getElementById("rent-status-body");
 const refreshRentStatusBtnEl = document.getElementById("refresh-rent-status");
+const residentPaymentReportsListEl = document.getElementById("resident-payment-reports-list");
+const residentPaymentReportsEmptyEl = document.getElementById("resident-payment-reports-empty");
+const refreshResidentPaymentReportsBtnEl = document.getElementById("refresh-resident-payment-reports");
 const rentPaymentCorrectionsBtnEl = document.getElementById("rent-payment-corrections-btn");
 const collectionsReportBuildingEl = document.getElementById("collections-report-building");
 const collectionsReportFromEl = document.getElementById("collections-report-from");
@@ -8239,6 +8242,47 @@ async function refreshPendingApplicationsIndicator() {
         renderApplications(state.applications);
     }
 }
+function renderResidentPaymentReports(reports = []) {
+    const rows = Array.isArray(reports) ? reports : [];
+    residentPaymentReportsListEl.replaceChildren();
+    const pending = rows.filter((item) => item.status === "pending");
+    residentPaymentReportsEmptyEl.textContent = pending.length
+        ? `${pending.length} payment report${pending.length === 1 ? "" : "s"} waiting for review.`
+        : "No resident payment reports waiting for review.";
+    rows.forEach((report) => {
+        const card = document.createElement("article");
+        card.className = "resident-payment-report-review-item";
+        const canReview = report.status === "pending";
+        card.innerHTML = `
+      <div class="resident-payment-report-review-main">
+        <strong>${escapeHtml(report.residentName || "Resident")} • House ${escapeHtml(report.houseNumber)}</strong>
+        <span>${escapeHtml(report.paymentType === "utilities" ? `Utilities • ${report.utilityType || "Utility type missing"}` : "Rent")} • ${escapeHtml(formatCurrency(report.amountKsh))} • ${escapeHtml(String(report.provider || "").toUpperCase())}</span>
+        <span>Reference: ${escapeHtml(report.providerReference || "-")} • Paid ${escapeHtml(formatDateTime(report.paidAt))}</span>
+        ${report.note ? `<small>${escapeHtml(report.note)}</small>` : ""}
+        <span class="resident-payment-report-state status-${escapeHtml(report.status)}">${escapeHtml(report.status === "approved" ? "Confirmed" : report.status === "rejected" ? `Needs attention${report.reviewNote ? `: ${report.reviewNote}` : ""}` : "Awaiting review")}</span>
+      </div>
+      ${canReview ? `<div class="resident-payment-report-actions"><button type="button" data-payment-report-decision="approve" data-report-id="${escapeHtml(report.id)}">Confirm and post</button><button type="button" class="ghost-btn" data-payment-report-decision="reject" data-report-id="${escapeHtml(report.id)}">Needs correction</button></div>` : ""}`;
+        residentPaymentReportsListEl.append(card);
+    });
+}
+async function loadResidentPaymentReports() {
+    const payload = await requestJson("/api/landlord/payment-reports");
+    renderResidentPaymentReports(payload.data ?? []);
+}
+async function reviewResidentPaymentReport(reportId, decision) {
+    let reviewNote = "";
+    if (decision === "reject") {
+        reviewNote = window.prompt("Tell the resident what needs correcting:")?.trim() ?? "";
+        if (!reviewNote)
+            return;
+    }
+    await requestJson(`/api/landlord/payment-reports/${encodeURIComponent(reportId)}/review`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decision, reviewNote })
+    });
+    await Promise.all([loadRentStatus(), loadBills(), loadPayments()]);
+}
 async function loadRentStatus() {
     const payload = await requestJson("/api/landlord/rent-collection-status?limit=1200");
     state.rentStatus = payload.data ?? [];
@@ -8246,6 +8290,7 @@ async function loadRentStatus() {
     renderOverviewCollections(state.rentStatus);
     renderRoomLedger(state.residentDirectory);
     renderKeyedPrices();
+    await loadResidentPaymentReports();
 }
 async function loadResidents() {
     if (!(residentsBuildingSelectEl instanceof HTMLSelectElement)) {
@@ -10399,6 +10444,18 @@ document.addEventListener("visibilitychange", () => {
     void refreshPendingApplicationsIndicator().catch((error) => {
         handleLandlordError(error, "Unable to refresh applications.");
     });
+});
+refreshResidentPaymentReportsBtnEl?.addEventListener("click", () => {
+    void loadResidentPaymentReports().catch((error) => setStatus(error.message, "error"));
+});
+residentPaymentReportsListEl.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-payment-report-decision]");
+    if (!(button instanceof HTMLButtonElement))
+        return;
+    button.disabled = true;
+    void reviewResidentPaymentReport(button.dataset.reportId, button.dataset.paymentReportDecision)
+        .catch((error) => setStatus(error.message, "error"))
+        .finally(() => { button.disabled = false; });
 });
 refreshRentStatusBtnEl.addEventListener("click", () => {
     void loadRentStatus().catch((error) => {

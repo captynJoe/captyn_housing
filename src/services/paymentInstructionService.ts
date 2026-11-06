@@ -10,6 +10,8 @@ export interface BuildingPaymentInstructionsRecord {
   mpesaAccountReference?: string;
   mpesaAccountName?: string;
   bankName?: string;
+  bankPaybillNumber?: string;
+  bankPaybillAccountReference?: string;
   bankAccountName?: string;
   bankAccountNumber?: string;
   bankBranch?: string;
@@ -76,6 +78,8 @@ function normalizeRecord(
     mpesaAccountReference: normalizeOptionalString(value?.mpesaAccountReference),
     mpesaAccountName: normalizeOptionalString(value?.mpesaAccountName),
     bankName: normalizeOptionalString(value?.bankName),
+    bankPaybillNumber: normalizeOptionalString(value?.bankPaybillNumber),
+    bankPaybillAccountReference: normalizeOptionalString(value?.bankPaybillAccountReference),
     bankAccountName: normalizeOptionalString(value?.bankAccountName),
     bankAccountNumber: normalizeOptionalString(value?.bankAccountNumber),
     bankBranch: normalizeOptionalString(value?.bankBranch),
@@ -139,6 +143,8 @@ export class PaymentInstructionService {
         mpesaAccountReference: normalized.mpesaAccountReference,
         mpesaAccountName: normalized.mpesaAccountName,
         bankName: normalized.bankName,
+        bankPaybillNumber: normalized.bankPaybillNumber,
+        bankPaybillAccountReference: normalized.bankPaybillAccountReference,
         bankAccountName: normalized.bankAccountName,
         bankAccountNumber: normalized.bankAccountNumber,
         bankBranch: normalized.bankBranch,
@@ -193,6 +199,8 @@ export class PaymentInstructionService {
       mpesaAccountReference: updated.mpesaAccountReference,
       mpesaAccountName: updated.mpesaAccountName,
       bankName: updated.bankName,
+      bankPaybillNumber: updated.bankPaybillNumber,
+      bankPaybillAccountReference: updated.bankPaybillAccountReference,
       bankAccountName: updated.bankAccountName,
       bankAccountNumber: updated.bankAccountNumber,
       bankBranch: updated.bankBranch,

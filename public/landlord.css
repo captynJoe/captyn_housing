@@ -3354,3 +3354,56 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
   .mr-history-row { grid-template-columns: 1fr 1fr; }
   .mr-history-row small { grid-column: 1 / -1; }
 }
+
+.resident-payment-reports-list { display: grid; gap: 10px; }
+.resident-payment-review-card { margin: 16px 0; }
+.resident-payment-report-review-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid var(--captyn-line, #d8e0e8);
+  border-radius: 12px;
+  background: var(--panel, #fff);
+}
+.resident-payment-report-review-main { display: grid; gap: 5px; min-width: 0; }
+.resident-payment-report-review-main > span,
+.resident-payment-report-review-main > small { color: var(--muted, #64748b); }
+.resident-payment-report-state { font-weight: 700; }
+.resident-payment-report-state.status-pending { color: #956300; }
+.resident-payment-report-state.status-approved { color: #08764e; }
+.resident-payment-report-state.status-rejected { color: #a62b26; }
+.resident-payment-report-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 680px) {
+  .resident-payment-report-review-item { align-items: stretch; flex-direction: column; }
+}
+
+/* Keep the dashboard watch list useful at a glance on phones. */
+@media (max-width: 680px) {
+  #overview-collections-section table[data-mobile-cards="true"] td:nth-child(4),
+  #overview-collections-section table[data-mobile-cards="true"] td:nth-child(6),
+  #overview-collections-section table[data-mobile-cards="true"] td:nth-child(7),
+  #overview-collections-section table[data-mobile-cards="true"] td:nth-child(9),
+  #overview-collections-section table[data-mobile-cards="true"] td:nth-child(10),
+  #overview-collections-section table[data-mobile-cards="true"] td:nth-child(11) {
+    display: none !important;
+  }
+
+  #overview-collections-section table[data-mobile-cards="true"] tbody tr {
+    gap: 8px;
+    padding: 12px;
+  }
+
+  #overview-collections-section table[data-mobile-cards="true"] td::before {
+    color: var(--captyn-muted, #68768a);
+    font-size: 0.68rem;
+  }
+
+  #overview-collections-section table[data-mobile-cards="true"] td:nth-child(8) {
+    padding-top: 8px;
+    border-top: 1px solid var(--captyn-line, #d9e1e5);
+    font-size: 1.05rem;
+    font-weight: 800;
+  }
+}

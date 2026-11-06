@@ -4,7 +4,7 @@ import { applyDocumentBranding, getResidentPortalTitle, getResidentShellBrand } 
 const RESIDENT_TOKEN_KEY = "estatedesk_resident_session_token";
 const RESIDENT_SESSION_TOKEN_KEY = "estatedesk_resident_session_token_session";
 const RESIDENT_REMEMBER_DEVICE_KEY = "estatedesk_resident_remember_device";
-const RESIDENT_SW_URL = "/resident-sw.js?v=b3d227fafe";
+const RESIDENT_SW_URL = "/resident-sw.js?v=e21be12315";
 let deferredInstallPrompt = null;
 let residentSwRegistrationPromise = null;
 const apiStatusEl = document.getElementById("api-status");
@@ -36,9 +36,10 @@ const residentBalanceAdjustedEl = document.getElementById("resident-balance-adju
 const residentHomeSummaryEl = document.getElementById("resident-home-summary");
 const overviewRentBalanceEl = document.getElementById("overview-rent-balance");
 const overviewUtilityBalanceEl = document.getElementById("overview-utility-balance");
+const overviewOtherBalanceEl = document.getElementById("overview-other-balance");
+const overviewOtherBalanceCardEl = document.getElementById("overview-other-balance-card");
 const openSupportViewBtnEl = document.getElementById("open-support-view-btn");
 const openPaymentsViewBtnEl = document.getElementById("open-payments-view-btn");
-const openNoticesViewBtnEl = document.getElementById("open-notices-view-btn");
 const residentAuthFormEl = document.getElementById("resident-auth-form");
 const authBuildingIdEl = document.getElementById("auth-building-id");
 const authHouseNumberEl = document.getElementById("auth-house-number");
@@ -87,6 +88,7 @@ const rentDueEl = document.getElementById("rent-due");
 const paymentsSummaryActionEl = document.getElementById("payments-summary-action");
 const paymentsRentOutstandingEl = document.getElementById("payments-rent-outstanding");
 const paymentsUtilityOutstandingEl = document.getElementById("payments-utility-outstanding");
+const paymentsOtherOutstandingEl = document.getElementById("payments-other-outstanding");
 const paymentsMonthPaidEl = document.getElementById("payments-month-paid");
 const residentPayHeadlineEl = document.getElementById("resident-pay-headline");
 const residentPaySheetEl = document.getElementById("resident-pay-sheet");
@@ -136,14 +138,18 @@ const utilityPaymentBalanceEl = document.getElementById("utility-payment-balance
 const utilityPaymentBtnEl = document.getElementById("utility-payment-btn");
 const utilityPaymentsCountEl = document.getElementById("utility-payments-count");
 const utilityPaymentsListEl = document.getElementById("utility-payments-list");
-const wifiErrorEl = document.getElementById("wifi-error");
-const wifiEmptyEl = document.getElementById("wifi-empty");
-const wifiPlansEl = document.getElementById("wifi-plans");
-const wifiCurrentCardEl = document.getElementById("wifi-current-card");
-const wifiCurrentPlanNameEl = document.getElementById("wifi-current-plan-name");
-const wifiCurrentExpiryEl = document.getElementById("wifi-current-expiry");
-const wifiCurrentUsageEl = document.getElementById("wifi-current-usage");
-const wifiBuyLinkEl = document.getElementById("wifi-buy-link");
+const residentPaymentReportFormEl = document.getElementById("resident-payment-report-form");
+const residentPaymentReportTypeEl = document.getElementById("resident-payment-report-type");
+const residentPaymentReportUtilityFieldEl = document.getElementById("resident-payment-report-utility-field");
+const residentPaymentReportUtilityTypeEl = document.getElementById("resident-payment-report-utility-type");
+const residentPaymentReportAmountEl = document.getElementById("resident-payment-report-amount");
+const residentPaymentReportProviderEl = document.getElementById("resident-payment-report-provider");
+const residentPaymentReportDateEl = document.getElementById("resident-payment-report-date");
+const residentPaymentReportReferenceEl = document.getElementById("resident-payment-report-reference");
+const residentPaymentReportNoteEl = document.getElementById("resident-payment-report-note");
+const residentPaymentReportSubmitEl = document.getElementById("resident-payment-report-submit");
+const residentPaymentReportsListEl = document.getElementById("resident-payment-reports-list");
+const residentPaymentReportsEmptyEl = document.getElementById("resident-payment-reports-empty");
 const mpesaStatusModalEl = document.getElementById("mpesa-status-modal");
 const mpesaStatusBackdropEl = document.getElementById("mpesa-status-backdrop");
 const mpesaStatusTitleEl = document.getElementById("mpesa-status-title");
@@ -174,7 +180,7 @@ const DEFAULT_SMS_PREFERENCES = Object.freeze({
     utilityEnabled: true,
     supportEnabled: false
 });
-const VALID_RESIDENT_VIEWS = new Set(["overview", "support", "payments", "wifi", "notices"]);
+const VALID_RESIDENT_VIEWS = new Set(["overview", "bills", "support", "payments"]);
 const REPORT_ATTACHMENT_LIMIT = 4;
 function readStoredResidentToken() {
     const rememberedToken = localStorage.getItem(RESIDENT_TOKEN_KEY) ?? "";
@@ -230,9 +236,7 @@ const state = {
     activeMpesaFlow: null,
     mpesaStatusModalDismissed: false,
     activeReceipt: null,
-    activeResidentView: "payments",
-    wifiStatus: null,
-    wifiStatusLoaded: false,
+    activeResidentView: "overview",
     utilitySelectedBillMonthByType: {
         water: null,
         electricity: null
@@ -271,6 +275,8 @@ const REQUIRED_DOM_BINDINGS = Object.freeze([
     ["resident-home-summary", residentHomeSummaryEl],
     ["overview-rent-balance", overviewRentBalanceEl],
     ["overview-utility-balance", overviewUtilityBalanceEl],
+    ["overview-other-balance", overviewOtherBalanceEl],
+    ["overview-other-balance-card", overviewOtherBalanceCardEl],
     ["resident-auth-form", residentAuthFormEl],
     ["auth-building-id", authBuildingIdEl],
     ["auth-house-number", authHouseNumberEl],
@@ -316,6 +322,7 @@ const REQUIRED_DOM_BINDINGS = Object.freeze([
     ["payments-summary-action", paymentsSummaryActionEl],
     ["payments-rent-outstanding", paymentsRentOutstandingEl],
     ["payments-utility-outstanding", paymentsUtilityOutstandingEl],
+    ["payments-other-outstanding", paymentsOtherOutstandingEl],
     ["payments-month-paid", paymentsMonthPaidEl],
     ["resident-pay-headline", residentPayHeadlineEl],
     ["resident-pay-sheet", residentPaySheetEl],
@@ -361,6 +368,18 @@ const REQUIRED_DOM_BINDINGS = Object.freeze([
     ["utility-payment-btn", utilityPaymentBtnEl],
     ["utility-payments-count", utilityPaymentsCountEl],
     ["utility-payments-list", utilityPaymentsListEl],
+    ["resident-payment-report-form", residentPaymentReportFormEl],
+    ["resident-payment-report-type", residentPaymentReportTypeEl],
+    ["resident-payment-report-utility-field", residentPaymentReportUtilityFieldEl],
+    ["resident-payment-report-utility-type", residentPaymentReportUtilityTypeEl],
+    ["resident-payment-report-amount", residentPaymentReportAmountEl],
+    ["resident-payment-report-provider", residentPaymentReportProviderEl],
+    ["resident-payment-report-date", residentPaymentReportDateEl],
+    ["resident-payment-report-reference", residentPaymentReportReferenceEl],
+    ["resident-payment-report-note", residentPaymentReportNoteEl],
+    ["resident-payment-report-submit", residentPaymentReportSubmitEl],
+    ["resident-payment-reports-list", residentPaymentReportsListEl],
+    ["resident-payment-reports-empty", residentPaymentReportsEmptyEl],
     ["mpesa-status-modal", mpesaStatusModalEl],
     ["mpesa-status-backdrop", mpesaStatusBackdropEl],
     ["mpesa-status-title", mpesaStatusTitleEl],
@@ -967,6 +986,7 @@ function updatePaymentsSummaryCard() {
     if (state.residentSession && !canResidentAccessBilling()) {
         paymentsRentOutstandingEl.textContent = formatCurrency(0);
         paymentsUtilityOutstandingEl.textContent = formatCurrency(0);
+        paymentsOtherOutstandingEl.textContent = formatCurrency(0);
         paymentsMonthPaidEl.textContent = formatCurrency(0);
         paymentsSummaryActionEl.textContent = getPendingReviewBillingMessage();
         syncResidentPaySummary();
@@ -975,16 +995,18 @@ function updatePaymentsSummaryCard() {
     }
     const rentOutstanding = getRentOutstandingBalance();
     const utilityOutstanding = getTotalUtilityOutstandingBalance();
+    const otherOutstanding = getExpenseOutstandingBalance();
     const totalOutstanding = getTotalOutstandingBalance();
     const paidThisMonth = getPaidThisMonthTotal();
     paymentsRentOutstandingEl.textContent = formatCurrency(rentOutstanding);
     paymentsUtilityOutstandingEl.textContent = formatCurrency(utilityOutstanding);
+    paymentsOtherOutstandingEl.textContent = formatCurrency(otherOutstanding);
     paymentsMonthPaidEl.textContent = formatCurrency(paidThisMonth);
     syncResidentPaySummary();
     paymentsSummaryActionEl.textContent =
         totalOutstanding > 0
-            ? "Pay any amount toward your balance using the instructions below."
-            : "All balances are clear right now. If a new bill is posted, use the payment details on this page.";
+            ? "Utility payments made here are recorded after M-PESA confirms. For rent or off-site payments, use the instructions below."
+            : "Nothing is due right now. Payment instructions are available below if you need them.";
     syncPaymentShortcutButtons();
 }
 function updateRentPaymentGuidance() {
@@ -1210,11 +1232,16 @@ function syncResidentPaySummary() {
     if (overviewUtilityBalanceEl instanceof HTMLElement) {
         overviewUtilityBalanceEl.textContent = formatCurrency(utilityOutstanding);
     }
+    const otherOutstanding = pendingReview ? 0 : getExpenseOutstandingBalance();
+    if (overviewOtherBalanceEl instanceof HTMLElement) {
+        overviewOtherBalanceEl.textContent = formatCurrency(otherOutstanding);
+    }
+    overviewOtherBalanceCardEl?.classList.toggle("hidden", otherOutstanding <= 0);
     if (residentHomeSummaryEl instanceof HTMLElement) {
         residentHomeSummaryEl.textContent = pendingReview
             ? getPendingReviewBillingMessage()
             : totalOutstanding > 0
-                ? `Rent ${formatCurrency(rentOutstanding)} • Utilities ${formatCurrency(utilityOutstanding)}`
+                ? `Rent ${formatCurrency(rentOutstanding)} • Utilities ${formatCurrency(utilityOutstanding)}${otherOutstanding > 0 ? ` • Other charges ${formatCurrency(otherOutstanding)}` : ""}`
                 : "Your rent and utility balances are clear right now.";
     }
     residentPayOpenButtons.forEach((button) => {
@@ -1838,20 +1865,13 @@ async function checkActiveMpesaFlow() {
     await pollRentMpesaPayment(flow.checkoutRequestId, { manual: true });
 }
 function updateResidentNavDots() {
-    const noticesDot = document.querySelector('[data-dot="notices"]');
     const supportDot = document.querySelector('[data-dot="support"]');
     const paymentsDot = document.querySelector('[data-dot="payments"]');
-    const notificationsCount = Array.isArray(state.notifications)
-        ? state.notifications.length
-        : 0;
     const openReports = Array.isArray(state.reports)
         ? state.reports.filter((report) => report.status !== "resolved").length
         : 0;
     const rentOutstanding = getRentOutstandingBalance();
     const utilityOutstanding = getTotalUtilityOutstandingBalance();
-    if (noticesDot instanceof HTMLElement) {
-        noticesDot.classList.toggle("hidden", notificationsCount === 0);
-    }
     if (supportDot instanceof HTMLElement) {
         supportDot.classList.toggle("hidden", !canResidentAccessSupport() || openReports === 0);
     }
@@ -2084,101 +2104,13 @@ function setActiveResidentView(nextView, { scroll = false } = {}) {
         const active = panel.dataset.residentViewPanel === targetView;
         panel.classList.toggle("hidden", !active);
     });
+    document.querySelectorAll("[data-open-resident-view]").forEach((button) => {
+        button.setAttribute("aria-current", String(button.dataset.openResidentView === targetView));
+    });
     if (scroll) {
         requestAnimationFrame(() => {
             scrollToResidentPanel(targetView);
         });
-    }
-    if (targetView === "wifi" && !state.wifiStatusLoaded) {
-        void loadResidentWifiStatus();
-    }
-}
-function formatDataUsage(octets) {
-    const bytes = Number(octets ?? 0);
-    if (!Number.isFinite(bytes) || bytes <= 0) {
-        return "0 MB";
-    }
-    const mb = bytes / (1024 * 1024);
-    if (mb < 1024) {
-        return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
-    }
-    return `${(mb / 1024).toFixed(1)} GB`;
-}
-function formatWifiDuration(durationSeconds) {
-    const hours = Math.round(Number(durationSeconds ?? 0) / 3600);
-    if (hours < 1) {
-        return "Short access";
-    }
-    if (hours < 24) {
-        return `${hours} hour${hours === 1 ? "" : "s"}`;
-    }
-    const days = Math.round(hours / 24);
-    return `${days} day${days === 1 ? "" : "s"}`;
-}
-function renderResidentWifiStatus() {
-    const status = state.wifiStatus;
-    const plans = status?.plans ?? [];
-    if (wifiBuyLinkEl instanceof HTMLAnchorElement && status?.buyUrl) {
-        wifiBuyLinkEl.href = status.buyUrl;
-    }
-    if (status?.current) {
-        wifiCurrentCardEl.classList.remove("hidden");
-        wifiCurrentPlanNameEl.textContent = status.current.planName;
-        wifiCurrentExpiryEl.textContent = `Expires ${new Date(status.current.expiresAt).toLocaleString()}`;
-        const usedBytes = Number(status.current.totalInputOctets ?? 0) + Number(status.current.totalOutputOctets ?? 0);
-        wifiCurrentUsageEl.textContent = `Data used so far: ${formatDataUsage(usedBytes)}`;
-    }
-    else {
-        wifiCurrentCardEl.classList.add("hidden");
-    }
-    wifiEmptyEl.classList.toggle("hidden", Boolean(status?.current) || plans.length > 0);
-    wifiPlansEl.replaceChildren();
-    plans.forEach((plan) => {
-        const card = document.createElement("div");
-        card.className = "wifi-package-card";
-        if (plan.isFree) {
-            const badge = document.createElement("span");
-            badge.className = "wifi-package-badge";
-            badge.textContent = "Free access";
-            card.append(badge);
-        }
-        else if (plan.discountPercent > 0) {
-            const badge = document.createElement("span");
-            badge.className = "wifi-package-badge";
-            badge.textContent = `${plan.discountPercent}% off`;
-            card.append(badge);
-        }
-        else if (plan.recommended) {
-            const badge = document.createElement("span");
-            badge.className = "wifi-package-badge";
-            badge.textContent = "Recommended";
-            card.append(badge);
-        }
-        const name = document.createElement("div");
-        name.className = "wifi-package-name";
-        name.textContent = plan.name;
-        const price = document.createElement("div");
-        price.className = "wifi-package-price";
-        price.textContent = plan.isFree ? "Free" : formatCurrency(plan.priceKsh);
-        const duration = document.createElement("div");
-        duration.className = "wifi-package-meta";
-        duration.textContent = formatWifiDuration(plan.durationSeconds);
-        card.append(name, price, duration);
-        wifiPlansEl.append(card);
-    });
-}
-async function loadResidentWifiStatus() {
-    wifiErrorEl.classList.add("hidden");
-    try {
-        const payload = await requestJson("/api/resident/wifi/status", {}, { auth: true });
-        state.wifiStatus = payload.data ?? null;
-        state.wifiStatusLoaded = true;
-        renderResidentWifiStatus();
-    }
-    catch (error) {
-        wifiErrorEl.textContent =
-            error instanceof Error ? error.message : "Unable to load Wi-Fi status.";
-        wifiErrorEl.classList.remove("hidden");
     }
 }
 function scrollToResidentPanel(targetView) {
@@ -3114,6 +3046,51 @@ function renderUtilityBills(bills, meters = [], fallbackMessage, latestReadings 
         rollup.append(top, details);
         utilityBillsListEl.append(rollup);
     }
+    const historyBills = [...bills].sort((a, b) => String(b.billingMonth).localeCompare(String(a.billingMonth)));
+    if (historyBills.length > 0) {
+        const history = document.createElement("details");
+        history.className = "utility-billing-history";
+        const summary = document.createElement("summary");
+        summary.textContent = `Billing history (${historyBills.length})`;
+        const help = document.createElement("p");
+        help.className = "item-details";
+        help.textContent = "Check the reading and amount for each month. If something looks wrong, contact management from Support and include the billing month.";
+        const list = document.createElement("div");
+        list.className = "utility-billing-history-list";
+        historyBills.forEach((bill) => {
+            const row = document.createElement("article");
+            row.className = "utility-billing-history-row";
+            const head = document.createElement("div");
+            head.className = "stack-top";
+            const title = document.createElement("strong");
+            title.textContent = `${utilityLabel(bill.utilityType)} • ${bill.billingMonth}`;
+            const amount = document.createElement("strong");
+            amount.textContent = formatCurrency(Number(bill.amountKsh ?? 0));
+            head.append(title, amount);
+            const readings = document.createElement("p");
+            readings.className = "item-details";
+            if (bill.meterNumber === "NO-METER") {
+                readings.textContent = `Fixed charge • billed ${formatCurrency(Number(bill.amountKsh ?? 0))}`;
+            }
+            else {
+                readings.textContent = `Meter ${normalizeUtilityMeterDisplay(bill.meterNumber) || "-"}: ${formatReadingValue(bill.previousReading)} → ${formatReadingValue(bill.currentReading)} • ${formatReadingValue(bill.unitsConsumed)} units`;
+            }
+            row.append(head, readings);
+            (Array.isArray(bill.usageCharges) ? bill.usageCharges : []).forEach((charge) => {
+                const breakdown = document.createElement("p");
+                breakdown.className = "item-details utility-history-breakdown";
+                breakdown.textContent = `${utilityLabel(charge.utilityType)}: ${formatReadingValue(charge.unitsConsumed)} units • ${formatReadingValue(charge.includedUnits)} included • ${formatReadingValue(charge.extraUnits)} extra × ${formatCurrency(Number(charge.ratePerUnitKsh ?? 0))}/unit • extra charge ${formatCurrency(Number(charge.amountKsh ?? 0))}`;
+                row.append(breakdown);
+            });
+            const balance = document.createElement("p");
+            balance.className = "item-details";
+            balance.textContent = `Due ${formatDateTime(bill.dueDate)} • Remaining ${formatCurrency(Number(bill.balanceKsh ?? 0))}`;
+            row.append(balance);
+            list.append(row);
+        });
+        history.append(summary, help, list);
+        utilityBillsListEl.append(history);
+    }
 }
 function syncUtilityBillingMonthOptions() {
     if (!(utilityPaymentMonthEl instanceof HTMLSelectElement)) {
@@ -3189,6 +3166,70 @@ function syncUtilityPaymentFormFromBalances() {
         utilityPaymentAmountEl.value = formatAmountValue(totalOutstanding);
     }
     updateUtilityPaymentGuidance();
+}
+function renderResidentPaymentReports(reports = []) {
+    residentPaymentReportsListEl.replaceChildren();
+    const rows = Array.isArray(reports) ? reports : [];
+    residentPaymentReportsEmptyEl.classList.toggle("hidden", rows.length > 0);
+    rows.forEach((report) => {
+        const card = document.createElement("article");
+        card.className = "stack-item resident-payment-report-item";
+        const head = document.createElement("div");
+        head.className = "stack-item-head";
+        const title = document.createElement("strong");
+        const paymentLabel = report.paymentType === "utilities"
+            ? `Utilities${report.utilityType ? ` • ${String(report.utilityType).replace(/^./, (letter) => letter.toUpperCase())}` : ""}`
+            : "Rent";
+        title.textContent = `${paymentLabel} • ${formatCurrency(Number(report.amountKsh || 0))}`;
+        const status = document.createElement("span");
+        status.className = `item-chip resident-report-status status-${report.status}`;
+        status.textContent = report.status === "approved" ? "Confirmed" : report.status === "rejected" ? "Needs attention" : "Waiting for management";
+        head.append(title, status);
+        const detail = document.createElement("p");
+        detail.className = "item-details";
+        detail.textContent = `${String(report.provider || "").toUpperCase()} • ${report.providerReference || "No reference"} • Submitted ${formatDateTime(report.submittedAt)}`;
+        card.append(head, detail);
+        if (report.reviewNote) {
+            const note = document.createElement("p");
+            note.className = "item-details";
+            note.textContent = report.reviewNote;
+            card.append(note);
+        }
+        residentPaymentReportsListEl.append(card);
+    });
+}
+async function submitResidentPaymentReport(event) {
+    event.preventDefault();
+    clearFeedback();
+    residentPaymentReportSubmitEl.disabled = true;
+    try {
+        await requestJson("/api/user/payment-reports", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                paymentType: residentPaymentReportTypeEl.value,
+                utilityType: residentPaymentReportTypeEl.value === "utilities"
+                    ? residentPaymentReportUtilityTypeEl.value
+                    : undefined,
+                amountKsh: Number(residentPaymentReportAmountEl.value),
+                provider: residentPaymentReportProviderEl.value,
+                paidAt: residentPaymentReportDateEl.value,
+                providerReference: residentPaymentReportReferenceEl.value.trim(),
+                note: residentPaymentReportNoteEl.value.trim()
+            })
+        }, { auth: true });
+        residentPaymentReportAmountEl.value = "";
+        residentPaymentReportReferenceEl.value = "";
+        residentPaymentReportNoteEl.value = "";
+        showFeedback("Payment report sent. Your balance will update after management confirms it.", "success");
+        await loadTenantData();
+    }
+    catch (error) {
+        showFeedback(error instanceof Error ? error.message : "Could not send the payment report.");
+    }
+    finally {
+        residentPaymentReportSubmitEl.disabled = false;
+    }
 }
 function renderUtilityPayments(payments, fallbackMessage) {
     utilityPaymentsListEl.replaceChildren();
@@ -3492,6 +3533,7 @@ async function loadTenantData() {
         syncUtilityPaymentFormFromBalances();
         state.utilityPayments = data.utilityPayments ?? [];
         renderUtilityPayments(state.utilityPayments, messages.utilityPayments);
+        renderResidentPaymentReports(data.residentPaymentReports ?? []);
         syncPaymentMessaging();
         updateResidentNavDots();
         renderResidentIdentityNotice();
@@ -4411,6 +4453,11 @@ function startResidentPortal() {
             setActiveResidentView(target, { scroll: true });
         });
     });
+    document.querySelectorAll("[data-open-resident-view]").forEach((button) => {
+        button.addEventListener("click", () => {
+            setActiveResidentView(button.getAttribute("data-open-resident-view"), { scroll: true });
+        });
+    });
     if (openSupportViewBtnEl) {
         openSupportViewBtnEl.addEventListener("click", () => {
             setActiveResidentView("support", { scroll: true });
@@ -4419,11 +4466,6 @@ function startResidentPortal() {
     if (openPaymentsViewBtnEl) {
         openPaymentsViewBtnEl.addEventListener("click", () => {
             setActiveResidentView("payments", { scroll: true });
-        });
-    }
-    if (openNoticesViewBtnEl) {
-        openNoticesViewBtnEl.addEventListener("click", () => {
-            setActiveResidentView("notices", { scroll: true });
         });
     }
     residentPayOpenButtons.forEach((button) => {
@@ -4585,6 +4627,24 @@ function startResidentPortal() {
                 emptyText: "No photos selected."
             });
         }
+    });
+    residentPaymentReportDateEl.value = new Date().toISOString().slice(0, 10);
+    const syncResidentPaymentReportFields = () => {
+        const isUtilities = residentPaymentReportTypeEl.value === "utilities";
+        residentPaymentReportUtilityFieldEl.classList.toggle("hidden", !isUtilities);
+        residentPaymentReportUtilityTypeEl.required = isUtilities;
+        residentPaymentReportUtilityTypeEl.disabled = !isUtilities;
+        const cash = residentPaymentReportProviderEl.value === "cash";
+        residentPaymentReportReferenceEl.required = !cash;
+        residentPaymentReportReferenceEl.placeholder = cash
+            ? "Optional for cash; add a note if useful"
+            : "e.g. M-PESA receipt code";
+    };
+    residentPaymentReportProviderEl.addEventListener("change", syncResidentPaymentReportFields);
+    residentPaymentReportTypeEl.addEventListener("change", syncResidentPaymentReportFields);
+    syncResidentPaymentReportFields();
+    residentPaymentReportFormEl.addEventListener("submit", (event) => {
+        void submitResidentPaymentReport(event);
     });
     rentPaymentFormEl.addEventListener("submit", (event) => {
         void submitRentPayment(event);

@@ -89,7 +89,7 @@ html[data-captyn-ui-runtime="typescript"] body {
   padding: 22px;
   border-radius: 14px !important;
   border: 1px solid var(--resident-line) !important;
-  background: linear-gradient(180deg, #ffffff 0%, #f7fbf8 100%) !important;
+  background: linear-gradient(180deg, var(--resident-panel) 0%, var(--resident-panel-soft) 100%) !important;
   box-shadow: var(--resident-shadow);
 }
 
@@ -158,9 +158,9 @@ html[data-captyn-ui-runtime="typescript"] body {
 .resident-ts-shell .panel-card {
   border-radius: 14px !important;
   border: 1px solid var(--resident-line) !important;
-  background: rgba(255, 255, 255, 0.96) !important;
-  box-shadow: 0 14px 36px rgba(27, 44, 45, 0.08) !important;
-  color: #101c28 !important;
+  background: var(--resident-panel) !important;
+  box-shadow: var(--resident-shadow) !important;
+  color: var(--resident-ink) !important;
 }
 
 .resident-ts-shell .panel-card {
@@ -1300,4 +1300,30 @@ html[data-captyn-ui-runtime="typescript"] body {
 
 .resident-session-mode .resident-other-payment-methods > summary {
   font-size: 0.86rem;
+}
+
+
+/* Payment workspace: keep theme contrast and use the full content width for history. */
+.resident-session-mode .payments-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.resident-session-mode .payments-history-column {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.resident-session-mode .resident-report-payment > summary,
+.resident-session-mode .resident-other-payment-methods > summary {
+  color: var(--resident-ink) !important;
+}
+
+.resident-session-mode .resident-payment-report-history .stack-list:empty::before {
+  content: none;
+  display: none;
+}
+
+@media (max-width: 680px) {
+  .resident-session-mode .payments-history-column {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

@@ -210,6 +210,9 @@ export interface UtilityMeterReadingEvent {
   recordedAt: string;
   billingMonth?: string;
   chargeAmountKsh: number;
+  includedUnits: number;
+  extraUnits: number;
+  ratePerUnitKsh: number;
   billId?: string;
   dueDate?: string;
   status: "charged" | "unbilled";
@@ -594,7 +597,10 @@ export class UtilityBillingService {
       currentReading: Number(input.currentReading),
       previousReading: input.previousReading == null ? null : Number(input.previousReading),
       unitsConsumed: Math.max(0, Number(input.unitsConsumed) || 0),
-      chargeAmountKsh: Math.max(0, Math.round(Number(input.chargeAmountKsh) || 0))
+      chargeAmountKsh: Math.max(0, Math.round(Number(input.chargeAmountKsh) || 0)),
+      includedUnits: Math.max(0, Number(input.includedUnits) || 0),
+      extraUnits: Math.max(0, Number(input.extraUnits) || 0),
+      ratePerUnitKsh: Math.max(0, Number(input.ratePerUnitKsh) || 0)
     };
     this.meterReadingHistory.push(event);
     return { ...event };
@@ -777,6 +783,12 @@ export class UtilityBillingService {
         ) {
           continue;
         }
+        const linkedBill = item.billId
+          ? [...this.billsByLedger.values()].flat().find((bill) => bill.id === item.billId)
+          : undefined;
+        const linkedCharge = linkedBill?.usageCharges?.find(
+          (charge) => charge.utilityType === item.utilityType
+        );
         this.meterReadingHistory.push({
           ...item,
           id: String(item.id || randomUUID()),
@@ -788,6 +800,9 @@ export class UtilityBillingService {
           unitsConsumed: Math.max(0, Number(item.unitsConsumed) || 0),
           recordedAt: item.recordedAt || nowIso(),
           chargeAmountKsh: Math.max(0, Math.round(Number(item.chargeAmountKsh) || 0)),
+          includedUnits: Math.max(0, Number(item.includedUnits ?? linkedCharge?.includedUnits) || 0),
+          extraUnits: Math.max(0, Number(item.extraUnits ?? linkedCharge?.extraUnits ?? item.unitsConsumed) || 0),
+          ratePerUnitKsh: Math.max(0, Number(item.ratePerUnitKsh ?? linkedCharge?.ratePerUnitKsh ?? linkedBill?.ratePerUnitKsh) || 0),
           status: item.status === "charged" ? "charged" : "unbilled"
         });
       }
@@ -814,6 +829,9 @@ export class UtilityBillingService {
                 recordedAt: charge.recordedAt,
                 billingMonth: bill.billingMonth,
                 chargeAmountKsh: charge.amountKsh,
+                includedUnits: charge.includedUnits,
+                extraUnits: charge.extraUnits,
+                ratePerUnitKsh: charge.ratePerUnitKsh,
                 billId: bill.id,
                 dueDate: bill.dueDate,
                 status: "charged"
@@ -832,6 +850,9 @@ export class UtilityBillingService {
               recordedAt: bill.createdAt,
               billingMonth: bill.billingMonth,
               chargeAmountKsh: bill.amountKsh,
+              includedUnits: 0,
+              extraUnits: bill.unitsConsumed,
+              ratePerUnitKsh: bill.ratePerUnitKsh,
               billId: bill.id,
               dueDate: bill.dueDate,
               status: "charged"
@@ -852,6 +873,9 @@ export class UtilityBillingService {
           recordedAt: item.recordedAt,
           billingMonth: billingMonthFromDate(new Date(item.recordedAt)),
           chargeAmountKsh: 0,
+          includedUnits: 0,
+          extraUnits: 0,
+          ratePerUnitKsh: 0,
           status: "unbilled"
         });
       }

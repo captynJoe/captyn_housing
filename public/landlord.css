@@ -3340,7 +3340,7 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
 .mr-history-list { display: grid; gap: 6px; margin-top: 8px; }
 .mr-history-row {
   display: grid;
-  grid-template-columns: 72px minmax(120px, 1fr) 90px minmax(90px, auto);
+  grid-template-columns: 72px minmax(110px, 0.9fr) minmax(100px, 0.8fr) minmax(180px, 1.5fr);
   gap: 8px;
   align-items: center;
   padding: 7px 9px;
@@ -3348,6 +3348,7 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
   background: rgba(0, 0, 0, 0.14);
   font-size: 0.82rem;
 }
+.mr-history-row span { overflow-wrap: anywhere; }
 .mr-history-row small { grid-column: 2 / -1; color: var(--muted, #8fa89e); }
 @media (max-width: 600px) {
   .mr-history-row { grid-template-columns: 1fr 1fr; }

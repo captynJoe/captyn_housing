@@ -18568,6 +18568,9 @@ async function bootstrap() {
               recordedAt: now.toISOString(),
               billingMonth: currentMonth,
               chargeAmountKsh: 0,
+              includedUnits: 0,
+              extraUnits: 0,
+              ratePerUnitKsh: rates[utilityType] ?? 0,
               status: "unbilled"
             });
             saved.push({
@@ -18671,6 +18674,9 @@ async function bootstrap() {
               recordedAt: now.toISOString(),
               billingMonth: usageMonth,
               chargeAmountKsh: usageBill.amountKsh,
+              includedUnits: charge.includedUnits,
+              extraUnits: charge.extraUnits,
+              ratePerUnitKsh: charge.ratePerUnitKsh,
               billId: usageBill.id,
               dueDate: usageBill.dueDate,
               status: "charged"
@@ -18706,7 +18712,7 @@ async function bootstrap() {
               ? previous.previousReading
               : previous.currentReading
             : Number(entry.previousReading);
-          const { bill } = utilityBillingService.recordUsageReading({
+          const { bill, charge } = utilityBillingService.recordUsageReading({
             utilityType,
             billUtilityType: utilityType,
             buildingId: building.id,
@@ -18736,6 +18742,9 @@ async function bootstrap() {
             recordedAt: now.toISOString(),
             billingMonth: bill.billingMonth,
             chargeAmountKsh: bill.amountKsh,
+            includedUnits: charge.includedUnits,
+            extraUnits: charge.extraUnits,
+            ratePerUnitKsh: charge.ratePerUnitKsh,
             billId: bill.id,
             dueDate: bill.dueDate,
             status: "charged"

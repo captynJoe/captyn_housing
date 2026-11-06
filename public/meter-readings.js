@@ -246,24 +246,26 @@ export function createMeterReadingsView(deps) {
             const preview = previewDraft(row[utility], draft?.[utility], rates[utility], allowanceFor(utility), isBaselineOnly(row));
             previewEl.classList.toggle("is-error", Boolean(preview.error));
             let text = "";
+            const unitLabel = utility === "water" ? "m³" : "kWh";
             if (preview.error) {
                 text = preview.error;
             }
             else if (preview.hasReading && preview.baseline) {
                 text =
                     preview.units != null
-                        ? `${formatFigure(preview.units)} units since last · no charge`
+                        ? `${formatFigure(preview.units)} ${unitLabel} since last read · no charge`
                         : "Starting reading · no charge";
             }
             else if (preview.hasReading && preview.units != null) {
+                const rateLabel = `${deps.formatCurrency(rates[utility] ?? 0)}/${unitLabel}`;
                 if (preview.extraUnits === undefined) {
-                    text = `${formatFigure(preview.units)} units · ${deps.formatCurrency(preview.amountKsh ?? 0)}`;
+                    text = `${formatFigure(preview.units)} ${unitLabel} · all usage billed at ${rateLabel}`;
                 }
                 else if (preview.extraUnits > 0) {
-                    text = `${formatFigure(preview.units)} units · ${formatFigure(preview.extraUnits)} extra · +${deps.formatCurrency(preview.amountKsh ?? 0)}`;
+                    text = `${formatFigure(preview.units)} ${unitLabel} used · ${formatFigure(includedUnits[utility] ?? 0)} ${unitLabel} included · ${formatFigure(preview.extraUnits)} ${unitLabel} extra at ${rateLabel}`;
                 }
                 else {
-                    text = `${formatFigure(preview.units)} units · within allowance`;
+                    text = `${formatFigure(preview.units)} ${unitLabel} used · within ${formatFigure(includedUnits[utility] ?? 0)} ${unitLabel} allowance`;
                 }
             }
             previewEl.textContent = text;
@@ -309,14 +311,14 @@ export function createMeterReadingsView(deps) {
             for (const utility of METER_UTILITIES) {
                 const rate = rates[utility];
                 chips.push(rate != null
-                    ? `<span class="mr-chip is-rate">${UTILITY_LABEL[utility]} ${escapeHtml(deps.formatCurrency(rate))} / unit</span>`
+                    ? `<span class="mr-chip is-rate">${UTILITY_LABEL[utility]} ${escapeHtml(deps.formatCurrency(rate))} / ${utility === "water" ? "m³" : "kWh"}</span>`
                     : `<span class="mr-chip is-due">No ${utility} rate in Setup</span>`);
             }
         }
         else if (readsMeters()) {
             if (billingMode === "combined_charge") {
                 const combined = buildingCharges?.combined;
-                chips.push(`<span class="mr-chip is-rate">Default ${combined != null ? escapeHtml(deps.formatCurrency(combined)) : "not set"} / room</span>`);
+                chips.push(`<span class="mr-chip is-rate">Base utility charge: ${combined != null ? escapeHtml(deps.formatCurrency(combined)) : "not set"} / room</span>`);
             }
             else {
                 const parts = METER_UTILITIES.map((utility) => {
@@ -330,7 +332,7 @@ export function createMeterReadingsView(deps) {
                 const rate = rates[utility];
                 chips.push(included == null
                     ? `<span class="mr-chip is-due">${UTILITY_LABEL[utility]}: set included units in Setup</span>`
-                    : `<span class="mr-chip">${UTILITY_LABEL[utility]} ${escapeHtml(formatFigure(included))} units included · extra ${escapeHtml(deps.formatCurrency(rate ?? 0))}/unit</span>`);
+                    : `<span class="mr-chip">${UTILITY_LABEL[utility]} ${escapeHtml(formatFigure(included))} ${utility === "water" ? "m³" : "kWh"} included · extra ${escapeHtml(deps.formatCurrency(rate ?? 0))}/${utility === "water" ? "m³" : "kWh"}</span>`);
             }
         }
         summaryEl.innerHTML = chips.join("");
@@ -350,12 +352,24 @@ export function createMeterReadingsView(deps) {
         const info = row[utility];
         const draft = drafts.get(row.houseNumber)?.[utility];
         const latestHistory = info.history?.[0];
+        const unitLabel = utility === "water" ? "m³" : "kWh";
         const last = info.lastReading != null
-            ? `Last <b>${escapeHtml(formatFigure(info.lastReading))}</b> · ${escapeHtml(formatShortDate(info.lastReadAt))}${latestHistory?.status === "charged" ? ` · <b>${escapeHtml(deps.formatCurrency(latestHistory.chargeAmountKsh))} charged</b>` : latestHistory ? " · Not charged" : ""}`
+            ? `Last <b>${escapeHtml(formatFigure(info.lastReading))} ${unitLabel}</b> · ${escapeHtml(formatShortDate(info.lastReadAt))}${latestHistory ? ` · ${escapeHtml(formatFigure(latestHistory.unitsConsumed))} ${unitLabel} since prior read` : ""}`
             : "First reading";
         const history = info.history?.length
             ? `<details class="mr-history"><summary>Reading history (${info.history.length})</summary><div class="mr-history-list">${info.history
-                .map((item) => `<div class="mr-history-row"><span>${escapeHtml(formatShortDate(item.recordedAt))}</span><span>${escapeHtml(formatFigure(item.previousReading ?? item.currentReading))} → ${escapeHtml(formatFigure(item.currentReading))}</span><span>${escapeHtml(formatFigure(item.unitsConsumed))} units</span><b>${item.status === "charged" ? escapeHtml(deps.formatCurrency(item.chargeAmountKsh)) : "Not charged"}</b><small>${item.billingMonth ? escapeHtml(formatMonth(item.billingMonth)) : "Reading only"}${item.dueDate ? ` · due ${escapeHtml(formatShortDate(item.dueDate))}` : ""}</small></div>`)
+                .map((item) => {
+                const used = `${formatFigure(item.unitsConsumed)} ${unitLabel} used`;
+                const breakdown = item.status !== "charged"
+                    ? "No charge"
+                    : item.includedUnits > 0
+                        ? `${formatFigure(item.includedUnits)} ${unitLabel} included · ${formatFigure(item.extraUnits)} ${unitLabel} extra at ${deps.formatCurrency(item.ratePerUnitKsh)}/${unitLabel}`
+                        : `All usage billed at ${deps.formatCurrency(item.ratePerUnitKsh)}/${unitLabel}`;
+                const period = item.status === "charged"
+                    ? `Bill period ${item.billingMonth ? formatMonth(item.billingMonth) : "previous month"}`
+                    : "Reading only · no bill";
+                return `<div class="mr-history-row"><span>${escapeHtml(formatShortDate(item.recordedAt))}</span><span>${escapeHtml(formatFigure(item.previousReading ?? item.currentReading))} → ${escapeHtml(formatFigure(item.currentReading))}</span><span>${escapeHtml(used)}</span><span>${escapeHtml(breakdown)}</span><small>${escapeHtml(period)}${item.dueDate ? ` · due ${escapeHtml(formatShortDate(item.dueDate))}` : ""}</small></div>`;
+            })
                 .join("")}</div></details>`
             : `<details class="mr-history"><summary>No reading history yet</summary></details>`;
         const startInput = info.lastReading == null
@@ -480,7 +494,7 @@ export function createMeterReadingsView(deps) {
             const flatValue = draft?.flatAmount ?? (Number(row.flatAmountKsh ?? 0) > 0 ? String(row.flatAmountKsh) : "");
             const flatField = hasFlatAmount()
                 ? `<label class="mr-flat">
-              Monthly amount (KSh)
+              Base monthly charge (KSh)
               <input class="mr-input mr-flat-input" data-path="flatAmount" type="text"
                 inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off"
                 placeholder="${defaultAmount != null ? `Default ${escapeHtml(formatFigure(defaultAmount))}` : "Building default"}"
@@ -598,11 +612,10 @@ export function createMeterReadingsView(deps) {
                 rates = response.rates ?? rates;
             }
             const saved = Array.isArray(response.saved) ? response.saved : [];
-            const totalKsh = saved.reduce((sum, item) => sum + item.amountKsh, 0);
             deps.onStatus(failures.length > 0
                 ? `House No. ${houseNumber}: ${failures.length} item${failures.length === 1 ? "" : "s"} need attention.`
-                : saved.length > 0 && totalKsh > 0
-                    ? `Saved house ${houseNumber} (${deps.formatCurrency(totalKsh)} billed).`
+                : saved.length > 0
+                    ? `Saved house ${houseNumber}; the previous month’s utility bill was updated. See Bills for the full charge breakdown.`
                     : `Saved house ${houseNumber}.`);
             savedThisVisit.add(houseNumber);
             deps.onSaved?.();

@@ -116,6 +116,7 @@ import {
   initializeUtilityMpesaPaymentSchema,
   verifyUtilityMpesaPaymentSchema,
   recordAdminRentPaymentSchema,
+  updateRentPaymentAllocationSchema,
   residentDebtCollectionSchema,
   depositRefundRecordSchema,
   createBuildingSchema,
@@ -979,6 +980,18 @@ function buildAgreementFallbackRentDueDate(
   return new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), dueDay, 0, 0, 0, 0)
   ).toISOString();
+}
+
+function mapDepositAllocationError(error: unknown): { status: number; message: string } | null {
+  if (!(error instanceof Error)) return null;
+  const errors: Record<string, { status: number; message: string }> = {
+    TENANT_DEPOSIT_NOT_CONFIGURED: { status: 400, message: "Set the required tenant deposit before allocating payment to deposit." },
+    ACTIVE_TENANCY_NOT_FOUND: { status: 400, message: "An active tenant is required to allocate payment to deposit." },
+    DEPOSIT_ALLOCATION_EXCEEDS_PAID: { status: 400, message: "The allocation is greater than the deposit amount currently recorded as paid." },
+    DEPOSIT_ALLOCATION_EXCEEDS_REQUIRED: { status: 400, message: "Deposit allocation exceeds the remaining deposit due." },
+    TENANT_AGREEMENT_CHANGED_RETRY: { status: 409, message: "Tenant deposit details changed. Refresh and try again." }
+  };
+  return errors[error.message] ?? null;
 }
 
 function buildManualRentPaymentReference(
@@ -15063,12 +15076,31 @@ async function bootstrap() {
         });
       }
 
-      const outcome = rentLedgerService.unrecordCashPayment({
-        buildingId,
-        houseNumber,
-        paymentId
-      });
+      const paymentEvent = rentLedgerService.listPayments({ buildingId, houseNumber })
+        .find((payment) => payment.id === paymentId);
+      if (!paymentEvent) {
+        return res.status(404).json({ error: "Rent payment not found." });
+      }
+      const depositAmountKsh = Math.max(0, Number(paymentEvent.depositAmountKsh ?? 0));
+      if (depositAmountKsh > 0) {
+        if (!userAccountService) {
+          return res.status(400).json({ error: "Tenant deposit details are unavailable for this house." });
+        }
+        await userAccountService.adjustActiveTenantDepositPaid({ buildingId, houseNumber, deltaKsh: -depositAmountKsh });
+      }
+      let outcome: ReturnType<RentLedgerService["unrecordCashPayment"]> = null;
+      try {
+        outcome = rentLedgerService.unrecordCashPayment({ buildingId, houseNumber, paymentId });
+      } catch (error) {
+        if (depositAmountKsh > 0 && userAccountService) {
+          await userAccountService.adjustActiveTenantDepositPaid({ buildingId, houseNumber, deltaKsh: depositAmountKsh });
+        }
+        throw error;
+      }
       if (!outcome) {
+        if (depositAmountKsh > 0 && userAccountService) {
+          await userAccountService.adjustActiveTenantDepositPaid({ buildingId, houseNumber, deltaKsh: depositAmountKsh });
+        }
         return res.status(404).json({ error: "Rent payment not found." });
       }
 
@@ -15079,6 +15111,8 @@ async function bootstrap() {
           houseNumber: outcome.event.houseNumber,
           paymentId: outcome.event.id,
           amountKsh: outcome.event.amountKsh,
+          rentAmountKsh: outcome.event.rentAmountKsh ?? outcome.event.amountKsh,
+          depositAmountKsh: outcome.event.depositAmountKsh ?? 0,
           provider: outcome.event.provider,
           providerReference: outcome.event.providerReference,
           applied: outcome.applied,
@@ -15087,6 +15121,8 @@ async function bootstrap() {
         role: admin.role
       });
     } catch (error) {
+      const mapped = mapDepositAllocationError(error);
+      if (mapped) return res.status(mapped.status).json({ error: mapped.message });
       if (error instanceof Error && error.message.includes("Only manually recorded")) {
         return res.status(400).json({ error: error.message });
       }
@@ -16302,6 +16338,25 @@ async function bootstrap() {
         }
       }
 
+      const depositAmountKsh = Math.round(Number(parsed.depositAmountKsh ?? 0));
+      if (depositAmountKsh > parsed.amountKsh) {
+        return res.status(400).json({ error: "Deposit allocation cannot exceed the payment amount." });
+      }
+      let depositAgreementState: Awaited<ReturnType<NonNullable<typeof userAccountService>["getActiveTenantAgreement"]>> | null = null;
+      if (depositAmountKsh > 0) {
+        if (!userAccountService) {
+          return res.status(400).json({ error: "Tenant deposit details are unavailable for this house." });
+        }
+        depositAgreementState = await userAccountService.getActiveTenantAgreement({ buildingId, houseNumber });
+        const agreement = depositAgreementState.agreement;
+        if (!depositAgreementState.hasActiveResident || agreement?.depositKsh == null) {
+          return res.status(400).json({ error: "Set the tenant's required deposit before allocating a payment to deposit." });
+        }
+        if (Number(agreement.depositPaidKsh ?? 0) + depositAmountKsh > Number(agreement.depositKsh)) {
+          return res.status(400).json({ error: "Deposit allocation exceeds the remaining deposit due." });
+        }
+      }
+
       const buildingPaymentProfile = paymentProfileService.resolveForBuilding(
         buildingId,
         "/api/payments/mpesa/rent-callback"
@@ -16310,6 +16365,7 @@ async function bootstrap() {
         buildingId,
         houseNumber,
         amountKsh: parsed.amountKsh,
+        depositAmountKsh,
         provider: parsed.provider,
         providerReference,
         phoneNumber: parsed.phoneNumber,
@@ -16320,6 +16376,19 @@ async function bootstrap() {
         paymentProfileName: buildingPaymentProfile.publicProfile?.name,
         paymentAccountReference: buildingPaymentProfile.assignment.accountReference
       });
+
+      if (outcome.created && depositAmountKsh > 0 && userAccountService) {
+        try {
+          await userAccountService.adjustActiveTenantDepositPaid({ buildingId, houseNumber, deltaKsh: depositAmountKsh });
+        } catch (error) {
+          rentLedgerService.updateDepositAllocation({ buildingId, houseNumber, paymentId: outcome.event.id, depositAmountKsh: 0 });
+          await persistRentLedgerStateNow();
+          throw error;
+        }
+      }
+      if (!outcome.created && Number(outcome.event.depositAmountKsh ?? 0) !== depositAmountKsh) {
+        return res.status(409).json({ error: "This reference is already recorded with a different rent/deposit split." });
+      }
 
       const providerLabel =
         parsed.provider === "mpesa"
@@ -16333,7 +16402,7 @@ async function bootstrap() {
       userSupportService.enqueueSystemNotifications(buildingId, houseNumber, [
         {
           title: "Rent Payment Received",
-          message: `${providerLabel} payment ${outcome.event.providerReference} of KSh ${outcome.event.amountKsh.toLocaleString("en-US")} has been posted.`,
+          message: `${providerLabel} receipt ${outcome.event.providerReference} of KSh ${outcome.event.amountKsh.toLocaleString("en-US")} recorded: KSh ${(outcome.event.rentAmountKsh ?? outcome.event.amountKsh).toLocaleString("en-US")} rent and KSh ${(outcome.event.depositAmountKsh ?? 0).toLocaleString("en-US")} deposit.`,
           level: "success",
           source: "rent",
           dedupeKey: `rent-payment-${outcome.event.providerReference}`
@@ -16345,7 +16414,7 @@ async function bootstrap() {
         buildingId,
         houseNumber,
         action: "rent.payment.recorded",
-        summary: `${providerLabel} rent payment of KSh ${outcome.event.amountKsh.toLocaleString("en-US")} recorded.`,
+        summary: `${providerLabel} receipt of KSh ${outcome.event.amountKsh.toLocaleString("en-US")} recorded: KSh ${(outcome.event.rentAmountKsh ?? outcome.event.amountKsh).toLocaleString("en-US")} rent and KSh ${(outcome.event.depositAmountKsh ?? 0).toLocaleString("en-US")} deposit.`,
         actor: actorFromLandlordContext(context),
         metadata: {
           paymentId: outcome.event.id,
@@ -16361,7 +16430,7 @@ async function bootstrap() {
         context.role === "caretaker" ? await store.getBuilding(buildingId) : null;
       await enqueueOwnerNotificationForManagementAction(context, {
         title: "Rent Payment Recorded",
-        message: `${actorFromLandlordContext(context).name || "House manager"} recorded ${providerLabel} rent of KSh ${outcome.event.amountKsh.toLocaleString("en-US")} for ${notificationBuilding?.name ?? buildingId} house ${houseNumber}.`,
+        message: `${actorFromLandlordContext(context).name || "House manager"} recorded a ${providerLabel} receipt of KSh ${outcome.event.amountKsh.toLocaleString("en-US")} for ${notificationBuilding?.name ?? buildingId} house ${houseNumber}: KSh ${(outcome.event.rentAmountKsh ?? outcome.event.amountKsh).toLocaleString("en-US")} rent and KSh ${(outcome.event.depositAmountKsh ?? 0).toLocaleString("en-US")} deposit.`,
         level: "success",
         action: "rent.payment.recorded",
         buildingId,
@@ -16383,6 +16452,8 @@ async function bootstrap() {
           buildingId: outcome.event.buildingId,
           houseNumber: outcome.event.houseNumber,
           amountKsh: outcome.event.amountKsh,
+          rentAmountKsh: outcome.event.rentAmountKsh ?? outcome.event.amountKsh,
+          depositAmountKsh: outcome.event.depositAmountKsh ?? 0,
           provider: outcome.event.provider,
           providerReference: outcome.event.providerReference,
           paidAt: outcome.event.paidAt,
@@ -16392,9 +16463,88 @@ async function bootstrap() {
         role: context.role
       });
     } catch (error) {
+      const mapped = mapDepositAllocationError(error);
+      if (mapped) return res.status(mapped.status).json({ error: mapped.message });
       return next(error);
     }
   });
+
+  app.patch(
+    "/api/landlord/rent/:houseNumber/payments/:paymentId/allocation",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) return;
+        if (context.role === "caretaker") {
+          return res.status(403).json({ error: "House manager accounts cannot change payment allocations." });
+        }
+        const { houseNumber } = houseNumberQuerySchema.parse({ houseNumber: req.params.houseNumber });
+        const paymentId = String(req.params.paymentId ?? "").trim();
+        const parsed = updateRentPaymentAllocationSchema.parse(req.body);
+        const buildingId = typeof req.body?.buildingId === "string"
+          ? req.body.buildingId
+          : typeof req.query.buildingId === "string" ? req.query.buildingId : "";
+        if (!paymentId || !buildingId.trim()) {
+          return res.status(400).json({ error: "Building and payment details are required." });
+        }
+        if (!(await canManageBuildingFromLandlordContext(context, buildingId))) {
+          return res.status(403).json({ error: "Building access denied" });
+        }
+        const previousEvent = rentLedgerService.listPayments({ buildingId, houseNumber })
+          .find((payment) => payment.id === paymentId);
+        if (!previousEvent) return res.status(404).json({ error: "Rent payment not found." });
+        if (parsed.depositAmountKsh > previousEvent.amountKsh) {
+          return res.status(400).json({ error: "Deposit allocation cannot exceed the payment amount." });
+        }
+        const previousDepositAmountKsh = Math.max(0, Number(previousEvent.depositAmountKsh ?? 0));
+        const depositDeltaKsh = parsed.depositAmountKsh - previousDepositAmountKsh;
+        if (depositDeltaKsh !== 0 && !userAccountService) {
+          return res.status(400).json({ error: "Tenant deposit details are unavailable for this house." });
+        }
+        if (depositDeltaKsh !== 0) {
+          await userAccountService!.adjustActiveTenantDepositPaid({ buildingId, houseNumber, deltaKsh: depositDeltaKsh });
+        }
+        let outcome: ReturnType<RentLedgerService["updateDepositAllocation"]> = null;
+        try {
+          outcome = rentLedgerService.updateDepositAllocation({
+            buildingId,
+            houseNumber,
+            paymentId,
+            depositAmountKsh: parsed.depositAmountKsh
+          });
+          if (!outcome) throw new Error("Rent payment not found.");
+        } catch (error) {
+          if (depositDeltaKsh !== 0) {
+            await userAccountService!.adjustActiveTenantDepositPaid({ buildingId, houseNumber, deltaKsh: -depositDeltaKsh });
+          }
+          throw error;
+        }
+        await persistRentLedgerStateNow();
+        await recordRoomAccountAuditEvent({
+          buildingId,
+          houseNumber,
+          action: "rent.payment.allocation.updated",
+          summary: `Payment allocation updated: KSh ${outcome.event.rentAmountKsh ?? outcome.event.amountKsh} to rent and KSh ${outcome.event.depositAmountKsh ?? 0} to deposit.`,
+          actor: actorFromLandlordContext(context),
+          metadata: {
+            paymentId,
+            provider: outcome.event.provider,
+            providerReference: outcome.event.providerReference,
+            receivedAmountKsh: outcome.event.amountKsh,
+            previousRentAmountKsh: previousEvent.rentAmountKsh ?? previousEvent.amountKsh,
+            previousDepositAmountKsh,
+            rentAmountKsh: outcome.event.rentAmountKsh ?? outcome.event.amountKsh,
+            depositAmountKsh: outcome.event.depositAmountKsh ?? 0
+          }
+        });
+        return res.json({ data: outcome.event, role: context.role });
+      } catch (error) {
+        const mapped = mapDepositAllocationError(error);
+        if (mapped) return res.status(mapped.status).json({ error: mapped.message });
+        return next(error);
+      }
+    }
+  );
 
   app.patch("/api/landlord/rent/:houseNumber/payments/:paymentId", async (req, res, next) => {
     try {
@@ -16607,12 +16757,31 @@ async function bootstrap() {
           return res.status(403).json({ error: "Building access denied" });
         }
 
-        const outcome = rentLedgerService.unrecordCashPayment({
-          buildingId,
-          houseNumber,
-          paymentId
-        });
+        const paymentEvent = rentLedgerService.listPayments({ buildingId, houseNumber })
+          .find((payment) => payment.id === paymentId);
+        if (!paymentEvent) {
+          return res.status(404).json({ error: "Rent payment not found." });
+        }
+        const depositAmountKsh = Math.max(0, Number(paymentEvent.depositAmountKsh ?? 0));
+        if (depositAmountKsh > 0) {
+          if (!userAccountService) {
+            return res.status(400).json({ error: "Tenant deposit details are unavailable for this house." });
+          }
+          await userAccountService.adjustActiveTenantDepositPaid({ buildingId, houseNumber, deltaKsh: -depositAmountKsh });
+        }
+        let outcome: ReturnType<RentLedgerService["unrecordCashPayment"]> = null;
+        try {
+          outcome = rentLedgerService.unrecordCashPayment({ buildingId, houseNumber, paymentId });
+        } catch (error) {
+          if (depositAmountKsh > 0 && userAccountService) {
+            await userAccountService.adjustActiveTenantDepositPaid({ buildingId, houseNumber, deltaKsh: depositAmountKsh });
+          }
+          throw error;
+        }
         if (!outcome) {
+          if (depositAmountKsh > 0 && userAccountService) {
+            await userAccountService.adjustActiveTenantDepositPaid({ buildingId, houseNumber, deltaKsh: depositAmountKsh });
+          }
           return res.status(404).json({ error: "Rent payment not found." });
         }
 
@@ -16645,6 +16814,8 @@ async function bootstrap() {
           role: context.role
         });
       } catch (error) {
+        const mapped = mapDepositAllocationError(error);
+        if (mapped) return res.status(mapped.status).json({ error: mapped.message });
         if (
           error instanceof Error &&
           error.message.includes("Only manually recorded")

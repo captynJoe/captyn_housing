@@ -799,7 +799,7 @@
               </div>
               <div class="inline-fields compact-fields">
                 <label>
-                  Amount (KSh)
+                  Amount received (KSh)
                   <input id="rent-payment-amount" type="number" min="1" required />
                 </label>
                 <label>
@@ -815,6 +815,13 @@
                   Paid At (optional)
                   <input id="rent-payment-paid-at" type="datetime-local" />
                 </label>
+              </div>
+              <div class="inline-fields compact-fields">
+                <label>
+                  Deposit part (KSh)
+                  <input id="rent-payment-deposit-amount" type="number" min="0" step="1" value="0" />
+                </label>
+                <p id="rent-payment-allocation-help" class="status-text">The remaining amount will be applied to rent.</p>
               </div>
               <label>
                 Reference
@@ -932,7 +939,9 @@
                     <th>Recorded</th>
                     <th>Provider</th>
                     <th>Reference</th>
-                    <th>Amount</th>
+                    <th>Received</th>
+                    <th>Rent Applied</th>
+                    <th>Deposit Applied</th>
                     <th>Paid On</th>
                     <th>Actions</th>
                   </tr>
@@ -1610,7 +1619,7 @@
           </label>
 
           <p class="status-text">
-            Monthly rent sets the recurring amount. Current Balance is what is owed now. Deposit Required, Deposit Paid, and Deposit Due track the tenant agreement; changing rent alone will not add a charge.
+            Monthly rent sets the recurring amount. Current Balance is rent still owed. Deposit Required, Deposit Paid, and Deposit Due track the tenant agreement. For old receipts, split each receipt in Payment Corrections; enter opening balances here only when those receipts are not recorded.
           </p>
           <div class="table-wrap utility-sheet-table-wrap rent-sheet-table-wrap">
             <table class="utility-sheet-table">
@@ -2068,6 +2077,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=0c92fcdfb3"></script>
+    <script type="module" src="/landlord.js?v=e3c1e01183"></script>
   </body>
 </html>

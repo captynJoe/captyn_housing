@@ -376,6 +376,8 @@ const rentPaymentBuildingSelectEl = document.getElementById("rent-payment-buildi
 const rentPaymentHouseEl = document.getElementById("rent-payment-house");
 const rentPaymentMonthEl = document.getElementById("rent-payment-month");
 const rentPaymentAmountEl = document.getElementById("rent-payment-amount");
+const rentPaymentDepositAmountEl = document.getElementById("rent-payment-deposit-amount");
+const rentPaymentAllocationHelpEl = document.getElementById("rent-payment-allocation-help");
 const rentPaymentProviderEl = document.getElementById("rent-payment-provider");
 const rentPaymentPaidAtEl = document.getElementById("rent-payment-paid-at");
 const rentPaymentReferenceEl = document.getElementById("rent-payment-reference");
@@ -9236,8 +9238,14 @@ function canCorrectPayment(item) {
 }
 
 function buildCorrectionActionButtons(item, type) {
+  if (isCaretakerRole()) {
+    return "-";
+  }
   if (!canCorrectPayment(item)) {
-    return normalizePaymentProvider(item?.provider) === "mpesa" ? "M-PESA locked" : "-";
+    if (type !== "rent" || normalizePaymentProvider(item?.provider) !== "mpesa") {
+      return "M-PESA locked";
+    }
+    return `<button type="button" data-action="allocate-rent-payment" data-payment-id="${escapeHtml(item?.id ?? item?.paymentId ?? "")}" data-building-id="${escapeHtml(item?.buildingId ?? "")}" data-house-number="${escapeHtml(item?.houseNumber ?? "")}" data-amount-ksh="${escapeHtml(Number(item?.amountKsh ?? 0))}" data-deposit-amount-ksh="${escapeHtml(Number(item?.depositAmountKsh ?? 0))}">Split rent / deposit</button>`;
   }
 
   const action = type === "rent" ? "rent" : "utility";
@@ -9279,6 +9287,7 @@ function buildCorrectionActionButtons(item, type) {
         data-house-number="${houseNumber}"
         data-amount-ksh="${amountKsh}"${utilityAttribute}
       >Unrecord</button>
+      ${type === "rent" ? `<button type="button" data-action="allocate-rent-payment" data-payment-id="${paymentId}" data-building-id="${buildingId}" data-house-number="${houseNumber}" data-amount-ksh="${amountKsh}" data-deposit-amount-ksh="${escapeHtml(Number(item?.depositAmountKsh ?? 0))}">Split rent / deposit</button>` : ""}
     </div>
   `;
 }
@@ -9296,7 +9305,7 @@ function renderCorrectionRentPayments(rows) {
   const visibleRows = filterCorrectionPaymentRows(rows);
   if (visibleRows.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="9">No rent payments found for the current filters.</td>';
+    row.innerHTML = '<td colspan="11">No rent payments found for the current filters.</td>';
     correctionRentPaymentsBodyEl.append(row);
     return;
   }
@@ -9311,6 +9320,8 @@ function renderCorrectionRentPayments(rows) {
       <td>${escapeHtml(item.provider ?? "-")}</td>
       <td>${escapeHtml(item.providerReference ?? "-")}</td>
       <td>${escapeHtml(formatCurrency(item.amountKsh))}</td>
+      <td>${escapeHtml(formatCurrency(item.rentAmountKsh ?? item.amountKsh))}</td>
+      <td>${escapeHtml(formatCurrency(item.depositAmountKsh ?? 0))}</td>
       <td>${escapeHtml(formatDateTime(item.paidAt))}</td>
       <td>${buildCorrectionActionButtons(item, "rent")}</td>
     `;
@@ -9654,7 +9665,8 @@ async function handleCorrectionPaymentAction(button) {
   const isRent = action.includes("rent");
   const isEdit = action.startsWith("edit-");
   const isUnrecord = action.startsWith("unrecord-");
-  if (!isEdit && !isUnrecord) {
+  const isAllocation = action === "allocate-rent-payment";
+  if (!isEdit && !isUnrecord && !isAllocation) {
     return;
   }
   if (!isRent && !utilityType) {
@@ -9665,7 +9677,28 @@ async function handleCorrectionPaymentAction(button) {
   button.disabled = true;
   clearError();
   try {
-    if (isEdit) {
+    if (isAllocation) {
+      const currentDepositAmount = Math.max(0, Number(button.dataset.depositAmountKsh ?? 0));
+      const raw = window.prompt(
+        `How much of the KSh ${formatCurrency(button.dataset.amountKsh)} receipt was for deposit? The remainder stays allocated to rent.`,
+        String(currentDepositAmount)
+      );
+      if (raw === null) return;
+      const depositAmountKsh = Math.round(Number(raw.trim()));
+      const totalAmountKsh = Math.round(Number(button.dataset.amountKsh ?? 0));
+      if (!Number.isFinite(depositAmountKsh) || depositAmountKsh < 0 || depositAmountKsh > totalAmountKsh) {
+        throw new Error("Deposit allocation must be between zero and the payment amount.");
+      }
+      await requestJson(
+        `/api/landlord/rent/${encodeURIComponent(houseNumber)}/payments/${encodeURIComponent(paymentId)}/allocation`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ buildingId, depositAmountKsh })
+        }
+      );
+      setStatus("Payment allocation saved.");
+    } else if (isEdit) {
       const payload = promptForLandlordPaymentEdit(button);
       if (!payload) {
         return;
@@ -9701,7 +9734,7 @@ async function handleCorrectionPaymentAction(button) {
 
     await Promise.all([loadPaymentCorrections(), loadRentStatus(), loadBills(), loadResidents()]);
   } catch (error) {
-    handleLandlordError(error, isEdit ? "Failed to edit payment." : "Failed to unrecord payment.");
+    handleLandlordError(error, isAllocation ? "Failed to update payment allocation." : isEdit ? "Failed to edit payment." : "Failed to unrecord payment.");
   } finally {
     button.disabled = false;
   }
@@ -10085,6 +10118,7 @@ function createRentPaymentPayload() {
       buildingId,
       billingMonth: toBillingMonth(rentPaymentMonthEl?.value) || undefined,
       amountKsh: Number(rentPaymentAmountEl?.value),
+      depositAmountKsh: Math.max(0, Number(rentPaymentDepositAmountEl?.value ?? 0)),
       provider: String(rentPaymentProviderEl?.value ?? "cash"),
       providerReference: String(rentPaymentReferenceEl?.value ?? "").trim() || undefined,
       paidAt: toIsoFromDateTimeLocal(rentPaymentPaidAtEl?.value) || undefined
@@ -10125,6 +10159,9 @@ function prefillRentPaymentFromStatus(action) {
   }
   if (rentPaymentReferenceEl instanceof HTMLInputElement) {
     rentPaymentReferenceEl.value = "";
+  }
+  if (rentPaymentDepositAmountEl instanceof HTMLInputElement) {
+    rentPaymentDepositAmountEl.value = "0";
   }
   if (rentPaymentDetailsEl instanceof HTMLDetailsElement) {
     rentPaymentDetailsEl.open = true;
@@ -12742,6 +12779,15 @@ rentSheetFormEl?.addEventListener("submit", (event) => {
   })();
 });
 
+rentPaymentAmountEl?.addEventListener("input", updateRentPaymentAllocationHelp);
+rentPaymentDepositAmountEl?.addEventListener("input", updateRentPaymentAllocationHelp);
+function updateRentPaymentAllocationHelp() {
+  if (!(rentPaymentAllocationHelpEl instanceof HTMLElement)) return;
+  const total = Math.max(0, Number(rentPaymentAmountEl?.value ?? 0));
+  const deposit = Math.max(0, Number(rentPaymentDepositAmountEl?.value ?? 0));
+  rentPaymentAllocationHelpEl.textContent = `KSh ${Math.round(Math.max(0, total - deposit))} will be applied to rent; KSh ${Math.round(deposit)} to deposit.`;
+}
+
 rentPaymentFormEl?.addEventListener("submit", (event) => {
   event.preventDefault();
   clearError();
@@ -12752,13 +12798,15 @@ rentPaymentFormEl?.addEventListener("submit", (event) => {
     !rentPayment.buildingId ||
     !rentPayment.houseNumber ||
     !Number.isFinite(rentPayment.payload.amountKsh) ||
-    (requiresReference && !rentPayment.payload.providerReference)
+    (requiresReference && !rentPayment.payload.providerReference) ||
+    !Number.isInteger(rentPayment.payload.depositAmountKsh) ||
+    rentPayment.payload.depositAmountKsh > rentPayment.payload.amountKsh
   ) {
     showError(
-      requiresReference && !rentPayment.payload.providerReference
-        ? `Enter the ${rentPayment.payload.provider} transaction reference to record this payment. Choose cash if no transaction reference is available.`
-        : requiresReference
-          ? "Rent payment requires building, house, and amount."
+      rentPayment.payload.depositAmountKsh > rentPayment.payload.amountKsh
+        ? "Deposit part cannot exceed the amount received."
+        : requiresReference && !rentPayment.payload.providerReference
+          ? `Enter the ${rentPayment.payload.provider} transaction reference to record this payment. Choose cash if no transaction reference is available.`
           : "Rent payment requires building, house, and amount."
     );
     if (requiresReference && !rentPayment.payload.providerReference) {
@@ -12788,6 +12836,7 @@ rentPaymentFormEl?.addEventListener("submit", (event) => {
 
       rentPaymentFormEl.reset();
       rentPaymentProviderEl.value = "cash";
+      updateRentPaymentAllocationHelp();
       state.selectedRentPaymentBuildingId = rentPayment.buildingId;
       syncRentPaymentBuildingOptions();
       setStatus(

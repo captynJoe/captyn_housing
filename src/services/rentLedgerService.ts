@@ -11,6 +11,8 @@ interface RecordRentPaymentInput {
   buildingId: string;
   houseNumber: string;
   amountKsh: number;
+  depositAmountKsh?: number;
+  rentAmountKsh?: number;
   provider: RentPaymentProvider;
   providerReference: string;
   phoneNumber?: string;
@@ -37,6 +39,8 @@ export interface RentPaymentEvent {
   provider: RentPaymentProvider;
   providerReference: string;
   amountKsh: number;
+  depositAmountKsh?: number;
+  rentAmountKsh?: number;
   phoneNumber?: string;
   paymentProfileId?: string;
   paymentProfileName?: string;
@@ -111,6 +115,7 @@ export interface RecordMpesaPaymentResult {
   event: RentPaymentEvent;
   applied: boolean;
   snapshot: RentDueSnapshot | null;
+  created?: boolean;
 }
 
 interface ReferenceIndexEntry {
@@ -134,6 +139,7 @@ interface ReplaceManualRentPaymentInput {
   houseNumber: string;
   paymentId: string;
   amountKsh: number;
+  depositAmountKsh?: number;
   provider: RentPaymentProvider;
   providerReference: string;
   phoneNumber?: string;
@@ -396,7 +402,12 @@ export class RentLedgerService {
                 buildingId: normalizeBuildingId(payment.buildingId ?? buildingId),
                 houseNumber,
                 provider: normalizeRentPaymentProvider(payment.provider),
-                providerReference: normalizeProviderReference(payment.providerReference)
+                providerReference: normalizeProviderReference(payment.providerReference),
+                depositAmountKsh: Math.max(0, Math.round(Number(payment.depositAmountKsh ?? 0))),
+                rentAmountKsh: Math.max(
+                  0,
+                  Math.round(Number(payment.rentAmountKsh ?? payment.amountKsh ?? 0))
+                )
               }))
             : [],
           latePenaltyCharges: Array.isArray(record.latePenaltyCharges)
@@ -437,7 +448,12 @@ export class RentLedgerService {
           buildingId,
           houseNumber,
           provider: normalizeRentPaymentProvider(payment.provider),
-          providerReference: normalizeProviderReference(payment.providerReference)
+          providerReference: normalizeProviderReference(payment.providerReference),
+          depositAmountKsh: Math.max(0, Math.round(Number(payment.depositAmountKsh ?? 0))),
+          rentAmountKsh: Math.max(
+            0,
+            Math.round(Number(payment.rentAmountKsh ?? payment.amountKsh ?? 0))
+          )
         });
         this.pendingPayments.set(key, current);
       }
@@ -649,7 +665,7 @@ export class RentLedgerService {
       }
 
       record.payments.splice(paymentIndex, 1);
-      record.balanceKsh = Math.max(0, Math.round(record.balanceKsh + event.amountKsh));
+      record.balanceKsh = Math.max(0, Math.round(record.balanceKsh + (event.rentAmountKsh ?? event.amountKsh)));
       record.updatedAt = nowIso();
       if (record.note === "Rent cleared by CASH payment event.") {
         record.note = undefined;
@@ -741,6 +757,7 @@ export class RentLedgerService {
         buildingId: input.buildingId,
         houseNumber: input.houseNumber,
         amountKsh: input.amountKsh,
+        depositAmountKsh: input.depositAmountKsh ?? existingEvent.depositAmountKsh,
         provider: input.provider,
         providerReference: input.providerReference,
         phoneNumber: input.phoneNumber ?? existingEvent.phoneNumber,
@@ -766,6 +783,7 @@ export class RentLedgerService {
         buildingId: previousEvent.buildingId,
         houseNumber: previousEvent.houseNumber,
         amountKsh: previousEvent.amountKsh,
+        depositAmountKsh: previousEvent.depositAmountKsh,
         provider: previousEvent.provider,
         providerReference: previousEvent.providerReference,
         phoneNumber: previousEvent.phoneNumber,
@@ -780,6 +798,62 @@ export class RentLedgerService {
       });
       throw error;
     }
+  }
+
+  updateDepositAllocation(input: {
+    buildingId: string;
+    houseNumber: string;
+    paymentId: string;
+    depositAmountKsh: number;
+  }): { previousEvent: RentPaymentEvent; event: RentPaymentEvent; applied: boolean; snapshot: RentDueSnapshot | null } | null {
+    const target = this.findPaymentById(input.buildingId, input.houseNumber, input.paymentId);
+    if (!target) {
+      return null;
+    }
+    const depositAmountKsh = Math.round(Number(input.depositAmountKsh));
+    const paymentAmountKsh = Math.round(Number(target.event.amountKsh));
+    if (!Number.isFinite(depositAmountKsh) || depositAmountKsh < 0 || depositAmountKsh > paymentAmountKsh) {
+      throw new Error("Deposit allocation must be between zero and the payment amount.");
+    }
+    const previousEvent = { ...target.event };
+    const previousRentAmountKsh = Math.max(
+      0,
+      Math.round(Number(target.event.rentAmountKsh ?? paymentAmountKsh))
+    );
+    const rentAmountKsh = paymentAmountKsh - depositAmountKsh;
+    const event = { ...target.event, depositAmountKsh, rentAmountKsh };
+    if (target.applied) {
+      const record = this.resolveRecord(input.buildingId, input.houseNumber);
+      if (!record) {
+        return null;
+      }
+      const index = record.payments.findIndex((item) => item.id === input.paymentId);
+      if (index < 0) {
+        return null;
+      }
+      record.payments[index] = event;
+      this.paymentReferenceIndex.set(normalizeProviderReference(event.providerReference), {
+        event: { ...event },
+        applied: true
+      });
+      record.balanceKsh = Math.max(0, Math.round(record.balanceKsh + previousRentAmountKsh - rentAmountKsh));
+      record.updatedAt = nowIso();
+      this.refreshRecordForBilling(record);
+      this.emitStateChange();
+      return { previousEvent, event: { ...event }, applied: true, snapshot: this.toSnapshot(record) };
+    }
+    const pending = this.pendingPayments.get(ledgerKey(input.buildingId, input.houseNumber));
+    const index = pending?.findIndex((item) => item.id === input.paymentId) ?? -1;
+    if (!pending || index < 0) {
+      return null;
+    }
+    pending[index] = event;
+    this.paymentReferenceIndex.set(normalizeProviderReference(event.providerReference), {
+      event: { ...event },
+      applied: false
+    });
+    this.emitStateChange();
+    return { previousEvent, event: { ...event }, applied: false, snapshot: null };
   }
 
   purgeHouse(buildingId: string, houseNumber: string): boolean {
@@ -944,10 +1018,16 @@ export class RentLedgerService {
       return {
         event: existingReference.event,
         applied: existingReference.applied,
-        snapshot: snapshot ? this.toSnapshot(snapshot) : null
+        snapshot: snapshot ? this.toSnapshot(snapshot) : null,
+        created: false
       };
     }
 
+    const depositAmountKsh = Math.round(Number(input.depositAmountKsh ?? 0));
+    const amountKsh = Math.round(Number(input.amountKsh));
+    if (depositAmountKsh < 0 || depositAmountKsh > amountKsh) {
+      throw new Error("Deposit allocation must be between zero and the payment amount.");
+    }
     const paidAt = input.paidAt ?? nowIso();
     const billingMonth = input.billingMonth ?? billingMonthFromDateTime(paidAt);
     const event: RentPaymentEvent = {
@@ -959,7 +1039,9 @@ export class RentLedgerService {
       tenantName: input.tenantName,
       provider: normalizeRentPaymentProvider(input.provider),
       providerReference: normalizedReference,
-      amountKsh: Math.round(input.amountKsh),
+      amountKsh,
+      depositAmountKsh,
+      rentAmountKsh: amountKsh - depositAmountKsh,
       phoneNumber: input.phoneNumber,
       paymentProfileId: input.paymentProfileId,
       paymentProfileName: input.paymentProfileName,
@@ -977,7 +1059,8 @@ export class RentLedgerService {
       return {
         event,
         applied: false,
-        snapshot: null
+        snapshot: null,
+        created: true
       };
     }
 
@@ -997,7 +1080,8 @@ export class RentLedgerService {
       return {
         event,
         applied: false,
-        snapshot: this.toSnapshot(record)
+        snapshot: this.toSnapshot(record),
+        created: true
       };
     }
 
@@ -1032,7 +1116,8 @@ export class RentLedgerService {
       return {
         event,
         applied: true,
-        snapshot: this.toSnapshot(migratedRecord)
+        snapshot: this.toSnapshot(migratedRecord),
+        created: true
       };
     }
 
@@ -1047,7 +1132,8 @@ export class RentLedgerService {
     return {
       event,
       applied: true,
-      snapshot: this.toSnapshot(record)
+      snapshot: this.toSnapshot(record),
+      created: true
     };
   }
 
@@ -1363,7 +1449,7 @@ export class RentLedgerService {
       buildingId: record.buildingId,
       houseNumber: record.houseNumber
     });
-    record.balanceKsh = Math.max(0, record.balanceKsh - event.amountKsh);
+    record.balanceKsh = Math.max(0, record.balanceKsh - (event.rentAmountKsh ?? event.amountKsh));
     record.updatedAt = nowIso();
 
     if (record.balanceKsh === 0 && !record.note?.trim()) {
@@ -1454,7 +1540,7 @@ export class RentLedgerService {
         ? Math.max(0, currentCycleChargeKsh - currentMonthOutstandingKsh)
         : 0;
     const totalPaidKsh = record.payments.reduce(
-      (sum, payment) => sum + Math.max(0, Number(payment.amountKsh ?? 0)),
+      (sum, payment) => sum + Math.max(0, Number(payment.rentAmountKsh ?? payment.amountKsh ?? 0)),
       0
     );
 

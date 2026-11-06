@@ -2330,6 +2330,48 @@ export class UserAccountService {
     };
   }
 
+  async adjustActiveTenantDepositPaid(input: {
+    buildingId: string;
+    houseNumber: string;
+    deltaKsh: number;
+  }): Promise<number> {
+    const houseNumber = normalizeHouseNumber(input.houseNumber);
+    const tenancy = await this.prisma.tenancy.findFirst({
+      where: {
+        buildingId: input.buildingId,
+        active: true,
+        unit: { houseNumber, isActive: true }
+      },
+      select: { id: true },
+      orderBy: { createdAt: "desc" }
+    });
+    if (!tenancy) {
+      throw new Error("ACTIVE_TENANCY_NOT_FOUND");
+    }
+    const agreement = await this.prisma.tenantAgreement.findUnique({
+      where: { tenancyId: tenancy.id },
+      select: { depositKsh: true, depositPaidKsh: true, updatedAt: true }
+    });
+    if (!agreement || agreement.depositKsh == null) {
+      throw new Error("TENANT_DEPOSIT_NOT_CONFIGURED");
+    }
+    const nextPaidKsh = Math.round(Number(agreement.depositPaidKsh ?? 0) + input.deltaKsh);
+    if (nextPaidKsh < 0) {
+      throw new Error("DEPOSIT_ALLOCATION_EXCEEDS_PAID");
+    }
+    if (nextPaidKsh > agreement.depositKsh) {
+      throw new Error("DEPOSIT_ALLOCATION_EXCEEDS_REQUIRED");
+    }
+    const updated = await this.prisma.tenantAgreement.updateMany({
+      where: { tenancyId: tenancy.id, updatedAt: agreement.updatedAt },
+      data: { depositPaidKsh: nextPaidKsh }
+    });
+    if (updated.count !== 1) {
+      throw new Error("TENANT_AGREEMENT_CHANGED_RETRY");
+    }
+    return nextPaidKsh;
+  }
+
   async upsertActiveTenantAgreement(input: {
     buildingId: string;
     houseNumber: string;

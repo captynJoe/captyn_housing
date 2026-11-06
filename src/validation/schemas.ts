@@ -1268,12 +1268,17 @@ export const createRentPaymentSchema = z.object({
 });
 
 export const recordAdminRentPaymentSchema = z.object({
-  amountKsh: z.number().positive().max(500_000),
+  amountKsh: z.number().int().positive().max(500_000),
+  depositAmountKsh: z.number().int().min(0).max(500_000).optional(),
   provider: utilityPaymentProviderSchema.default("cash"),
   providerReference: nonEmptyString.max(120).optional(),
   billingMonth: billingMonthSchema.optional(),
   paidAt: z.string().datetime().optional(),
   phoneNumber: kenyaPhoneSchema.optional()
+});
+
+export const updateRentPaymentAllocationSchema = z.object({
+  depositAmountKsh: z.number().int().min(0).max(500_000)
 });
 
 export const residentDebtCollectionSchema = z.object({

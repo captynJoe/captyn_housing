@@ -333,6 +333,7 @@ const refreshLandlordTicketsBtnEl = document.getElementById(
 );
 const rentStatusBodyEl = document.getElementById("rent-status-body");
 const refreshRentStatusBtnEl = document.getElementById("refresh-rent-status");
+const rentPaymentCorrectionsBtnEl = document.getElementById("rent-payment-corrections-btn");
 const collectionsReportBuildingEl = document.getElementById("collections-report-building");
 const collectionsReportFromEl = document.getElementById("collections-report-from");
 const collectionsReportToEl = document.getElementById("collections-report-to");
@@ -12878,6 +12879,10 @@ refreshRentStatusBtnEl.addEventListener("click", () => {
   void loadRentStatus().catch((error) => {
     handleLandlordError(error, "Unable to refresh rent status.");
   });
+});
+
+rentPaymentCorrectionsBtnEl?.addEventListener("click", () => {
+  scrollToLandlordSection("payment-corrections-section");
 });
 
 rentStatusBodyEl?.addEventListener("click", (event) => {

@@ -188,6 +188,25 @@ const balancesView = createBalancesView({
 const landlordViewPanels = [
   ...document.querySelectorAll("[data-landlord-view-panel]")
 ];
+const meterWorkspaceButtons = [
+  ...document.querySelectorAll<HTMLButtonElement>("[data-meter-workspace]")
+];
+let activeMeterWorkspace = "readings";
+function setActiveMeterWorkspace(next) {
+  activeMeterWorkspace = ["readings", "bills", "payments"].includes(next) ? next : "readings";
+  document.querySelectorAll<HTMLElement>("[data-meter-panel]").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.meterPanel !== activeMeterWorkspace);
+  });
+  meterWorkspaceButtons.forEach((button) => {
+    const selected = button.dataset.meterWorkspace === activeMeterWorkspace;
+    button.setAttribute("aria-selected", String(selected));
+    button.classList.toggle("active", selected);
+  });
+}
+meterWorkspaceButtons.forEach((button) => {
+  button.addEventListener("click", () => setActiveMeterWorkspace(button.dataset.meterWorkspace));
+});
+setActiveMeterWorkspace(activeMeterWorkspace);
 const landlordFocusTargetButtons = [
   ...document.querySelectorAll("[data-landlord-focus-target-view]")
 ];
@@ -1526,6 +1545,10 @@ function setActiveLandlordView(nextView, options = {}) {
     void loadAutomaticMessageRules(getSelectedSettingsBuildingId()).catch((error) => {
       handleLandlordError(error, "Unable to load automatic SMS.");
     });
+  }
+
+  if (targetView === "meters") {
+    setActiveMeterWorkspace(activeMeterWorkspace);
   }
 
   if (targetView === "meters" && (previousView !== "meters" || options.forceLoad) && !options.skipLoad) {

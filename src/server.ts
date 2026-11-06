@@ -18072,6 +18072,11 @@ async function bootstrap() {
         .listLatestMeterReadings(building.id)
         .map((item) => [`${item.utilityType}:${normalizeHouseNumber(item.houseNumber)}`, item])
     );
+    const historyByKey = new Map<string, ReturnType<typeof utilityBillingService.listMeterReadingHistory>>();
+    for (const item of utilityBillingService.listMeterReadingHistory(building.id)) {
+      const key = `${item.utilityType}:${item.houseNumber}`;
+      historyByKey.set(key, [...(historyByKey.get(key) ?? []), item]);
+    }
 
     const describeMeter = (
       utilityType: "water" | "electricity",
@@ -18084,6 +18089,7 @@ async function bootstrap() {
         lastReading: latest ? latest.currentReading : null,
         lastReadAt: latest?.recordedAt ?? null,
         lastBillingMonth: latest?.billingMonth ?? null,
+        history: historyByKey.get(`${utilityType}:${normalizeHouseNumber(houseNumber)}`) ?? [],
         ...getMeterReadingDueInfo(latest?.recordedAt, now)
       };
     };
@@ -18398,6 +18404,7 @@ async function bootstrap() {
 
       return res.json({
         data: await buildMeterReadingRows(building),
+        readingHistory: utilityBillingService.listMeterReadingHistory(building.id),
         building: { id: building.id, name: building.name },
         billingMode: configuration?.utilityBillingMode ?? "metered",
         buildingCharges: {
@@ -18439,7 +18446,6 @@ async function bootstrap() {
           .listLatestMeterReadings(building.id)
           .map((item) => [`${item.utilityType}:${normalizeHouseNumber(item.houseNumber)}`, item])
       );
-
       await refreshRoomBillingHoldCache();
       const saved: Array<{
         houseNumber: string;
@@ -18550,11 +18556,25 @@ async function bootstrap() {
               reading: entry.reading,
               recordedAt: now.toISOString()
             });
+            const baselineUnits = previous ? Number((entry.reading - previous.currentReading).toFixed(3)) : 0;
+            utilityBillingService.recordMeterReadingEvent({
+              utilityType,
+              buildingId: building.id,
+              houseNumber,
+              meterNumber: utilityBillingService.getMeter(utilityType, building.id, houseNumber)?.meterNumber ?? "",
+              previousReading: previous?.currentReading ?? null,
+              currentReading: entry.reading,
+              unitsConsumed: baselineUnits,
+              recordedAt: now.toISOString(),
+              billingMonth: currentMonth,
+              chargeAmountKsh: 0,
+              status: "unbilled"
+            });
             saved.push({
               houseNumber,
               utilityType,
               billingMonth: currentMonth,
-              unitsConsumed: previous ? Number((entry.reading - previous.currentReading).toFixed(3)) : 0,
+              unitsConsumed: baselineUnits,
               amountKsh: 0
             });
             continue;
@@ -18579,7 +18599,9 @@ async function bootstrap() {
               continue;
             }
 
-            const usageMonth = billingMonthFromDate(now);
+            const usageMonth = billingMonthFromDate(
+              new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))
+            );
             const billUtilityType = billingMode === "combined_charge" ? "water" : utilityType;
             if (
               isRoomBillingHeld({
@@ -18615,7 +18637,7 @@ async function bootstrap() {
                   )
                 : getUtilityFixedChargeDefaultForHouse(utilityType, building.id, houseNumber);
 
-            const { charge } = utilityBillingService.recordUsageReading({
+            const { charge, bill: usageBill } = utilityBillingService.recordUsageReading({
               utilityType,
               billUtilityType,
               buildingId: building.id,
@@ -18638,21 +18660,33 @@ async function bootstrap() {
                     }
                   : undefined
             });
+            utilityBillingService.recordMeterReadingEvent({
+              utilityType,
+              buildingId: building.id,
+              houseNumber,
+              meterNumber: utilityBillingService.getMeter(utilityType, building.id, houseNumber)?.meterNumber ?? "",
+              previousReading: startReading,
+              currentReading: entry.reading,
+              unitsConsumed: charge.unitsConsumed,
+              recordedAt: now.toISOString(),
+              billingMonth: usageMonth,
+              chargeAmountKsh: usageBill.amountKsh,
+              billId: usageBill.id,
+              dueDate: usageBill.dueDate,
+              status: "charged"
+            });
             saved.push({
               houseNumber,
               utilityType,
               billingMonth: usageMonth,
               unitsConsumed: charge.unitsConsumed,
-              amountKsh: charge.amountKsh
+              amountKsh: usageBill.amountKsh
             });
             continue;
           }
 
-          const billingMonth = utilityBillingService.resolveReadingBillMonth(
-            utilityType,
-            building.id,
-            houseNumber,
-            now
+          const billingMonth = billingMonthFromDate(
+            new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))
           );
           if (
             isRoomBillingHeld({
@@ -18663,25 +18697,49 @@ async function bootstrap() {
               billingMonth
             })
           ) {
-            fail("Utility billing is paused for this house.");
+            fail("Utility billing is paused for this house and month.");
             continue;
           }
 
-          const input = createUtilityBillSchema.parse(
-            resolveUtilityBillInput(utilityType, building.id, houseNumber, {
-              billingMonth,
-              previousReading: previous ? previous.currentReading : entry.previousReading,
-              currentReading: entry.reading,
-              dueDate,
-              note: "Meter reading recorded."
-            })
-          );
-          const bill = utilityBillingService.createBill(
+          const startReading = previous
+            ? previous.billingMonth === billingMonth
+              ? previous.previousReading
+              : previous.currentReading
+            : Number(entry.previousReading);
+          const { bill } = utilityBillingService.recordUsageReading({
             utilityType,
-            building.id,
+            billUtilityType: utilityType,
+            buildingId: building.id,
             houseNumber,
-            input
-          );
+            billingMonth,
+            previousReading: startReading,
+            currentReading: entry.reading,
+            includedUnits: 0,
+            ratePerUnitKsh: rates[utilityType] ?? 0,
+            recordedAt: now.toISOString(),
+            createBillIfMissing: {
+              fixedChargeKsh: 0,
+              dueDate,
+              previousReading: startReading,
+              currentReading: entry.reading,
+              ratePerUnitKsh: rates[utilityType] ?? 0
+            }
+          });
+          utilityBillingService.recordMeterReadingEvent({
+            utilityType,
+            buildingId: building.id,
+            houseNumber,
+            meterNumber: bill.meterNumber,
+            previousReading: bill.previousReading,
+            currentReading: entry.reading,
+            unitsConsumed: bill.unitsConsumed,
+            recordedAt: now.toISOString(),
+            billingMonth: bill.billingMonth,
+            chargeAmountKsh: bill.amountKsh,
+            billId: bill.id,
+            dueDate: bill.dueDate,
+            status: "charged"
+          });
           saved.push({
             houseNumber,
             utilityType,
@@ -18722,6 +18780,7 @@ async function bootstrap() {
 
       return res.status(saved.length > 0 ? 201 : 200).json({
         data: await buildMeterReadingRows(building),
+        readingHistory: utilityBillingService.listMeterReadingHistory(building.id),
         saved,
         failures,
         meterNumbersUpdated,

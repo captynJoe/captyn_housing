@@ -6,6 +6,18 @@ export type MeterDueStatus = "no_reading" | "ok" | "due_soon" | "overdue";
 
 export const METER_UTILITIES: MeterUtility[] = ["water", "electricity"];
 
+export interface MeterReadingHistoryItem {
+  id: string;
+  previousReading: number | null;
+  currentReading: number;
+  unitsConsumed: number;
+  recordedAt: string;
+  billingMonth?: string;
+  chargeAmountKsh: number;
+  dueDate?: string;
+  status: "charged" | "unbilled";
+}
+
 export interface MeterInfo {
   meterNumber: string;
   lastReading: number | null;
@@ -13,6 +25,7 @@ export interface MeterInfo {
   status: MeterDueStatus;
   nextDueAt?: string;
   daysUntilDue?: number;
+  history?: MeterReadingHistoryItem[];
 }
 
 export interface MeterReadingRow {
@@ -543,12 +556,18 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
   function renderUtilityBlock(row: MeterReadingRow, utility: MeterUtility) {
     const info = row[utility];
     const draft = drafts.get(row.houseNumber)?.[utility];
+    const latestHistory = info.history?.[0];
     const last =
       info.lastReading != null
         ? `Last <b>${escapeHtml(formatFigure(info.lastReading))}</b> · ${escapeHtml(
             formatShortDate(info.lastReadAt)
-          )}`
+          )}${latestHistory?.status === "charged" ? ` · <b>${escapeHtml(deps.formatCurrency(latestHistory.chargeAmountKsh))} charged</b>` : latestHistory ? " · Not charged" : ""}`
         : "First reading";
+    const history = info.history?.length
+      ? `<details class="mr-history"><summary>Reading history (${info.history.length})</summary><div class="mr-history-list">${info.history
+          .map((item) => `<div class="mr-history-row"><span>${escapeHtml(formatShortDate(item.recordedAt))}</span><span>${escapeHtml(formatFigure(item.previousReading ?? item.currentReading))} → ${escapeHtml(formatFigure(item.currentReading))}</span><span>${escapeHtml(formatFigure(item.unitsConsumed))} units</span><b>${item.status === "charged" ? escapeHtml(deps.formatCurrency(item.chargeAmountKsh)) : "Not charged"}</b><small>${item.billingMonth ? escapeHtml(formatMonth(item.billingMonth)) : "Reading only"}${item.dueDate ? ` · due ${escapeHtml(formatShortDate(item.dueDate))}` : ""}</small></div>`)
+          .join("")}</div></details>`
+      : `<details class="mr-history"><summary>No reading history yet</summary></details>`;
     const startInput =
       info.lastReading == null
         ? `<input class="mr-input mr-input-start" data-path="${utility}.previousReading"
@@ -573,6 +592,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
           <span class="mr-preview" data-preview="${utility}" aria-live="polite"></span>
           <span class="mr-meter">${renderMeterNumber(row.houseNumber, utility, info)}</span>
         </div>
+        ${history}
       </div>`;
     }
     return `<div class="mr-utility is-${info.status}">
@@ -593,6 +613,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
         <span class="mr-preview" data-preview="${utility}" aria-live="polite"></span>
         <span class="mr-meter">${renderMeterNumber(row.houseNumber, utility, info)}</span>
       </div>
+      ${history}
     </div>`;
   }
 

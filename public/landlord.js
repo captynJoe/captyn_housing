@@ -1,7 +1,7 @@
 import { initResponsiveTables } from "./mobile-table.js?v=3e39d752dc";
 import { notifyError, notifyStatus } from "./notifications.js?v=62acc56b74";
 import { applyHouseSheetImport, buildXlsx, describeHouseSheetPlan, houseSheetRowsFromRegistry, houseSheetTable, parseHouseSheet, prepareHouseSheetImport, readSpreadsheet } from "./house-sheet.js?v=e453a69103";
-import { createMeterReadingsView } from "./meter-readings.js?v=dc715ba264";
+import { createMeterReadingsView } from "./meter-readings.js?v=313b2a3e39";
 import { createBalancesView } from "./balances-view.js?v=59a3d1aef4";
 import { createUploadedImageGallery, renderSelectedImagePreviews, uploadImageFiles, validateImageFiles } from "./media-upload.js?v=549f6d7675";
 import { applyDocumentBranding, getLandlordPortalTitle, getLandlordShellBrand } from "./portal-branding.js?v=9b283694b2";
@@ -123,6 +123,25 @@ const balancesView = createBalancesView({
 const landlordViewPanels = [
     ...document.querySelectorAll("[data-landlord-view-panel]")
 ];
+const meterWorkspaceButtons = [
+    ...document.querySelectorAll("[data-meter-workspace]")
+];
+let activeMeterWorkspace = "readings";
+function setActiveMeterWorkspace(next) {
+    activeMeterWorkspace = ["readings", "bills", "payments"].includes(next) ? next : "readings";
+    document.querySelectorAll("[data-meter-panel]").forEach((panel) => {
+        panel.classList.toggle("hidden", panel.dataset.meterPanel !== activeMeterWorkspace);
+    });
+    meterWorkspaceButtons.forEach((button) => {
+        const selected = button.dataset.meterWorkspace === activeMeterWorkspace;
+        button.setAttribute("aria-selected", String(selected));
+        button.classList.toggle("active", selected);
+    });
+}
+meterWorkspaceButtons.forEach((button) => {
+    button.addEventListener("click", () => setActiveMeterWorkspace(button.dataset.meterWorkspace));
+});
+setActiveMeterWorkspace(activeMeterWorkspace);
 const landlordFocusTargetButtons = [
     ...document.querySelectorAll("[data-landlord-focus-target-view]")
 ];
@@ -1149,6 +1168,9 @@ function setActiveLandlordView(nextView, options = {}) {
         void loadAutomaticMessageRules(getSelectedSettingsBuildingId()).catch((error) => {
             handleLandlordError(error, "Unable to load automatic SMS.");
         });
+    }
+    if (targetView === "meters") {
+        setActiveMeterWorkspace(activeMeterWorkspace);
     }
     if (targetView === "meters" && (previousView !== "meters" || options.forceLoad) && !options.skipLoad) {
         void loadMetersView().catch((error) => {

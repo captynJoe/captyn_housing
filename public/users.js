@@ -2746,13 +2746,16 @@ function renderReports(reports) {
         const detailsEl = fragment.querySelector(".item-details");
         const guidanceEl = fragment.querySelector(".item-guidance");
         fragment.querySelector(".item-title").textContent = report.title;
-        chipEl.textContent = report.status.replace("_", " ");
+        const statusLabels = {
+            open: "Open",
+            triaged: "Received",
+            in_progress: "In progress",
+            resolved: "Resolved"
+        };
+        chipEl.textContent = statusLabels[report.status] || "Open";
         chipEl.classList.add(`chip-${report.status}`);
-        const slaLabel = report.slaBreached
-            ? `SLA breached (${report.slaHours}h)`
-            : `SLA ${report.slaHours}h (${report.slaState.replace("_", " ")})`;
         fragment.querySelector(".item-meta").textContent =
-            `${report.queue} queue • ${formatDateTime(report.createdAt)} • ${slaLabel}`;
+            `Submitted ${formatDateTime(report.createdAt)}`;
         detailsEl.textContent = report.details;
         const guidance = report.status === "resolved"
             ? "Resolved. If anything is still pending, open a new request."

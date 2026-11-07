@@ -13265,6 +13265,7 @@ async function bootstrap() {
       let utilityLatestReadings: ReturnType<
         typeof utilityBillingService.listLatestReadingsForHouse
       > = [];
+      let utilityReadingHistory: ReturnType<typeof utilityBillingService.listMeterReadingHistory> = [];
       let utilitiesMessage: string | undefined;
       let utilityPayments = [] as ReturnType<typeof utilityBillingService.listPayments>;
       let utilityPaymentsMessage: string | undefined;
@@ -13336,6 +13337,11 @@ async function bootstrap() {
           session.buildingId,
           session.houseNumber
         );
+        utilityReadingHistory = utilityBillingService.listMeterReadingHistory(
+          session.buildingId,
+          session.houseNumber,
+          500
+        );
         utilitiesMessage =
           utilityBills.length > 0
             ? undefined
@@ -13372,6 +13378,7 @@ async function bootstrap() {
           utilityBills,
           utilityMeters,
           utilityLatestReadings,
+          utilityReadingHistory,
           utilityPayments,
           residentPaymentReports: [...residentPaymentReports.values()]
             .filter((item) => item.residentUserId === session.userId)

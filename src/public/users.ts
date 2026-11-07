@@ -245,6 +245,7 @@ const state = {
   utilityBills: [],
   utilityMeters: [],
   utilityLatestReadings: [],
+  utilityReadingHistory: [],
   rentPayments: [],
   utilityPayments: [],
   paymentAccess: { ...DEFAULT_PAYMENT_ACCESS },
@@ -3546,7 +3547,93 @@ function renderRentDue(rentDue, fallbackMessage) {
   updateRentPaymentGuidance();
 }
 
-function renderUtilityBills(bills, meters = [], fallbackMessage, latestReadings = []) {
+function appendUtilityChargeBreakdown(container, bill) {
+  const breakdown = document.createElement("details");
+  breakdown.className = "utility-charge-breakdown";
+  const summary = document.createElement("summary");
+  summary.textContent = "How this bill was calculated";
+  const list = document.createElement("dl");
+  list.className = "utility-charge-breakdown-list";
+  const addLine = (label, value) => {
+    const row = document.createElement("div");
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const description = document.createElement("dd");
+    description.textContent = value;
+    row.append(term, description);
+    list.append(row);
+  };
+
+  const charges = Array.isArray(bill.usageCharges) ? bill.usageCharges : [];
+  if (charges.length > 0) {
+    charges.forEach((charge, index) => {
+      const title = document.createElement("div");
+      title.className = "utility-charge-breakdown-heading";
+      title.textContent = `${utilityLabel(charge.utilityType)} reading${charges.length > 1 ? ` ${index + 1}` : ""}`;
+      list.append(title);
+      addLine("Meter reading", `${formatReadingValue(charge.previousReading)} → ${formatReadingValue(charge.currentReading)}`);
+      addLine("Usage", `${formatReadingValue(charge.unitsConsumed)} units`);
+      addLine("Included", `${formatReadingValue(charge.includedUnits)} units`);
+      addLine("Extra usage", `${formatReadingValue(charge.extraUnits)} units × ${formatCurrency(Number(charge.ratePerUnitKsh ?? 0))} per unit`);
+      addLine("Extra usage charge", formatCurrency(Number(charge.amountKsh ?? 0)));
+    });
+    if (Number(bill.fixedChargeKsh) > 0) addLine("Fixed utility charge", formatCurrency(Number(bill.fixedChargeKsh)));
+  } else if (bill.meterNumber === "NO-METER") {
+    addLine("Fixed utility charge", formatCurrency(Number(bill.fixedChargeKsh ?? bill.amountKsh ?? 0)));
+  } else {
+    addLine("Meter reading", `${formatReadingValue(bill.previousReading)} → ${formatReadingValue(bill.currentReading)}`);
+    addLine("Usage", `${formatReadingValue(bill.unitsConsumed)} units`);
+    addLine("Usage charge", `${formatReadingValue(bill.unitsConsumed)} units × ${formatCurrency(Number(bill.ratePerUnitKsh ?? 0))} per unit`);
+    if (Number(bill.fixedChargeKsh) > 0) addLine("Fixed utility charge", formatCurrency(Number(bill.fixedChargeKsh)));
+  }
+  addLine("Total bill", formatCurrency(Number(bill.amountKsh ?? 0)));
+  breakdown.append(summary, list);
+  container.append(breakdown);
+}
+
+function appendUtilityReadingHistory(container, readings = []) {
+  if (!Array.isArray(readings) || readings.length === 0) return;
+  const history = document.createElement("details");
+  history.className = "utility-reading-history";
+  const summary = document.createElement("summary");
+  summary.textContent = `Meter reading history (${readings.length})`;
+  const help = document.createElement("p");
+  help.className = "item-details";
+  help.textContent = "Recorded readings are listed here, including interim readings that have not been billed.";
+  const list = document.createElement("div");
+  list.className = "utility-reading-history-list";
+  readings.forEach((reading) => {
+    const row = document.createElement("article");
+    row.className = "utility-reading-history-row";
+    const head = document.createElement("div");
+    head.className = "stack-top";
+    const title = document.createElement("strong");
+    title.textContent = `${utilityLabel(reading.utilityType)} • ${reading.billingMonth || "Interim reading"}`;
+    const status = document.createElement("span");
+    status.className = `item-chip ${reading.status === "charged" ? "chip-clear" : "chip-due_soon"}`;
+    status.textContent = reading.status === "charged" ? "Billed" : "Not billed";
+    head.append(title, status);
+
+    const readingDetails = document.createElement("p");
+    readingDetails.className = "item-details";
+    const previous = reading.previousReading == null ? "Starting point" : formatReadingValue(reading.previousReading);
+    const meter = normalizeUtilityMeterDisplay(reading.meterNumber);
+    readingDetails.textContent = `${meter ? `Meter ${meter} • ` : ""}${previous} → ${formatReadingValue(reading.currentReading)} • ${formatReadingValue(reading.unitsConsumed)} units • ${formatDateTime(reading.recordedAt)}`;
+    row.append(head, readingDetails);
+
+    if (reading.status === "charged") {
+      const charge = document.createElement("p");
+      charge.className = "item-details utility-reading-charge";
+      charge.textContent = `${formatReadingValue(reading.includedUnits)} units included • ${formatReadingValue(reading.extraUnits)} extra × ${formatCurrency(Number(reading.ratePerUnitKsh ?? 0))} per unit • ${formatCurrency(Number(reading.chargeAmountKsh ?? 0))} charge${reading.dueDate ? ` • due ${formatDateTime(reading.dueDate)}` : ""}`;
+      row.append(charge);
+    }
+    list.append(row);
+  });
+  history.append(summary, help, list);
+  container.append(history);
+}
+
+function renderUtilityBills(bills, meters = [], fallbackMessage, latestReadings = [], readingHistory = []) {
   utilityBillsListEl.replaceChildren();
   const latestReadingCount = appendLatestUtilityReadingCards(
     utilityBillsListEl,
@@ -3578,6 +3665,7 @@ function renderUtilityBills(bills, meters = [], fallbackMessage, latestReadings 
         ? "The last recorded meter readings are shown above. Water and electricity balances will appear once monthly bills are posted."
         : "Water and electricity balances plus previous/current readings will appear once monthly bills are posted.";
     utilityBillsListEl.append(empty);
+    appendUtilityReadingHistory(utilityBillsListEl, readingHistory);
     updateUtilityPaymentGuidance();
     return;
   }
@@ -3672,6 +3760,7 @@ function renderUtilityBills(bills, meters = [], fallbackMessage, latestReadings 
     `;
 
     card.append(top, details, meta);
+    appendUtilityChargeBreakdown(card, focusBill);
     utilityBillsListEl.append(card);
   }
 
@@ -3753,12 +3842,7 @@ function renderUtilityBills(bills, meters = [], fallbackMessage, latestReadings 
         readings.textContent = `Meter ${normalizeUtilityMeterDisplay(bill.meterNumber) || "-"}: ${formatReadingValue(bill.previousReading)} → ${formatReadingValue(bill.currentReading)} • ${formatReadingValue(bill.unitsConsumed)} units`;
       }
       row.append(head, readings);
-      (Array.isArray(bill.usageCharges) ? bill.usageCharges : []).forEach((charge) => {
-        const breakdown = document.createElement("p");
-        breakdown.className = "item-details utility-history-breakdown";
-        breakdown.textContent = `${utilityLabel(charge.utilityType)}: ${formatReadingValue(charge.unitsConsumed)} units • ${formatReadingValue(charge.includedUnits)} included • ${formatReadingValue(charge.extraUnits)} extra × ${formatCurrency(Number(charge.ratePerUnitKsh ?? 0))}/unit • extra charge ${formatCurrency(Number(charge.amountKsh ?? 0))}`;
-        row.append(breakdown);
-      });
+      appendUtilityChargeBreakdown(row, bill);
       const balance = document.createElement("p");
       balance.className = "item-details";
       balance.textContent = `Due ${formatDateTime(bill.dueDate)} • Remaining ${formatCurrency(Number(bill.balanceKsh ?? 0))}`;
@@ -3768,6 +3852,7 @@ function renderUtilityBills(bills, meters = [], fallbackMessage, latestReadings 
     history.append(summary, help, list);
     utilityBillsListEl.append(history);
   }
+  appendUtilityReadingHistory(utilityBillsListEl, readingHistory);
 }
 
 function syncUtilityBillingMonthOptions() {
@@ -3846,7 +3931,8 @@ function syncUtilityPaymentFormFromBalances() {
     state.utilityBills,
     state.utilityMeters,
     undefined,
-    state.utilityLatestReadings
+    state.utilityLatestReadings,
+    state.utilityReadingHistory
   );
   syncUtilityBillCardSelection();
 
@@ -4170,13 +4256,14 @@ function showSignedOutState() {
   state.utilityBills = [];
   state.utilityMeters = [];
   state.utilityLatestReadings = [];
+  state.utilityReadingHistory = [];
   state.utilitySelectedBillMonthByType = {
     water: null,
     electricity: null
   };
   state.paymentAccess = { ...DEFAULT_PAYMENT_ACCESS };
   renderPaymentInstructions();
-  renderUtilityBills([], [], undefined, []);
+  renderUtilityBills([], [], undefined, [], []);
   renderUtilityPayments([]);
   renderOverviewSession();
   setActiveResidentView("payments");
@@ -4294,11 +4381,13 @@ async function loadTenantData() {
     state.utilityBills = data.utilityBills ?? [];
     state.utilityMeters = data.utilityMeters ?? [];
     state.utilityLatestReadings = data.utilityLatestReadings ?? [];
+    state.utilityReadingHistory = data.utilityReadingHistory ?? [];
     renderUtilityBills(
       state.utilityBills,
       state.utilityMeters,
       messages.utilities,
-      state.utilityLatestReadings
+      state.utilityLatestReadings,
+      state.utilityReadingHistory
     );
     syncUtilityPaymentFormFromBalances();
     state.utilityPayments = data.utilityPayments ?? [];
@@ -5782,7 +5871,7 @@ function startResidentPortal() {
 
   utilityBillsListEl.addEventListener("click", (event) => {
     const target = event.target;
-    if (!(target instanceof HTMLElement)) {
+    if (!(target instanceof HTMLElement) || target.closest("details, summary")) {
       return;
     }
 

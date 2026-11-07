@@ -10,7 +10,7 @@ declare global {
   }
 }
 
-const LEGACY_RESIDENT_SCRIPT = "/users.js?v=20261106b";
+const LEGACY_RESIDENT_SCRIPT = "/users.js?v=20261107a";
 
 function markTypeScriptRuntime() {
   document.documentElement.dataset.captynUiRuntime = "typescript";

@@ -5,7 +5,7 @@ import { createMeterReadingsView } from "./meter-readings.js?v=7b27cc6aee";
 import { createBalancesView } from "./balances-view.js?v=59a3d1aef4";
 import { createUploadedImageGallery, renderSelectedImagePreviews, uploadImageFiles, validateImageFiles } from "./media-upload.js?v=549f6d7675";
 import { applyDocumentBranding, getLandlordPortalTitle, getLandlordShellBrand } from "./portal-branding.js?v=9b283694b2";
-const LANDLORD_SW_URL = "/resident-sw.js?v=e21be12315";
+const LANDLORD_SW_URL = "/resident-sw.js?v=c3d081b975";
 const authStatusEl = document.getElementById("auth-status");
 const landlordRoleEl = document.getElementById("landlord-role");
 const landlordBrandTagEl = document.getElementById("landlord-brand-tag");

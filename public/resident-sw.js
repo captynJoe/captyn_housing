@@ -1,4 +1,4 @@
-const CACHE_NAME = "captyn-resident-v20261106b";
+const CACHE_NAME = "captyn-resident-v20261107a";
 const RESIDENT_SHELL_URL = "/resident";
 const PROFILE_SHELL_URL = "/user";
 const LANDLORD_SHELL_URL = "/landlord";

@@ -18,7 +18,7 @@
     <link rel="stylesheet" href="/users.css?v=d325db752d" />
     <script src="/captyn-theme.js?v=6944e37fb6"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=d9fd4fe626" />
-    <link rel="stylesheet" href="/resident-app/assets/resident.css?v=89c23bacca" />
+    <link rel="stylesheet" href="/resident-app/assets/resident.css?v=9a725446e1" />
   </head>
   <body class="app-loading">
     <div class="ambient" aria-hidden="true"></div>
@@ -262,6 +262,7 @@
               <h1 id="resident-home-balance" class="rv-hero-amount">KSh 0 due</h1>
               <p id="resident-balance-adjusted" class="rv-adjusted hidden"></p>
               <p id="resident-home-summary" class="rv-hero-copy">Your house balance will appear after sign-in.</p>
+              <p id="resident-home-next-due" class="rv-home-next-due hidden" aria-live="polite"></p>
               <div class="rv-hero-actions">
                 <button id="open-payments-view-btn" type="button" class="rv-btn-primary">Pay now</button>
                 <button id="open-support-view-btn" type="button" class="rv-btn-ghost">Report an issue</button>
@@ -284,6 +285,14 @@
             </section>
 
             <p class="rv-home-address"><span id="overview-building">-</span> · House <span id="overview-house-number">-</span></p>
+            <section id="resident-home-maintenance" class="rv-home-maintenance hidden" aria-label="Latest maintenance update">
+              <div class="rv-home-maintenance-copy">
+                <p class="rv-home-maintenance-kicker">Maintenance update</p>
+                <strong id="resident-home-maintenance-title"></strong>
+                <p id="resident-home-maintenance-update" class="item-details"></p>
+              </div>
+              <button type="button" class="rv-home-maintenance-link" data-open-resident-view="support">View request</button>
+            </section>
             <details class="rv-home-updates" id="resident-notifications" open><summary class="section-head rv-home-updates-summary"><div><h2>Recent updates</h2><p id="notification-count" class="item-details">0 alerts</p></div><span class="rv-updates-toggle" aria-hidden="true">⌄</span></summary><section id="notification-list" class="stack-list"></section></details>
 <details class="rv-alert-settings"><summary>Notification preferences</summary>
               <section class="notification-control-card">
@@ -888,6 +897,6 @@
       </article>
     </section>
 
-    <script type="module" src="/resident-app/assets/resident.js?v=5534840247"></script>
+    <script type="module" src="/resident-app/assets/resident.js?v=f97c709bc5"></script>
   </body>
 </html>

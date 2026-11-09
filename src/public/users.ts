@@ -54,6 +54,10 @@ const overviewSessionExpiryEl = document.getElementById("overview-session-expiry
 const residentHomeBalanceEl = document.getElementById("resident-home-balance");
 const residentBalanceAdjustedEl = document.getElementById("resident-balance-adjusted");
 const residentHomeSummaryEl = document.getElementById("resident-home-summary");
+const residentHomeNextDueEl = document.getElementById("resident-home-next-due");
+const residentHomeMaintenanceEl = document.getElementById("resident-home-maintenance");
+const residentHomeMaintenanceTitleEl = document.getElementById("resident-home-maintenance-title");
+const residentHomeMaintenanceUpdateEl = document.getElementById("resident-home-maintenance-update");
 const overviewRentBalanceEl = document.getElementById("overview-rent-balance");
 const overviewUtilityBalanceEl = document.getElementById("overview-utility-balance");
 const overviewOtherBalanceEl = document.getElementById("overview-other-balance");
@@ -309,6 +313,10 @@ const REQUIRED_DOM_BINDINGS = Object.freeze([
   ["overview-session-expiry", overviewSessionExpiryEl],
   ["resident-home-balance", residentHomeBalanceEl],
   ["resident-home-summary", residentHomeSummaryEl],
+  ["resident-home-next-due", residentHomeNextDueEl],
+  ["resident-home-maintenance", residentHomeMaintenanceEl],
+  ["resident-home-maintenance-title", residentHomeMaintenanceTitleEl],
+  ["resident-home-maintenance-update", residentHomeMaintenanceUpdateEl],
   ["overview-rent-balance", overviewRentBalanceEl],
   ["overview-utility-balance", overviewUtilityBalanceEl],
   ["overview-other-balance", overviewOtherBalanceEl],
@@ -1497,6 +1505,70 @@ function getResidentPayModeBalance(mode) {
   return getUtilityOutstandingBalance(utilityType);
 }
 
+function formatHomeDueDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(date);
+}
+
+function getHomeNextDueMessage(pendingReview, totalOutstanding, rentOutstanding) {
+  if (pendingReview) return "Billing details unlock after management approves your access.";
+  if (totalOutstanding <= 0) return "You're all caught up. No payments are due right now.";
+
+  const dueItems = [];
+  if (rentOutstanding > 0 && state.rentDue?.dueDate) {
+    dueItems.push({ label: "Rent", dueDate: state.rentDue.dueDate });
+  }
+  state.utilityBills
+    .filter((bill) => Number(bill.balanceKsh) > 0 && bill.dueDate)
+    .forEach((bill) => dueItems.push({
+      label: utilityLabel(bill.utilityType),
+      dueDate: bill.dueDate
+    }));
+
+  dueItems.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+  const next = dueItems.find((item) => !Number.isNaN(new Date(item.dueDate).getTime()));
+  if (!next) return "A due date hasn't been set for your outstanding balance.";
+
+  const dueDate = new Date(next.dueDate);
+  const today = new Date();
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const startOfDueDate = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
+  const daysUntilDue = Math.round((startOfDueDate.getTime() - startOfToday.getTime()) / 86_400_000);
+  if (daysUntilDue < 0) return `${next.label} overdue since ${formatHomeDueDate(dueDate)}.`;
+  if (daysUntilDue === 0) return `${next.label} due today.`;
+  if (daysUntilDue === 1) return `${next.label} due tomorrow.`;
+  return `${next.label} due ${formatHomeDueDate(dueDate)}.`;
+}
+
+function renderHomeMaintenanceUpdate() {
+  const reports = Array.isArray(state.reports) ? state.reports : [];
+  const latestFirst = [...reports].sort((a, b) =>
+    String(b.updatedAt ?? b.createdAt ?? "").localeCompare(String(a.updatedAt ?? a.createdAt ?? ""))
+  );
+  const report = latestFirst.find((item) => item.status !== "resolved") ?? latestFirst[0];
+  if (!report) {
+    residentHomeMaintenanceEl?.classList.add("hidden");
+    return;
+  }
+
+  const statusLabels = {
+    open: "Received",
+    triaged: "Received",
+    in_progress: "In progress",
+    resolved: "Resolved"
+  };
+  const status = statusLabels[report.status] ?? "Received";
+  const managementUpdate = report.resolutionNotes || report.adminNote;
+  residentHomeMaintenanceTitleEl.textContent = `${report.title} · ${status}`;
+  residentHomeMaintenanceUpdateEl.textContent = managementUpdate
+    ? `Management update: ${managementUpdate}`
+    : report.status === "resolved"
+      ? "This request is marked resolved. Open it if anything still needs attention."
+      : "Your request is with management. Check here for updates.";
+  residentHomeMaintenanceEl.classList.remove("hidden");
+}
+
 function syncResidentPaySummary() {
   const pendingReview = Boolean(state.residentSession && !canResidentAccessBilling());
   const rentOutstanding = pendingReview ? 0 : getRentOutstandingBalance();
@@ -1540,6 +1612,14 @@ function syncResidentPaySummary() {
       : totalOutstanding > 0
         ? `Rent ${formatCurrency(rentOutstanding)} • Utilities ${formatCurrency(utilityOutstanding)}${otherOutstanding > 0 ? ` • Other charges ${formatCurrency(otherOutstanding)}` : ""}`
         : "Your rent and utility balances are clear right now.";
+  }
+  if (residentHomeNextDueEl instanceof HTMLElement) {
+    residentHomeNextDueEl.textContent = getHomeNextDueMessage(
+      pendingReview,
+      totalOutstanding,
+      rentOutstanding
+    );
+    residentHomeNextDueEl.classList.remove("hidden");
   }
 
   residentPayOpenButtons.forEach((button) => {
@@ -3333,6 +3413,7 @@ function renderReports(reports) {
     empty.className = "empty";
     empty.textContent = getPendingReviewSupportMessage();
     reportsListEl.append(empty);
+    renderHomeMaintenanceUpdate();
     return;
   }
 
@@ -3343,6 +3424,7 @@ function renderReports(reports) {
     empty.className = "empty";
     empty.textContent = "No support requests yet.";
     reportsListEl.append(empty);
+    renderHomeMaintenanceUpdate();
     return;
   }
 
@@ -3389,6 +3471,7 @@ function renderReports(reports) {
 
     reportsListEl.append(fragment);
   });
+  renderHomeMaintenanceUpdate();
 }
 
 function renderNotifications(notifications) {
@@ -4240,6 +4323,7 @@ function showSignedOutState() {
   renderRentPayments([]);
   state.reports = [];
   state.notifications = [];
+  renderHomeMaintenanceUpdate();
   state.pushConfig = null;
   state.pushSubscriptionEndpoint = "";
   state.smsConfig = null;

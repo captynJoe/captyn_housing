@@ -1173,7 +1173,7 @@ function getExistingIdentityDocumentUrls(payload = state.data) {
 function canEditTenantDetails(payload = state.data) {
   return (
     String(state.role ?? "").trim() !== "caretaker" &&
-    Boolean(getAgreementState(payload).hasActiveResident || payload?.room?.hasActiveResident)
+    Boolean(getAgreementState(payload).hasActiveResident || payload?.room?.hasActiveResident || getAgreementState(payload).isDraft)
   );
 }
 
@@ -1211,17 +1211,20 @@ function renderManagementForms(payload) {
   const agreement = agreementState.agreement ?? {};
   const buildingConfiguration = payload?.buildingConfiguration ?? {};
   const hasActiveResident = Boolean(agreementState.hasActiveResident || room.hasActiveResident);
+  const isDraft = Boolean(agreementState.isDraft) && !hasActiveResident;
   const canEditAgreement = canEditTenantDetails(payload);
   const canEditRent = canEditRentSetup();
 
   setManagementStatus(
     hasActiveResident
       ? "Edit the resident profile and rent setup from this house account."
-      : "This house has no active resident. Rent setup can be prepared, but tenant details unlock after assignment."
+      : isDraft
+        ? "Complete this saved tenant intake here. The resident account is created after required ID and lease details are complete."
+        : "This house has no active resident. Rent setup can be prepared, but tenant details unlock after a tenant intake is started."
   );
   setPillText(
     roomAgreementStateEl,
-    hasActiveResident ? (canEditAgreement ? "Editable" : "Read only") : "Vacant"
+    hasActiveResident ? (canEditAgreement ? "Editable" : "Read only") : isDraft ? "Draft" : "Vacant"
   );
   setPillText(roomRentSetupStateEl, canEditRent ? "Editable" : "Read only");
 
@@ -1898,6 +1901,15 @@ function setRoomFormsSaving(saving) {
   }
 }
 
+function describeMissingFinalizeFields(payload) {
+  const missing = [];
+  if (!payload.identityType || !payload.identityNumber) missing.push("ID type and number");
+  if (!payload.identityDocumentUrls?.length) missing.push("an ID photo");
+  if (!payload.leaseStartDate) missing.push("lease start date");
+  if (!payload.leaseEndDate) missing.push("lease end date");
+  return missing;
+}
+
 async function saveRoomAgreement(event) {
   event.preventDefault();
   if (state.loading || state.formSaving || !canEditTenantDetails()) {
@@ -1909,21 +1921,64 @@ async function saveRoomAgreement(event) {
     return;
   }
 
+  const agreementState = getAgreementState();
+  const isDraft = Boolean(agreementState.isDraft) && !agreementState.hasActiveResident;
   setRoomFormsSaving(true);
   showError("");
-  setManagementStatus("Saving tenant details...");
+  setManagementStatus(isDraft ? "Saving tenant intake..." : "Saving tenant details...");
 
   try {
     const payload = await buildAgreementPayloadFromForm(form);
+    if (isDraft) {
+      const draft = agreementState.agreement ?? {};
+      const draftFields = {
+        buildingId: state.buildingId,
+        houseNumber: state.houseNumber,
+        fullName: draft.fullName,
+        phoneNumber: draft.phoneNumber,
+        acceptanceMethod: draft.acceptanceMethod,
+        staffWitnessConfirmed: draft.staffWitnessConfirmed,
+        acceptanceNote: draft.acceptanceNote,
+        note: draft.note
+      };
+      const missingFields = describeMissingFinalizeFields(payload);
+      if (missingFields.length === 0) {
+        const finalized = await requestJson("/api/landlord/residents/direct", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            ...payload,
+            ...draftFields,
+            billingStartDate: payload.leaseStartDate
+          })
+        });
+        await loadRoomAccount();
+        const smsText = finalized.data?.sms?.status === "sent"
+          ? " An onboarding message was sent."
+          : " Share the resident sign-in details manually.";
+        const message = `Tenant account created. The resident must review the lease details after signing in.${smsText}`;
+        setManagementStatus(message);
+        notifyStatus("Tenant account created.");
+      } else {
+        await requestJson("/api/landlord/tenant-agreement-drafts", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...payload, ...draftFields })
+        });
+        await loadRoomAccount();
+        setManagementStatus(`Draft saved. Still needed to create the tenant: ${missingFields.join(", ")}.`);
+        notifyStatus("Draft saved.");
+      }
+      return;
+    }
+
     await requestJson(
       `/api/landlord/buildings/${encodeURIComponent(state.buildingId)}/houses/${encodeURIComponent(
         state.houseNumber
       )}/agreement`,
       {
         method: "PUT",
-        headers: {
-          "content-type": "application/json"
-        },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify(payload)
       }
     );
@@ -1938,7 +1993,7 @@ async function saveRoomAgreement(event) {
 
     const message = error instanceof Error ? error.message : "Unable to save tenant details.";
     showError(message);
-    setManagementStatus("Tenant details save failed.");
+    setManagementStatus(isDraft ? "Draft save failed." : "Tenant details save failed.");
   } finally {
     setRoomFormsSaving(false);
   }

@@ -89,6 +89,7 @@ test("direct tenant onboarding forces first login password change and approves t
   const housingUserUpdateCalls: any[] = [];
   const tenantApplicationUpsertCalls: any[] = [];
   const tenantAgreementUpsertCalls: any[] = [];
+  const activeTenantAgreementUpsertCalls: any[] = [];
   const provisionTx = {
     houseUnit: {
       findUnique: async () => ({ id: "unit-a-10", isActive: true })
@@ -134,6 +135,23 @@ test("direct tenant onboarding forces first login password change and approves t
   };
   let transactionCall = 0;
   const service = new UserAccountService({
+    tenantAgreement: {
+      findUnique: async () => null,
+      upsert: async (args: any) => {
+        activeTenantAgreementUpsertCalls.push(args);
+        return {
+          ...args.create,
+          id: "agreement-1",
+          createdAt: new Date("2026-05-29T10:00:00.000Z"),
+          updatedAt: new Date("2026-05-29T10:00:00.000Z"),
+          acceptanceMethod: null,
+          acceptedAt: null,
+          acceptedByUserId: null,
+          acceptedByName: null,
+          acceptanceNote: null
+        };
+      }
+    },
     tenancy: {
       findFirst: async () => ({
         id: "tenancy-a-10",
@@ -169,7 +187,7 @@ test("direct tenant onboarding forces first login password change and approves t
   assert.equal(housingUserUpdateCalls[0].data.fullName, "Jane Wanjiku");
   assert.equal(tenantApplicationUpsertCalls[0].create.status, "approved");
   assert.equal(tenantApplicationUpsertCalls[0].create.reviewedByUserId, "landlord-1");
-  assert.equal(tenantAgreementUpsertCalls[0].create.identityNumber, "12345678");
+  assert.equal(activeTenantAgreementUpsertCalls[0].create.identityNumber, "12345678");
 });
 
 test("resident phone login resolves the only active tenancy without building selection", async () => {
@@ -627,13 +645,14 @@ test("caretaker resident removal is limited to assigned buildings", async () => 
   });
 });
 
-test("dedicated landlord staff can see and manage all buildings", async () => {
-  const findUniqueCalls: unknown[] = [];
+test("staff can see and manage only their assigned buildings", async () => {
+  const assignmentLookups: unknown[] = [];
   const service = new UserAccountService({
-    building: {
+    staffBuildingAssignment: {
+      findMany: async () => [{ buildingId: "BLDG-B" }],
       findUnique: async (args: unknown) => {
-        findUniqueCalls.push(args);
-        return { id: "BLDG-B" };
+        assignmentLookups.push(args);
+        return { id: "assignment-1" };
       }
     }
   } as never);
@@ -652,10 +671,10 @@ test("dedicated landlord staff can see and manage all buildings", async () => {
   const visibleBuildingIds = await service.listVisibleBuildingIds(session);
   const canAccess = await service.canAccessBuilding(session, "BLDG-B");
 
-  assert.equal(visibleBuildingIds, null);
+  assert.deepEqual(visibleBuildingIds, new Set(["BLDG-B"]));
   assert.equal(canAccess, true);
-  assert.deepEqual(findUniqueCalls[0], {
-    where: { id: "BLDG-B" },
+  assert.deepEqual(assignmentLookups[0], {
+    where: { staffUserId_buildingId: { staffUserId: "staff-a", buildingId: "BLDG-B" } },
     select: { id: true }
   });
 });
@@ -667,6 +686,9 @@ test("staff creation normalizes credentials and requires password change", async
     userSession: {
       deleteMany: async () => ({ count: 0 })
     },
+    building: {
+      findMany: async () => [{ id: "BLDG-A" }]
+    },
     housingUser: {
       count: async () => 1,
       findFirst: async () => null,
@@ -675,6 +697,7 @@ test("staff creation normalizes credentials and requires password change", async
         return {
           id: "owner-staff-2",
           ...args.data,
+          staffAssignments: args.data.staffAssignments.create,
           createdAt,
           updatedAt: createdAt
         };
@@ -683,11 +706,12 @@ test("staff creation normalizes credentials and requires password change", async
   } as never);
 
   const result = await service.createOwnerStaffUser({
+    buildingIds: ["BLDG-A"],
     fullName: "  Staff Two  ",
     email: "  Owner.Two@Example.Test ",
     phoneNumber: "0711 111 111",
     temporaryPassword: "temporary-secret"
-  });
+  }, "landlord-1");
 
   assert.equal(createArgs.data.fullName, "Staff Two");
   assert.equal(createArgs.data.email, "owner.two@example.test");
@@ -701,12 +725,16 @@ test("staff creation normalizes credentials and requires password change", async
   assert.equal(result.email, "owner.two@example.test");
   assert.equal(result.phone, "+254711111111");
   assert.equal(result.mustChangePassword, true);
+  assert.deepEqual(result.assignedBuildingIds, ["BLDG-A"]);
 });
 
 test("staff creation enforces the active account limit", async () => {
   const service = new UserAccountService({
     userSession: {
       deleteMany: async () => ({ count: 0 })
+    },
+    building: {
+      findMany: async () => [{ id: "BLDG-A" }]
     },
     housingUser: {
       count: async () => OWNER_STAFF_LIMIT
@@ -716,11 +744,12 @@ test("staff creation enforces the active account limit", async () => {
   await assert.rejects(
     () =>
       service.createOwnerStaffUser({
+        buildingIds: ["BLDG-A"],
         fullName: "Extra Owner",
         email: "extra.owner@example.test",
         phoneNumber: "+254722222222",
         temporaryPassword: "temporary-secret"
-      }),
+      }, "landlord-1"),
     /OWNER_STAFF_LIMIT_REACHED/
   );
 });
@@ -744,6 +773,7 @@ test("staff disabling does not target landlord accounts", async () => {
     () =>
       service.disableOwnerStaffUser("landlord-1", {
         actorUserId: "root-admin",
+        ownerUserId: "landlord-1",
         confirmUserId: "landlord-1"
       }),
     /OWNER_STAFF_USER_NOT_FOUND/
@@ -762,7 +792,8 @@ test("staff disabling allows staff removal without an owner guard", async () => 
         phone: "+254700000002",
         role: "staff",
         status: "active",
-        updatedAt
+        updatedAt,
+        staffAssignments: [{ id: "assignment-1" }]
       }),
       count: async () => {
         countCalls += 1;
@@ -790,6 +821,7 @@ test("staff disabling allows staff removal without an owner guard", async () => 
 
   const result = await service.disableOwnerStaffUser("staff-1", {
     actorUserId: "owner-1",
+    ownerUserId: "owner-1",
     confirmUserId: "staff-1"
   });
 

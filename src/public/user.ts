@@ -69,6 +69,10 @@ const agreementDepositEl = document.getElementById("agreement-deposit");
 const agreementDueDayEl = document.getElementById("agreement-due-day");
 const agreementUpdatedAtEl = document.getElementById("agreement-updated-at");
 const agreementSpecialTermsEl = document.getElementById("agreement-special-terms");
+const agreementAcknowledgmentEl = document.getElementById("agreement-acknowledgment");
+const agreementAcknowledgmentCopyEl = document.getElementById("agreement-acknowledgment-copy");
+const agreementConfirmCheckboxEl = document.getElementById("agreement-confirm-checkbox");
+const agreementAcceptBtnEl = document.getElementById("agreement-accept-btn");
 
 const state = {
   profile: null
@@ -376,6 +380,16 @@ function renderProfile(profile) {
   agreementUpdatedAtEl.textContent = formatDateTime(agreement?.updatedAt);
   agreementSpecialTermsEl.textContent =
     agreement?.specialTerms || "No special terms have been added yet.";
+  const acknowledgmentPending = agreement?.status === "awaiting_resident";
+  agreementAcknowledgmentEl?.classList.toggle("hidden", !acknowledgmentPending);
+  if (agreementAcknowledgmentCopyEl instanceof HTMLElement) {
+    agreementAcknowledgmentCopyEl.textContent = acknowledgmentPending
+      ? "Management has asked you to review these tenancy details. Acknowledgment records your confirmation and the date; it is not an electronic signature."
+      : agreement?.status === "verified"
+        ? `Acknowledged by ${agreement.acceptedByName || "resident"} on ${formatDateTime(agreement.acceptedAt)}${agreement.acceptanceMethod === "staff_witnessed" ? " (in person with management)" : ""}.`
+        : "No acknowledgment has been requested for these tenancy details.";
+  }
+  if (agreementConfirmCheckboxEl instanceof HTMLInputElement) agreementConfirmCheckboxEl.checked = false;
 }
 
 async function loadProfile() {
@@ -457,6 +471,18 @@ async function handleSave(event) {
   }
 }
 
+async function handleAgreementAccept() {
+  if (!(agreementAcceptBtnEl instanceof HTMLButtonElement) || !(agreementConfirmCheckboxEl instanceof HTMLInputElement)) return;
+  if (!agreementConfirmCheckboxEl.checked) { showFeedback("Please confirm you reviewed the agreement details.", "error"); return; }
+  agreementAcceptBtnEl.disabled = true;
+  try {
+    await apiRequest("/api/resident/agreement/accept", { method: "POST", body: JSON.stringify({ confirmed: true }) });
+    await loadProfile();
+    showFeedback("Your acknowledgment was recorded.", "success");
+  } catch (error) { showFeedback(error instanceof Error ? error.message : "Unable to record acknowledgment.", "error"); }
+  finally { agreementAcceptBtnEl.disabled = false; }
+}
+
 async function handleLogout() {
   residentLogoutBtnEl.disabled = true;
 
@@ -518,6 +544,7 @@ document.addEventListener("click", (event) => {
   }
 });
 residentProfileFormEl.addEventListener("submit", handleSave);
+agreementAcceptBtnEl?.addEventListener("click", handleAgreementAccept);
 profileIdentityDocumentEl?.addEventListener("change", () => {
   try {
     validateIdentityDocumentSelection();

@@ -93,6 +93,8 @@ model Building {
   maintenanceRecords         MaintenanceRecord[]
   vacancySnapshots           VacancySnapshot[]
   landlordUser               HousingUser?                @relation("BuildingLandlord", fields: [landlordUserId], references: [id], onDelete: SetNull)
+  staffAssignments           StaffBuildingAssignment[]
+  tenantAgreementDrafts      TenantAgreementDraft[]
   configuration              BuildingConfiguration?
   houseUnits                 HouseUnit[]
   tenantApplications         TenantApplication[]
@@ -164,6 +166,7 @@ model HousingUser {
   createdAt                      DateTime                @default(now())
   updatedAt                      DateTime                @updatedAt
   ownedBuildings                 Building[]              @relation("BuildingLandlord")
+  staffAssignments               StaffBuildingAssignment[]
   sessions                       UserSession[]
   tenantApplications             TenantApplication[]
   tenantAgreements               TenantAgreement[]
@@ -174,6 +177,53 @@ model HousingUser {
   reviewedLandlordAccessRequests LandlordAccessRequest[] @relation("LandlordAccessReviewer")
 
   @@index([role])
+}
+
+model StaffBuildingAssignment {
+  id          String      @id @default(uuid())
+  staffUserId String
+  buildingId  String
+  createdAt   DateTime    @default(now())
+  staffUser   HousingUser @relation(fields: [staffUserId], references: [id], onDelete: Cascade)
+  building    Building    @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+
+  @@unique([staffUserId, buildingId])
+  @@index([buildingId])
+}
+
+model TenantAgreementDraft {
+  id                        String                  @id @default(uuid())
+  buildingId                String
+  houseNumber               String
+  fullName                  String
+  phoneNumber               String
+  identityType              TenantIdentityType?
+  identityNumber            String?
+  identityDocumentUrls      Json                    @default("[]")
+  leaseStartDate            DateTime?
+  leaseEndDate              DateTime?
+  occupationStatus          TenantOccupationStatus?
+  occupationLabel           String?
+  organizationName          String?
+  organizationLocation      String?
+  studentRegistrationNumber String?
+  sponsorName               String?
+  sponsorPhone              String?
+  emergencyContactName      String?
+  emergencyContactPhone     String?
+  specialTerms              String?
+  acceptanceMethod          String?
+  staffWitnessConfirmed     Boolean                 @default(false)
+  acceptanceNote            String?
+  note                      String?
+  createdByUserId           String?
+  createdByName             String?
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+  building                  Building                @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+
+  @@unique([buildingId, houseNumber])
+  @@index([buildingId, updatedAt])
 }
 
 model LandlordAccessRequest {
@@ -370,14 +420,35 @@ model TenantAgreement {
   depositPaidKsh            Int?
   paymentDueDay             Int?
   specialTerms              String?
+  status                    String                  @default("not_requested")
+  acceptanceMethod          String?
+  acceptedAt                DateTime?
+  acceptedByUserId          String?
+  acceptedByName            String?
+  acceptanceNote            String?
   createdAt                 DateTime                @default(now())
   updatedAt                 DateTime                @updatedAt
   building                  Building                @relation(fields: [buildingId], references: [id], onDelete: Cascade)
   resident                  HousingUser             @relation(fields: [residentUserId], references: [id], onDelete: Cascade)
   tenancy                   Tenancy                 @relation(fields: [tenancyId], references: [id], onDelete: Cascade)
+  acknowledgments           TenantAgreementAcknowledgment[]
 
   @@index([buildingId, houseNumber, updatedAt])
   @@index([residentUserId])
+}
+
+model TenantAgreementAcknowledgment {
+  id                    String         @id @default(uuid())
+  tenantAgreementId     String
+  method                String
+  actorUserId           String?
+  actorName             String
+  note                  String?
+  termsSnapshot         Json
+  createdAt             DateTime       @default(now())
+  tenantAgreement       TenantAgreement @relation(fields: [tenantAgreementId], references: [id], onDelete: Cascade)
+
+  @@index([tenantAgreementId, createdAt])
 }
 
 model HouseholdMemberRegistry {

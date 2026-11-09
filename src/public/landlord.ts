@@ -114,6 +114,8 @@ const refreshSettingsViewBtnEl = document.getElementById("refresh-settings-view"
 const settingsClearCacheBtnEl = document.getElementById("settings-clear-cache-btn");
 const settingsClearDataBtnEl = document.getElementById("settings-clear-data-btn");
 const buildingDefaultsFormEl = document.getElementById("building-defaults-form");
+const buildingDefaultsCopySourceEl = document.getElementById("building-defaults-copy-source");
+const buildingDefaultsCopyBtnEl = document.getElementById("building-defaults-copy-btn");
 const buildingDefaultsSummaryEl = document.getElementById("building-defaults-summary");
 const buildingDefaultsSaveBtnEl = document.getElementById("building-defaults-save-btn");
 const buildingDefaultsUtilityBillingModeEl = document.getElementById(
@@ -141,6 +143,20 @@ const buildingDefaultsBalanceVisibleDaysEl = document.getElementById(
 );
 const buildingDefaultsMonthlyRentEl = document.getElementById("building-defaults-monthly-rent");
 const buildingDefaultsRentDueDayEl = document.getElementById("building-defaults-rent-due-day");
+const buildingDefaultsMeterReadingDayEl = document.getElementById("building-defaults-meter-reading-day");
+const buildingDefaultsRentGraceDaysEl = document.getElementById("building-defaults-rent-grace-days");
+const buildingDefaultsLatePenaltyEnabledEl = document.getElementById("building-defaults-late-penalty-enabled");
+const buildingDefaultsLatePenaltyAmountEl = document.getElementById("building-defaults-late-penalty-amount");
+const buildingDefaultsRentEnabledEl = document.getElementById("building-defaults-rent-enabled");
+const buildingDefaultsWaterEnabledEl = document.getElementById("building-defaults-water-enabled");
+const buildingDefaultsElectricityEnabledEl = document.getElementById("building-defaults-electricity-enabled");
+const buildingDefaultsApplicationsEnabledEl = document.getElementById("building-defaults-applications-enabled");
+const buildingDefaultsAgreementsEnabledEl = document.getElementById("building-defaults-agreements-enabled");
+const buildingDefaultsMaintenanceEnabledEl = document.getElementById("building-defaults-maintenance-enabled");
+const buildingDefaultsIncidentsEnabledEl = document.getElementById("building-defaults-incidents-enabled");
+const buildingDefaultsCaretakerEnabledEl = document.getElementById("building-defaults-caretaker-enabled");
+const buildingDefaultsExpensesEnabledEl = document.getElementById("building-defaults-expenses-enabled");
+const buildingDefaultsWifiEnabledEl = document.getElementById("building-defaults-wifi-enabled");
 const buildingDefaultsAllowManualRentEl = document.getElementById(
   "building-defaults-allow-manual-rent"
 );
@@ -296,6 +312,7 @@ const ownerStaffNameEl = document.getElementById("owner-staff-name");
 const ownerStaffEmailEl = document.getElementById("owner-staff-email");
 const ownerStaffPhoneEl = document.getElementById("owner-staff-phone");
 const ownerStaffPasswordEl = document.getElementById("owner-staff-password");
+const ownerStaffBuildingsEl = document.getElementById("owner-staff-buildings");
 const ownerStaffNoteEl = document.getElementById("owner-staff-note");
 const ownerStaffSubmitBtnEl = document.getElementById("owner-staff-submit-btn");
 const ownerStaffBodyEl = document.getElementById("owner-staff-body");
@@ -5411,6 +5428,22 @@ function renderSettingsPanel() {
   const building = state.buildings.find((item) => item.id === buildingId) ?? null;
   const hasBuildings = Array.isArray(state.buildings) && state.buildings.length > 0;
   const actionsDisabled = isCaretakerRole() || !building;
+  if (buildingDefaultsCopySourceEl instanceof HTMLSelectElement) {
+    const current = buildingDefaultsCopySourceEl.value;
+    buildingDefaultsCopySourceEl.replaceChildren();
+    const choices = state.buildings.filter((item) => item.id !== buildingId);
+    choices.forEach((item, index) => {
+      const option = document.createElement("option");
+      option.value = item.id;
+      option.textContent = getBuildingDisplayName(item);
+      option.selected = current ? current === item.id : index === 0;
+      buildingDefaultsCopySourceEl.append(option);
+    });
+    buildingDefaultsCopySourceEl.disabled = actionsDisabled || choices.length === 0;
+  }
+  if (buildingDefaultsCopyBtnEl instanceof HTMLButtonElement) {
+    buildingDefaultsCopyBtnEl.disabled = actionsDisabled || state.buildings.length < 2;
+  }
 
   if (!hasBuildings) {
     settingsSummaryEl.textContent =
@@ -5547,6 +5580,25 @@ async function loadBuildingDefaults(buildingId) {
     if (buildingDefaultsRentDueDayEl instanceof HTMLInputElement) {
       buildingDefaultsRentDueDayEl.value = data.defaultRentDueDay ?? "";
     }
+    if (buildingDefaultsMeterReadingDayEl instanceof HTMLInputElement) buildingDefaultsMeterReadingDayEl.value = data.meterReadingDay ?? "";
+    if (buildingDefaultsRentGraceDaysEl instanceof HTMLInputElement) buildingDefaultsRentGraceDaysEl.value = data.rentGraceDays ?? 0;
+    if (buildingDefaultsLatePenaltyEnabledEl instanceof HTMLInputElement) buildingDefaultsLatePenaltyEnabledEl.checked = data.lateRentPenaltyEnabled === true;
+    if (buildingDefaultsLatePenaltyAmountEl instanceof HTMLInputElement) buildingDefaultsLatePenaltyAmountEl.value = data.lateRentPenaltyAmountKsh ?? 0;
+    const moduleControls = [
+      [buildingDefaultsRentEnabledEl, data.rentEnabled],
+      [buildingDefaultsWaterEnabledEl, data.waterEnabled],
+      [buildingDefaultsElectricityEnabledEl, data.electricityEnabled],
+      [buildingDefaultsApplicationsEnabledEl, data.tenantApplicationsEnabled],
+      [buildingDefaultsAgreementsEnabledEl, data.tenantAgreementsEnabled],
+      [buildingDefaultsMaintenanceEnabledEl, data.maintenanceEnabled],
+      [buildingDefaultsIncidentsEnabledEl, data.incidentsEnabled],
+      [buildingDefaultsCaretakerEnabledEl, data.caretakerEnabled],
+      [buildingDefaultsExpensesEnabledEl, data.expenditureTrackingEnabled],
+      [buildingDefaultsWifiEnabledEl, data.wifiEnabled]
+    ];
+    moduleControls.forEach(([el, enabled]) => {
+      if (el instanceof HTMLInputElement) el.checked = enabled === true;
+    });
     if (buildingDefaultsAllowManualRentEl instanceof HTMLInputElement) {
       buildingDefaultsAllowManualRentEl.checked = data.allowManualRentPosting !== false;
     }
@@ -5570,6 +5622,60 @@ async function loadBuildingDefaults(buildingId) {
     handleLandlordError(error, "Failed to load building defaults.");
   }
 }
+
+buildingDefaultsCopyBtnEl?.addEventListener("click", () => {
+  const sourceId = String((buildingDefaultsCopySourceEl as HTMLSelectElement | null)?.value || "").trim();
+  const targetId = getSelectedSettingsBuildingId();
+  if (!sourceId || !targetId || sourceId === targetId) return;
+  if (buildingDefaultsCopyBtnEl instanceof HTMLButtonElement) buildingDefaultsCopyBtnEl.disabled = true;
+  void (async () => {
+    try {
+      const payload = await requestJson(`/api/landlord/buildings/${encodeURIComponent(sourceId)}/configuration`);
+      const data = payload.data ?? {};
+      const setNumber = (el, value) => { if (el instanceof HTMLInputElement) el.value = value ?? ""; };
+      if (buildingDefaultsUtilityBillingModeEl instanceof HTMLSelectElement) buildingDefaultsUtilityBillingModeEl.value = data.utilityBillingMode ?? "metered";
+      setNumber(buildingDefaultsWaterRateEl, data.defaultWaterRatePerUnitKsh);
+      setNumber(buildingDefaultsElectricityRateEl, data.defaultElectricityRatePerUnitKsh);
+      setNumber(buildingDefaultsWaterFixedEl, data.defaultWaterFixedChargeKsh);
+      setNumber(buildingDefaultsElectricityFixedEl, data.defaultElectricityFixedChargeKsh);
+      setNumber(buildingDefaultsIncludedWaterUnitsEl, data.includedWaterUnits);
+      setNumber(buildingDefaultsIncludedElectricityUnitsEl, data.includedElectricityUnits);
+      setNumber(buildingDefaultsCombinedChargeEl, data.defaultCombinedUtilityChargeKsh);
+      setNumber(buildingDefaultsBalanceVisibleDaysEl, data.utilityBalanceVisibleDays);
+      setNumber(buildingDefaultsMonthlyRentEl, data.defaultMonthlyRentKsh);
+      setNumber(buildingDefaultsRentDueDayEl, data.defaultRentDueDay);
+      setNumber(buildingDefaultsMeterReadingDayEl, data.meterReadingDay);
+      setNumber(buildingDefaultsRentGraceDaysEl, data.rentGraceDays);
+      setNumber(buildingDefaultsLatePenaltyAmountEl, data.lateRentPenaltyAmountKsh);
+      if (buildingDefaultsLatePenaltyEnabledEl instanceof HTMLInputElement) buildingDefaultsLatePenaltyEnabledEl.checked = data.lateRentPenaltyEnabled === true;
+      const moduleControls = [
+        [buildingDefaultsRentEnabledEl, data.rentEnabled],
+        [buildingDefaultsWaterEnabledEl, data.waterEnabled],
+        [buildingDefaultsElectricityEnabledEl, data.electricityEnabled],
+        [buildingDefaultsApplicationsEnabledEl, data.tenantApplicationsEnabled],
+        [buildingDefaultsAgreementsEnabledEl, data.tenantAgreementsEnabled],
+        [buildingDefaultsMaintenanceEnabledEl, data.maintenanceEnabled],
+        [buildingDefaultsIncidentsEnabledEl, data.incidentsEnabled],
+        [buildingDefaultsCaretakerEnabledEl, data.caretakerEnabled],
+        [buildingDefaultsExpensesEnabledEl, data.expenditureTrackingEnabled],
+        [buildingDefaultsWifiEnabledEl, data.wifiEnabled]
+      ];
+      moduleControls.forEach(([el, enabled]) => { if (el instanceof HTMLInputElement) el.checked = enabled === true; });
+      if (buildingDefaultsAllowManualRentEl instanceof HTMLInputElement) buildingDefaultsAllowManualRentEl.checked = data.allowManualRentPosting !== false;
+      if (buildingDefaultsAllowManualUtilityEl instanceof HTMLInputElement) buildingDefaultsAllowManualUtilityEl.checked = data.allowManualUtilityPosting !== false;
+      if (buildingDefaultsAcknowledgeEl instanceof HTMLInputElement) buildingDefaultsAcknowledgeEl.checked = false;
+      if (buildingDefaultsNoteEl instanceof HTMLInputElement) buildingDefaultsNoteEl.value = "";
+      buildingDefaultsLoadedFor = targetId;
+      if (buildingDefaultsSummaryEl instanceof HTMLElement) {
+        buildingDefaultsSummaryEl.textContent = `Loaded defaults from ${getBuildingDisplayNameById(sourceId, sourceId)}. Review all values for ${getBuildingDisplayNameById(targetId, targetId)}, then acknowledge and save.`;
+      }
+    } catch (error) {
+      handleLandlordError(error, "Failed to load defaults from the selected building.");
+    } finally {
+      if (buildingDefaultsCopyBtnEl instanceof HTMLButtonElement) buildingDefaultsCopyBtnEl.disabled = isCaretakerRole() || state.buildings.length < 2;
+    }
+  })();
+});
 
 buildingDefaultsFormEl?.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -5612,6 +5718,20 @@ buildingDefaultsFormEl?.addEventListener("submit", (event) => {
     utilityBalanceVisibleDays: toOptionalNumber(buildingDefaultsBalanceVisibleDaysEl?.value),
     defaultMonthlyRentKsh: toOptionalNumber(buildingDefaultsMonthlyRentEl?.value),
     defaultRentDueDay: toOptionalNumber(buildingDefaultsRentDueDayEl?.value),
+    meterReadingDay: toOptionalNumber(buildingDefaultsMeterReadingDayEl?.value),
+    rentGraceDays: toOptionalNumber(buildingDefaultsRentGraceDaysEl?.value),
+    lateRentPenaltyEnabled: Boolean((buildingDefaultsLatePenaltyEnabledEl as HTMLInputElement | null)?.checked),
+    lateRentPenaltyAmountKsh: toOptionalNumber(buildingDefaultsLatePenaltyAmountEl?.value),
+    rentEnabled: Boolean((buildingDefaultsRentEnabledEl as HTMLInputElement | null)?.checked),
+    waterEnabled: Boolean((buildingDefaultsWaterEnabledEl as HTMLInputElement | null)?.checked),
+    electricityEnabled: Boolean((buildingDefaultsElectricityEnabledEl as HTMLInputElement | null)?.checked),
+    tenantApplicationsEnabled: Boolean((buildingDefaultsApplicationsEnabledEl as HTMLInputElement | null)?.checked),
+    tenantAgreementsEnabled: Boolean((buildingDefaultsAgreementsEnabledEl as HTMLInputElement | null)?.checked),
+    maintenanceEnabled: Boolean((buildingDefaultsMaintenanceEnabledEl as HTMLInputElement | null)?.checked),
+    incidentsEnabled: Boolean((buildingDefaultsIncidentsEnabledEl as HTMLInputElement | null)?.checked),
+    caretakerEnabled: Boolean((buildingDefaultsCaretakerEnabledEl as HTMLInputElement | null)?.checked),
+    expenditureTrackingEnabled: Boolean((buildingDefaultsExpensesEnabledEl as HTMLInputElement | null)?.checked),
+    wifiEnabled: Boolean((buildingDefaultsWifiEnabledEl as HTMLInputElement | null)?.checked),
     allowManualRentPosting: Boolean(buildingDefaultsAllowManualRentEl?.checked),
     allowManualUtilityPosting: Boolean(buildingDefaultsAllowManualUtilityEl?.checked),
     acknowledgeImpact: true,
@@ -6507,10 +6627,23 @@ function renderOwnerStaff() {
     return;
   }
 
+  if (ownerStaffBuildingsEl instanceof HTMLSelectElement) {
+    const selectedIds = new Set([...ownerStaffBuildingsEl.selectedOptions].map((option) => option.value));
+    ownerStaffBuildingsEl.replaceChildren();
+    (Array.isArray(state.buildings) ? state.buildings : []).forEach((building, index) => {
+      const option = document.createElement("option");
+      option.value = building.id;
+      option.textContent = getBuildingDisplayName(building);
+      option.selected = selectedIds.size ? selectedIds.has(building.id) : index === 0;
+      ownerStaffBuildingsEl.append(option);
+    });
+    ownerStaffBuildingsEl.disabled = !ownerAccess || !state.buildings?.length;
+  }
+
   ownerStaffBodyEl.replaceChildren();
   if (!Array.isArray(state.ownerStaff) || state.ownerStaff.length === 0) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="6">No staff accounts found.</td>';
+    row.innerHTML = '<td colspan="7">No staff accounts found.</td>';
     ownerStaffBodyEl.append(row);
     return;
   }
@@ -6523,6 +6656,7 @@ function renderOwnerStaff() {
       <td>${escapeHtml(item.phone ?? "-")}</td>
       <td>${escapeHtml(item.email ?? "-")}</td>
       <td>${escapeHtml(passwordState)}</td>
+      <td>${escapeHtml((item.assignedBuildings ?? []).map((building) => building.name).join(", ") || "No buildings")}</td>
       <td>${formatDateTime(item.createdAt)}</td>
       <td>
         ${
@@ -8028,11 +8162,15 @@ function renderResidentDrawer(resident) {
       : "";
   const agreementStatusText = state.residentAgreementLoading
     ? "Loading tenant agreement..."
-    : agreement?.updatedAt
-      ? `Agreement last updated ${formatDateTime(agreement.updatedAt)}.`
-      : hasResident
-        ? "No tenant agreement saved yet for this active resident."
-        : "Assign an active resident before capturing agreement details.";
+    : agreement?.status === "awaiting_resident"
+      ? "Agreement terms saved. Waiting for the resident to acknowledge."
+      : agreement?.status === "verified"
+        ? `Acknowledged by ${agreement.acceptedByName || "resident"} on ${formatDateTime(agreement.acceptedAt)}${agreement.acceptanceMethod === "staff_witnessed" ? " (in person)" : " (resident portal)"}.`
+        : agreement?.updatedAt
+          ? `Agreement last updated ${formatDateTime(agreement.updatedAt)}. Acknowledgment has not been requested.`
+          : hasResident
+            ? "No tenant agreement saved yet for this active resident."
+            : "Assign an active resident before capturing agreement details.";
   const canEditAgreement = hasResident && !isCaretakerRole();
   const disabledAttr = canEditAgreement ? "" : "disabled";
   const identitySummary = agreement?.identityNumber
@@ -8920,7 +9058,8 @@ function renderResidentDrawer(resident) {
         ${
           canEditAgreement
             ? `<div class="action-row">
-                <button type="submit">Save Agreement</button>
+                <button type="submit">Save Agreement &amp; Request Acknowledgment</button>
+                ${agreement?.status === "awaiting_resident" ? `<button type="button" class="ghost-btn" data-action="record-agreement-witness" data-building-id="${escapeHtml(resident.buildingId)}" data-house-number="${escapeHtml(resident.houseNumber)}">Record in-person acknowledgment</button>` : ""}
               </div>`
             : ""
         }
@@ -11159,6 +11298,9 @@ ownerStaffFormEl?.addEventListener("submit", (event) => {
           email,
           phoneNumber,
           temporaryPassword,
+          buildingIds: ownerStaffBuildingsEl instanceof HTMLSelectElement
+            ? [...ownerStaffBuildingsEl.selectedOptions].map((option) => option.value)
+            : [],
           note
         })
       });
@@ -13889,3 +14031,51 @@ void (async () => {
     });
   }, APPLICATION_REFRESH_INTERVAL_MS);
 })();
+
+
+document.addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('[data-action="record-agreement-witness"]') : null;
+  if (!target) return;
+  const confirmed = window.confirm("Did the resident review and acknowledge the saved agreement in person?");
+  if (!confirmed) return;
+  const note = window.prompt("Witness note (optional):") ?? "";
+  void requestJson(`/api/landlord/buildings/${encodeURIComponent(target.dataset.buildingId || "")}/houses/${encodeURIComponent(target.dataset.houseNumber || "")}/agreement/witness`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmed: true, note }) })
+    .then(async () => {
+      const resident = state.selectedResident;
+      if (resident) await loadResidentAgreement(resident);
+      setStatus("In-person agreement acknowledgment recorded.");
+    })
+    .catch((error) => handleLandlordError(error, "Unable to record acknowledgment."));
+});
+
+
+document.addEventListener("submit", (event) => {
+  const form = event.target instanceof HTMLFormElement && event.target.id === "resident-agreement-form" ? event.target : null;
+  if (!form) return;
+  event.preventDefault();
+  const resident = state.selectedResident;
+  if (!resident) return;
+  const formData = new FormData(form);
+  const read = (name: string) => String(formData.get(name) ?? "").trim();
+  const optionalNumber = (name: string) => { const value = read(name); return value === "" ? undefined : Number(value); };
+  const existingAgreement = state.selectedResidentAgreement?.agreement ?? {};
+  const payload = {
+    requestAcknowledgment: true,
+    identityType: read("identityType") || undefined, identityNumber: read("identityNumber") || undefined,
+    identityDocumentUrls: existingAgreement.identityDocumentUrls ?? [],
+    occupationStatus: read("occupationStatus") || undefined, occupationLabel: read("occupationLabel") || undefined,
+    organizationName: read("organizationName") || undefined, organizationLocation: read("organizationLocation") || undefined,
+    studentRegistrationNumber: read("studentRegistrationNumber") || undefined, sponsorName: read("sponsorName") || undefined,
+    sponsorPhone: read("sponsorPhone") || undefined, emergencyContactName: read("emergencyContactName") || undefined,
+    emergencyContactPhone: read("emergencyContactPhone") || undefined, leaseStartDate: read("leaseStartDate") || undefined,
+    leaseEndDate: read("leaseEndDate") || undefined, monthlyRentKsh: optionalNumber("monthlyRentKsh"),
+    depositKsh: optionalNumber("depositKsh"), paymentDueDay: optionalNumber("paymentDueDay"), specialTerms: read("specialTerms") || undefined,
+    depositPaidKsh: existingAgreement.depositPaidKsh
+  };
+  const submitButton = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
+  void requestJson(buildResidentAgreementUrl(resident), { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) })
+    .then(async () => { await loadResidentAgreement(resident); setStatus("Agreement saved. The resident has been asked to review and acknowledge these terms."); })
+    .catch((error) => handleLandlordError(error, "Unable to save tenant agreement."))
+    .finally(() => { if (submitButton) submitButton.disabled = false; });
+});

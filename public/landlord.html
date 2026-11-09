@@ -389,6 +389,10 @@
                 />
               </label>
               <label>
+                Assigned Buildings (Ctrl/Cmd-click to select more than one)
+                <select id="owner-staff-buildings" multiple size="4" required></select>
+              </label>
+              <label>
                 Temporary Password
                 <input
                   id="owner-staff-password"
@@ -413,6 +417,7 @@
                     <th>Phone</th>
                     <th>Email</th>
                     <th>Password</th>
+                    <th>Buildings</th>
                     <th>Added</th>
                     <th>Action</th>
                   </tr>
@@ -541,6 +546,14 @@
                 <p id="building-defaults-summary" class="status-text"></p>
               </div>
             </div>
+            <div class="inline-fields compact-fields">
+              <label>
+                Copy defaults from another building
+                <select id="building-defaults-copy-source"></select>
+              </label>
+              <button id="building-defaults-copy-btn" type="button">Load for review</button>
+              <p class="status-text">Values are copied into this form only. Review them and confirm the future-billing impact before saving.</p>
+            </div>
             <form id="building-defaults-form" class="inline-fields compact-fields">
               <label>
                 Utility Billing Mode
@@ -591,6 +604,36 @@
                 Rent Due Day
                 <input id="building-defaults-rent-due-day" type="number" min="1" max="31" step="1" />
               </label>
+              <label>
+                Meter Reading Day
+                <input id="building-defaults-meter-reading-day" type="number" min="1" max="31" step="1" />
+              </label>
+              <label>
+                Rent Grace Days
+                <input id="building-defaults-rent-grace-days" type="number" min="0" max="31" step="1" />
+              </label>
+              <label class="checkbox-row building-defaults-full-width">
+                <input id="building-defaults-late-penalty-enabled" type="checkbox" /> Apply a late rent penalty
+              </label>
+              <label>
+                Late Rent Penalty (KSh)
+                <input id="building-defaults-late-penalty-amount" type="number" min="0" step="1" />
+              </label>
+              <fieldset class="building-defaults-full-width">
+                <legend>Modules available in this building</legend>
+                <div class="message-center-rule-grid">
+                  <label class="checkbox-row"><input id="building-defaults-rent-enabled" type="checkbox" /> Rent</label>
+                  <label class="checkbox-row"><input id="building-defaults-water-enabled" type="checkbox" /> Water</label>
+                  <label class="checkbox-row"><input id="building-defaults-electricity-enabled" type="checkbox" /> Electricity</label>
+                  <label class="checkbox-row"><input id="building-defaults-applications-enabled" type="checkbox" /> Tenant applications</label>
+                  <label class="checkbox-row"><input id="building-defaults-agreements-enabled" type="checkbox" /> Tenant agreements</label>
+                  <label class="checkbox-row"><input id="building-defaults-maintenance-enabled" type="checkbox" /> Maintenance requests</label>
+                  <label class="checkbox-row"><input id="building-defaults-incidents-enabled" type="checkbox" /> Resident issues</label>
+                  <label class="checkbox-row"><input id="building-defaults-caretaker-enabled" type="checkbox" /> Caretaker access</label>
+                  <label class="checkbox-row"><input id="building-defaults-expenses-enabled" type="checkbox" /> Expense tracking</label>
+                  <label class="checkbox-row"><input id="building-defaults-wifi-enabled" type="checkbox" /> Wi-Fi module</label>
+                </div>
+              </fieldset>
               <label class="checkbox-row building-defaults-full-width">
                 <input id="building-defaults-allow-manual-rent" type="checkbox" /> Allow Manual Rent Posting
               </label>
@@ -599,7 +642,7 @@
               </label>
               <label class="checkbox-row building-defaults-full-width">
                 <input id="building-defaults-acknowledge" type="checkbox" required />
-                I understand changing these defaults affects future billing for this building.
+                I understand these changes affect future billing or which modules residents and staff can use in this building.
               </label>
               <label class="building-defaults-full-width">
                 Note (optional)
@@ -2092,6 +2135,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=29aa49e2cf"></script>
+    <script type="module" src="/landlord.js?v=20261110-portfolio-access"></script>
   </body>
 </html>

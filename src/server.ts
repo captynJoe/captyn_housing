@@ -137,6 +137,7 @@ import {
   ownerNotificationReadSchema,
   landlordMessageSendSchema,
   landlordDirectTenantCreateSchema,
+  landlordTenantAgreementDraftSaveSchema,
   landlordAutomaticMessageRulesUpdateSchema,
   updateResidentNotificationPreferencesSchema,
   upsertUtilityMeterSchema,
@@ -6045,7 +6046,7 @@ async function bootstrap() {
       return null;
     }
 
-    const ownerStaff = await userAccountService.listLandlordAndStaffUsers();
+    const ownerStaff = await userAccountService.listLandlordAndStaffUsers(input.buildingId);
     const recipientUserIds = [
       ...ownerStaff.users
         .map((item) => item.id)
@@ -6178,7 +6179,7 @@ async function bootstrap() {
     const anyOverdue = dueReadings.some((item) => item.due.status === "overdue");
 
     const ownerStaff = userAccountService
-      ? await userAccountService.listLandlordAndStaffUsers()
+      ? await userAccountService.listLandlordAndStaffUsers(building.id)
       : { users: [] };
     const caretakerUserIds = listCaretakerRecordsForBuilding(building.id).map(
       (record) => record.userId
@@ -6186,8 +6187,7 @@ async function bootstrap() {
     const recipientUserIds = [
       ...new Set([
         ...ownerStaff.users.map((item) => item.id),
-        ...caretakerUserIds,
-        LEGACY_OWNER_ALERT_USER_ID
+        ...caretakerUserIds
       ])
     ];
 
@@ -6481,7 +6481,8 @@ async function bootstrap() {
       buildingConfiguration,
       auditEvents,
       billingHolds,
-      agreementState
+      agreementState,
+      tenantAgreementDraft
     ] = await Promise.all([
       buildLandlordUtilityRegistryRows(building.id, [normalizedHouseNumber]),
       listVisibleHouseNumbersForBuildings([building]),
@@ -6495,8 +6496,18 @@ async function bootstrap() {
             buildingId: building.id,
             houseNumber: normalizedHouseNumber
           })
+        : Promise.resolve(null),
+      userAccountService
+        ? userAccountService.getTenantAgreementDraft({
+            buildingId: building.id,
+            houseNumber: normalizedHouseNumber
+          })
         : Promise.resolve(null)
     ]);
+    const resolvedAgreementState =
+      agreementState && !agreementState.hasActiveResident && tenantAgreementDraft
+        ? { ...agreementState, isDraft: true, agreement: tenantAgreementDraft }
+        : agreementState;
 
     const room =
       roomRows.find((item) => normalizeHouseNumber(item.houseNumber) === normalizedHouseNumber) ??
@@ -6727,7 +6738,7 @@ async function bootstrap() {
       tickets,
       auditEvents,
       billingHolds,
-      agreementState,
+      agreementState: resolvedAgreementState,
       monthlyCombinedCharge,
       buildingConfiguration
     };
@@ -7266,7 +7277,7 @@ async function bootstrap() {
             limit: OWNER_STAFF_LIMIT,
             remaining: 0
           })
-        : userAccountService.listOwnerStaffUsers();
+        : userAccountService.listOwnerStaffUsers(context.userId);
 
     const registryRows = !quickStartup && registryBuildingId
       ? residentDirectory
@@ -11048,7 +11059,7 @@ async function bootstrap() {
         });
       }
 
-      const data = await userAccountService.listOwnerStaffUsers();
+      const data = await userAccountService.listOwnerStaffUsers(context.userId);
       return res.json({ data, role: context.role });
     } catch (error) {
       return next(error);
@@ -11076,8 +11087,8 @@ async function bootstrap() {
 
       const parsed = ownerStaffCreateSchema.parse(req.body ?? {});
       try {
-        const staff = await userAccountService.createOwnerStaffUser(parsed);
-        const data = await userAccountService.listOwnerStaffUsers();
+        const staff = await userAccountService.createOwnerStaffUser(parsed, context.userId ?? "");
+        const data = await userAccountService.listOwnerStaffUsers(context.userId);
         return res.status(201).json({
           data: {
             staff,
@@ -11090,6 +11101,12 @@ async function bootstrap() {
           error instanceof Error
             ? error.message
             : "Unable to create staff account.";
+        if (message === "OWNER_STAFF_BUILDING_ACCESS_DENIED") {
+          return res.status(403).json({ error: "Staff can only be assigned to your buildings." });
+        }
+        if (message === "OWNER_STAFF_BUILDINGS_REQUIRED") {
+          return res.status(400).json({ error: "Select at least one building for this staff account." });
+        }
         if (message === "OWNER_STAFF_LIMIT_REACHED") {
           return res.status(409).json({
             error: `Staff limit reached. This dedicated app allows ${OWNER_STAFF_LIMIT} active staff accounts.`
@@ -11136,9 +11153,10 @@ async function bootstrap() {
       try {
         const staff = await userAccountService.disableOwnerStaffUser(userId, {
           ...parsed,
-          actorUserId: context.userId
+          actorUserId: context.userId,
+          ownerUserId: context.userId
         });
-        const data = await userAccountService.listOwnerStaffUsers();
+        const data = await userAccountService.listOwnerStaffUsers(context.userId);
         return res.json({
           data: {
             staff,
@@ -17076,6 +17094,54 @@ async function bootstrap() {
     handleLandlordUnrecordRentPayment
   );
 
+  app.post("/api/resident/agreement/accept", async (req, res, next) => {
+    try {
+      if (!userAccountService) return res.status(503).json({ error: "Agreement service unavailable." });
+      const session = await getResidentSession(req, res);
+      if (!session) return;
+      if (req.body?.confirmed !== true) return res.status(400).json({ error: "Confirm that you reviewed the agreement terms." });
+      const current = await userAccountService.getActiveTenantAgreement({ buildingId: session.buildingId, houseNumber: session.houseNumber });
+      if (!current.resident || current.resident.userId !== session.userId) return res.status(403).json({ error: "Agreement access denied." });
+      const agreement = await userAccountService.acknowledgeActiveTenantAgreement({
+        buildingId: session.buildingId, houseNumber: session.houseNumber, residentUserId: session.userId,
+        method: "resident_portal", actorUserId: session.userId, actorName: current.resident.fullName,
+        note: typeof req.body?.note === "string" ? req.body.note.slice(0, 500) : undefined
+      });
+      return res.json({ data: agreement });
+    } catch (error) {
+      if (error instanceof Error && error.message === "AGREEMENT_NOT_AWAITING_ACKNOWLEDGMENT") return res.status(409).json({ error: "There is no agreement awaiting your acknowledgment." });
+      return next(error);
+    }
+  });
+
+  app.post(
+    "/api/landlord/buildings/:buildingId/houses/:houseNumber/agreement/witness",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) return;
+        if (context.role === "caretaker") return res.status(403).json({ error: "Caretaker access is read-only for tenant agreements." });
+        if (!userAccountService) return res.status(503).json({ error: "Agreement service unavailable." });
+        if (req.body?.confirmed !== true) return res.status(400).json({ error: "Confirm the resident acknowledged these terms in person." });
+        const building = await store.getBuilding(req.params.buildingId?.trim() ?? "");
+        if (!building) return res.status(404).json({ error: "Building not found." });
+        if (!(await canManageBuildingFromLandlordContext(context, building.id))) return res.status(403).json({ error: "Building access denied." });
+        const houseNumber = normalizeHouseNumber(houseNumberQuerySchema.parse({ houseNumber: req.params.houseNumber }).houseNumber);
+        const current = await userAccountService.getActiveTenantAgreement({ buildingId: building.id, houseNumber });
+        if (!current.resident) return res.status(409).json({ error: "An active resident is required." });
+        const agreement = await userAccountService.acknowledgeActiveTenantAgreement({
+          buildingId: building.id, houseNumber, residentUserId: current.resident.userId, method: "staff_witnessed",
+          actorUserId: context.userId, actorName: "Management",
+          note: typeof req.body?.note === "string" ? req.body.note.slice(0, 500) : undefined
+        });
+        return res.json({ data: agreement });
+      } catch (error) {
+        if (error instanceof Error && error.message === "AGREEMENT_NOT_AWAITING_ACKNOWLEDGMENT") return res.status(409).json({ error: "Save the agreement terms and request resident acknowledgment before recording a witness." });
+        return next(error);
+      }
+    }
+  );
+
   app.get(
     "/api/landlord/buildings/:buildingId/houses/:houseNumber/agreement",
     async (req, res, next) => {
@@ -17652,7 +17718,8 @@ async function bootstrap() {
                 sponsorPhone: agreement.sponsorPhone,
                 emergencyContactName: agreement.emergencyContactName,
                 emergencyContactPhone: agreement.emergencyContactPhone,
-                leaseStartDate: billingStartDate,
+                requestAcknowledgment: Boolean(parsed.leaseStartDate || parsed.leaseEndDate || parsed.monthlyRentKsh != null || parsed.depositKsh != null || parsed.specialTerms),
+                leaseStartDate: agreement.leaseStartDate ?? billingStartDate,
                 leaseEndDate: agreement.leaseEndDate,
                 monthlyRentKsh: agreement.monthlyRentKsh,
                 depositKsh: agreement.depositKsh,
@@ -17823,6 +17890,46 @@ async function bootstrap() {
       }
     }
   );
+
+  app.post("/api/landlord/tenant-agreement-drafts", async (req, res, next) => {
+    try {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) return;
+      if (context.role === "caretaker") {
+        return res.status(403).json({ error: "House manager accounts cannot add tenants directly." });
+      }
+      if (!userAccountService) {
+        return res.status(503).json({ error: "User account service unavailable. Database connection is required." });
+      }
+      const parsed = landlordTenantAgreementDraftSaveSchema.parse(req.body ?? {});
+      const building = await store.getBuilding(parsed.buildingId);
+      if (!building) return res.status(404).json({ error: "Building not found" });
+      if (!(await canManageBuildingFromLandlordContext(context, building.id))) {
+        return res.status(403).json({ error: "Building access denied" });
+      }
+      const houseNumber = normalizeHouseNumber(parsed.houseNumber);
+      const registered = new Set((building.houseNumbers ?? []).map(normalizeHouseNumber));
+      const unitHouseNumbers = await listVisibleHouseNumbersForBuildings([building]);
+      if (!registered.has(houseNumber) && !unitHouseNumbers.has(houseNumber)) {
+        return res.status(404).json({ error: `House ${houseNumber} is not registered in ${building.name}.` });
+      }
+      const actor = actorFromLandlordContext(context);
+      try {
+        const data = await userAccountService.saveTenantAgreementDraft(
+          { ...parsed, buildingId: building.id, houseNumber },
+          { userId: actor.userId, fullName: actor.name }
+        );
+        return res.status(201).json({ data, role: context.role });
+      } catch (error) {
+        if (error instanceof Error && error.message === "HOUSE_OCCUPIED") {
+          return res.status(409).json({ error: "This house already has an active resident." });
+        }
+        throw error;
+      }
+    } catch (error) {
+      return next(error);
+    }
+  });
 
   app.get(
     "/api/landlord/buildings/:buildingId/rooms/:houseNumber/ledger",

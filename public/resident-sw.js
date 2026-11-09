@@ -11,7 +11,7 @@ const APP_ASSETS = [
     "/landlord.css?v=219787e7a6",
     "/captyn-theme.css?v=d9fd4fe626",
     "/captyn-theme.js?v=6944e37fb6",
-    "/resident-app/assets/resident.css?v=89c23bacca",
+    "/resident-app/assets/resident.css?v=9a725446e1",
     "/resident-app/assets/resident.js?v=1d78626ba2",
     "/users.js",
     "/user.js",

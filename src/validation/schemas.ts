@@ -656,6 +656,23 @@ export const landlordDirectTenantCreateSchema = z.object({
   phoneNumber: kenyaPhoneSchema,
   identityType: tenantIdentityTypeSchema.default("national_id"),
   identityNumber: nonEmptyString.min(4).max(80),
+  identityDocumentUrls: optionalTenantIdentityDocumentUrlsSchema,
+  occupationStatus: optionalTenantOccupationStatusSchema,
+  occupationLabel: optionalTenantTextSchema(120),
+  organizationName: optionalTenantTextSchema(160),
+  organizationLocation: optionalTenantTextSchema(160),
+  studentRegistrationNumber: optionalTenantTextSchema(120),
+  sponsorName: optionalTenantTextSchema(120),
+  sponsorPhone: optionalTenantPhoneSchema,
+  emergencyContactName: optionalTenantTextSchema(120),
+  emergencyContactPhone: optionalTenantPhoneSchema,
+  leaseStartDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  leaseEndDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  monthlyRentKsh: z.number().int().min(0).max(10_000_000).optional(),
+  depositKsh: z.number().int().min(0).max(10_000_000).optional(),
+  paymentDueDay: z.number().int().min(1).max(31).optional(),
+  specialTerms: optionalTenantTextSchema(1_200),
+  acceptanceNote: optionalTenantTextSchema(280),
   billingStartDate: z
     .string()
     .trim()
@@ -760,6 +777,7 @@ export const userRegisterSchema = z.object({
 });
 
 export const ownerStaffCreateSchema = z.object({
+  buildingIds: z.array(nonEmptyString.max(120)).min(1).max(100),
   fullName: nonEmptyString.max(120),
   email: z.string().trim().email().max(160),
   phoneNumber: kenyaPhoneSchema,
@@ -815,6 +833,7 @@ const tenantAgreementDateSchema = z
 
 export const tenantAgreementUpsertSchema = z
   .object({
+    requestAcknowledgment: z.boolean().optional(),
     identityType: optionalTenantIdentityTypeSchema,
     identityNumber: optionalTenantTextSchema(80),
     identityDocumentUrls: optionalTenantIdentityDocumentUrlsSchema,
@@ -895,6 +914,48 @@ export const tenantAgreementUpsertSchema = z
         path: ["depositPaidKsh"],
         message: "Deposit paid cannot be more than the agreed deposit amount."
       });
+    }
+  });
+
+export const landlordTenantAgreementDraftSaveSchema = z
+  .object({
+    buildingId: nonEmptyString.max(120),
+    houseNumber: nonEmptyString.max(24),
+    fullName: nonEmptyString.max(120),
+    phoneNumber: kenyaPhoneSchema,
+    identityType: optionalTenantIdentityTypeSchema,
+    identityNumber: optionalTenantTextSchema(80),
+    identityDocumentUrls: optionalTenantIdentityDocumentUrlsSchema,
+    leaseStartDate: tenantAgreementDateSchema.optional(),
+    leaseEndDate: tenantAgreementDateSchema.optional(),
+    occupationStatus: optionalTenantOccupationStatusSchema,
+    occupationLabel: optionalTenantTextSchema(120),
+    organizationName: optionalTenantTextSchema(160),
+    organizationLocation: optionalTenantTextSchema(160),
+    studentRegistrationNumber: optionalTenantTextSchema(120),
+    sponsorName: optionalTenantTextSchema(120),
+    sponsorPhone: optionalTenantPhoneSchema,
+    emergencyContactName: optionalTenantTextSchema(120),
+    emergencyContactPhone: optionalTenantPhoneSchema,
+    monthlyRentKsh: z.number().int().min(0).max(10_000_000).optional(),
+    depositKsh: z.number().int().min(0).max(10_000_000).optional(),
+    depositPaidKsh: z.number().int().min(0).max(10_000_000).optional(),
+    paymentDueDay: z.number().int().min(1).max(31).optional(),
+    specialTerms: optionalTenantTextSchema(1_200),
+    acceptanceMethod: z.enum(["resident_portal", "staff_witnessed"]).optional(),
+    staffWitnessConfirmed: z.boolean().optional(),
+    acceptanceNote: optionalTenantTextSchema(280),
+    note: optionalTenantTextSchema(280)
+  })
+  .superRefine((value, context) => {
+    if (value.leaseStartDate && value.leaseEndDate && value.leaseEndDate < value.leaseStartDate) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["leaseEndDate"], message: "Lease end date must be on or after the lease start date." });
+    }
+    if (value.depositPaidKsh != null && value.depositKsh == null) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["depositKsh"], message: "Set the agreed deposit before recording how much has been paid." });
+    }
+    if (value.depositPaidKsh != null && value.depositKsh != null && value.depositPaidKsh > value.depositKsh) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["depositPaidKsh"], message: "Deposit paid cannot be more than the agreed deposit amount." });
     }
   });
 
@@ -1474,6 +1535,9 @@ export type OwnerStaffDisableInput = z.infer<typeof ownerStaffDisableSchema>;
 export type TenantApplicationInput = z.infer<typeof tenantApplicationSchema>;
 export type LandlordDirectTenantCreateInput = z.infer<
   typeof landlordDirectTenantCreateSchema
+>;
+export type LandlordTenantAgreementDraftSaveInput = z.infer<
+  typeof landlordTenantAgreementDraftSaveSchema
 >;
 export type TenantAgreementUpsertInput = z.infer<typeof tenantAgreementUpsertSchema>;
 export type LandlordDecisionInput = z.infer<typeof landlordDecisionSchema>;

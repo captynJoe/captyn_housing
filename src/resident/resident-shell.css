@@ -1049,6 +1049,68 @@ html[data-captyn-ui-runtime="typescript"] body {
   font-weight: 700;
 }
 
+.resident-session-mode .rv-home-next-due {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  margin: -10px 0 18px;
+  padding: 7px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  background: rgba(5, 22, 17, 0.24);
+  color: #e8fff5;
+  font-size: 0.88rem;
+  font-weight: 750;
+}
+
+.resident-session-mode .rv-home-maintenance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--resident-line);
+  border-radius: 16px;
+  background: var(--resident-panel);
+}
+
+.resident-session-mode .rv-home-maintenance-kicker {
+  margin: 0 0 4px;
+  color: var(--resident-teal-dark);
+  font-size: 0.76rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.resident-session-mode .rv-home-maintenance-copy > strong {
+  display: block;
+  color: var(--resident-ink);
+  overflow-wrap: anywhere;
+}
+
+.resident-session-mode .rv-home-maintenance-copy .item-details {
+  margin: 5px 0 0;
+}
+
+.resident-session-mode .rv-home-maintenance-link {
+  min-height: 40px;
+  flex: 0 0 auto;
+  padding: 0 14px;
+  border: 1px solid var(--resident-line);
+  border-radius: 999px;
+  background: var(--resident-panel-soft);
+  color: var(--resident-teal-dark);
+  font-weight: 800;
+}
+
+@media (max-width: 560px) {
+  .resident-session-mode .rv-home-maintenance {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .resident-session-mode .rv-home-updates,
 .resident-session-mode .rv-alert-settings,
 .resident-session-mode .resident-bills-panel,

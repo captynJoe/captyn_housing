@@ -2141,3 +2141,7 @@ input[type="radio"] {
 .rv-home-updates > #notification-list {
   margin-top: 10px;
 }
+
+.rent-payment-arrangement { margin-top: 1rem; padding: 0.9rem 1rem; border: 1px solid var(--border, #2c493d); border-radius: 0.8rem; background: color-mix(in srgb, var(--surface-2, #10251d) 78%, transparent); }
+.rent-payment-arrangement p { margin: 0.35rem 0 0; }
+.resident-arrangement-missed { border-color: #b7791f; }

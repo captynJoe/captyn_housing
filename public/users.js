@@ -208,6 +208,7 @@ const state = {
     buildings: [],
     residentSession: null,
     rentDue: null,
+    rentPaymentArrangement: null,
     balanceAdjustment: null,
     reports: [],
     notifications: [],
@@ -2907,6 +2908,13 @@ function formatRentSetupSourceLabel(source) {
     }
     return "Not Set";
 }
+function formatPromisedDate(value) {
+    const raw = String(value ?? "").trim();
+    const date = new Date(`${raw}T00:00:00`);
+    return raw && !Number.isNaN(date.getTime())
+        ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(date)
+        : "the agreed date";
+}
 function formatRentDueDay(value) {
     const numeric = Number(value);
     return Number.isFinite(numeric) && numeric >= 1
@@ -2990,6 +2998,19 @@ function renderRentDue(rentDue, fallbackMessage) {
     </div>
   `;
     rentDueEl.append(keyvals);
+    const arrangement = state.rentPaymentArrangement;
+    if (arrangement && arrangement.status !== "fulfilled") {
+        const promise = document.createElement("div");
+        promise.className = `rent-payment-arrangement resident-arrangement-${arrangement.status}`;
+        const title = document.createElement("strong");
+        title.textContent = arrangement.status === "missed" ? "Promised payment date passed" : "Agreed payment date";
+        const detail = document.createElement("p");
+        detail.textContent = arrangement.status === "missed"
+            ? `The date agreed with management was ${formatPromisedDate(arrangement.promisedDate)}. Please contact management to update the arrangement.`
+            : `You and management agreed that the current rent balance of ${formatCurrency(arrangement.currentBalanceKsh ?? arrangement.balanceAtPromiseKsh)} will be paid by ${formatPromisedDate(arrangement.promisedDate)}.`;
+        promise.append(title, detail);
+        rentDueEl.append(promise);
+    }
     if (!String(rentPaymentAmountEl.value ?? "").trim() && rentDue.balanceKsh > 0) {
         rentPaymentAmountEl.value = formatAmountValue(computeSuggestedStarterAmount(rentDue.balanceKsh));
     }
@@ -3677,6 +3698,7 @@ async function loadTenantData() {
         state.notifications = data.notifications ?? [];
         state.paymentInstructions = data.paymentInstructions ?? null;
         state.rentDue = data.rentDue ?? null;
+        state.rentPaymentArrangement = data.rentPaymentArrangement ?? null;
         state.balanceAdjustment = data.balanceAdjustment ?? null;
         state.identityRequirement =
             data.identityRequirement ?? state.residentSession?.identityRequirement ?? null;

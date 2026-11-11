@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=044c9c08af" />
-    <link rel="stylesheet" href="/landlord.css?v=219787e7a6" />
+    <link rel="stylesheet" href="/landlord.css?v=862ab39b00" />
     <script src="/captyn-theme.js?v=6944e37fb6"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=d9fd4fe626" />
   </head>
@@ -47,18 +47,46 @@
           <div class="metric-card"><p>Occupancy</p><strong id="room-metric-occupancy">-</strong></div>
           <div class="metric-card"><p>Billing Mode</p><strong id="room-metric-billing-mode">-</strong></div>
           <div class="metric-card"><p>Outstanding</p><strong id="room-metric-outstanding">-</strong></div>
-          <div class="metric-card"><p>Projected</p><strong id="room-metric-projected">-</strong></div>
-          <div class="metric-card"><p>Current Utility Due</p><strong id="room-metric-current-utility">-</strong></div>
-          <div class="metric-card"><p>House Charges</p><strong id="room-metric-charges">-</strong></div>
-          <div class="metric-card"><p>This Month Paid</p><strong id="room-metric-paid">-</strong></div>
+          <div class="metric-card"><p>Rent Balance</p><strong id="room-metric-projected">-</strong></div>
+          <div class="metric-card"><p>Utility Balance</p><strong id="room-metric-current-utility">-</strong></div>
           <div class="metric-card"><p>Next Due</p><strong id="room-metric-next-due">-</strong></div>
         </div>
       </section>
 
-      <section class="panel wide-panel room-management-panel">
+      <section class="panel wide-panel room-account-actions-panel">
         <div class="panel-head">
-          <h2>House Management</h2>
+          <div><h2>Account Actions</h2><p class="status-text">Correct the rent balance or record a promised payment date.</p></div>
         </div>
+        <div class="room-account-actions-grid">
+          <form id="room-balance-adjustment-form" class="room-management-form">
+            <div class="room-management-form-head"><h3>Correct Rent Balance</h3></div>
+            <p class="status-text">Use this when the amount currently owed is wrong. To fix a recorded receipt, open Rent Payments in History & records.</p>
+            <button id="room-open-rent-history" class="room-history-link" type="button">Open rent payment history</button>
+            <p class="status-text">If “paid this month” has no matching receipt, it may be a manual marker. <a id="room-rent-setup-correction-link" href="/landlord?rentSetup=1">Review it in Rent Setup</a>.</p>
+            <div class="room-management-fields">
+              <label>Correct balance (KSh)<input name="rentBalanceKsh" type="number" min="0" max="5000000" step="1" required /></label>
+              <label>Reason<input name="reason" type="text" maxlength="280" minlength="3" placeholder="e.g. Correct opening balance" required /></label>
+            </div>
+            <div class="action-row"><button id="room-balance-adjustment-submit" type="submit">Update Rent Balance</button></div>
+          </form>
+          <form id="room-payment-arrangement-form" class="room-management-form">
+            <div class="room-management-form-head">
+              <h3>Payment Arrangement</h3>
+              <span id="room-payment-arrangement-state" class="status-pill">No arrangement</span>
+            </div>
+            <p id="room-payment-arrangement-summary" class="status-text">Record when the resident agreed to clear the current rent balance.</p>
+            <div class="room-management-fields">
+              <label>Promised payment date<input name="promisedDate" type="date" required /></label>
+              <label>Note (optional)<input name="note" type="text" maxlength="280" placeholder="Short context" /></label>
+            </div>
+            <div class="action-row"><button id="room-payment-arrangement-submit" type="submit">Record Promise Date</button></div>
+          </form>
+        </div>
+      </section>
+
+      <details class="panel wide-panel room-management-panel room-account-disclosure">
+        <summary class="room-account-disclosure-summary"><span>House management</span><small>Tenant details and recurring rent setup</small></summary>
+        <div class="room-account-disclosure-content">
         <p id="room-management-status" class="status-text">
           Tenant and rent setup will load here.
         </p>
@@ -179,10 +207,6 @@
                 />
               </label>
               <label>
-                Current Balance (KSh)
-                <input name="balanceKsh" type="number" min="0" max="5000000" step="1" />
-              </label>
-              <label>
                 Due Date
                 <input name="dueDate" type="date" required />
               </label>
@@ -239,10 +263,15 @@
               <button id="room-rent-setup-submit" type="submit">Save Rent Setup</button>
             </div>
           </form>
-        </div>
-      </section>
 
-      <section class="panel wide-panel room-account-grid-panel">
+
+        </div>
+        </div>
+      </details>
+
+      <details class="panel wide-panel room-account-grid-panel room-account-disclosure">
+        <summary class="room-account-disclosure-summary"><span>House profile & utility setup</span><small>Billing rules, tenancy and meter details</small></summary>
+        <div class="room-account-disclosure-content">
         <div class="room-account-grid">
           <article class="package-card">
             <div class="panel-head">
@@ -263,13 +292,17 @@
 
           <article class="package-card">
             <div class="panel-head">
-              <h2>Resident + Agreement</h2>
+              <h2>Tenancy Details</h2>
             </div>
             <div id="room-profile-grid" class="resident-agreement-overview"></div>
           </article>
         </div>
-      </section>
+        </div>
+      </details>
 
+      <details id="room-billing-history" class="panel wide-panel room-account-disclosure">
+        <summary class="room-account-disclosure-summary"><span>History & records</span><small>Billing holds, audit trail, bills, payments and issues</small></summary>
+        <div class="room-account-disclosure-content">
       <section class="panel wide-panel">
         <div class="panel-head">
           <h2>Billing Holds</h2>
@@ -351,7 +384,7 @@
         </div>
       </section>
 
-      <section class="panel wide-panel">
+      <section id="room-rent-payments-section" class="panel wide-panel">
         <div class="panel-head">
           <h2>Rent Payments</h2>
         </div>
@@ -425,6 +458,8 @@
           <p class="status-text">No house issues loaded yet.</p>
         </div>
       </section>
+        </div>
+      </details>
     </main>
 
     <div id="room-balance-confirm-backdrop" class="room-confirm-backdrop hidden"></div>
@@ -450,6 +485,6 @@
       </div>
     </section>
 
-    <script type="module" src="/room-account.js?v=20261110-intake-draft"></script>
+    <script type="module" src="/room-account.js?v=adba7b30d9"></script>
   </body>
 </html>

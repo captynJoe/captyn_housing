@@ -60,6 +60,16 @@ const roomAgreementSubmitEl = document.getElementById("room-agreement-submit");
 const roomRentSetupFormEl = document.getElementById("room-rent-setup-form");
 const roomRentSetupStateEl = document.getElementById("room-rent-setup-state");
 const roomRentSetupSubmitEl = document.getElementById("room-rent-setup-submit");
+const roomPaymentArrangementFormEl = document.getElementById("room-payment-arrangement-form");
+const roomBalanceAdjustmentFormEl = document.getElementById("room-balance-adjustment-form");
+const roomBalanceAdjustmentSubmitEl = document.getElementById("room-balance-adjustment-submit");
+const roomOpenRentHistoryBtnEl = document.getElementById("room-open-rent-history");
+const roomBillingHistoryDetailsEl = document.getElementById("room-billing-history");
+const roomRentSetupCorrectionLinkEl = document.getElementById("room-rent-setup-correction-link");
+const roomRentPaymentsSectionEl = document.getElementById("room-rent-payments-section");
+const roomPaymentArrangementStateEl = document.getElementById("room-payment-arrangement-state");
+const roomPaymentArrangementSummaryEl = document.getElementById("room-payment-arrangement-summary");
+const roomPaymentArrangementSubmitEl = document.getElementById("room-payment-arrangement-submit");
 const roomRentDueDayDefaultActionEl = document.getElementById(
   "room-rent-due-day-default-action"
 );
@@ -962,10 +972,10 @@ function renderMetrics(payload) {
     metricOutstandingEl.textContent = formatCurrency(summary.displayedOutstandingKsh ?? 0);
   }
   if (metricProjectedEl instanceof HTMLElement) {
-    metricProjectedEl.textContent = formatCurrency(summary.projectedOutstandingKsh ?? 0);
+    metricProjectedEl.textContent = formatCurrency(summary.rentOutstandingKsh ?? 0);
   }
   if (metricCurrentUtilityEl instanceof HTMLElement) {
-    metricCurrentUtilityEl.textContent = formatCurrency(summary.currentUtilityDueKsh ?? 0);
+    metricCurrentUtilityEl.textContent = formatCurrency(summary.utilityOutstandingKsh ?? 0);
   }
   if (metricChargesEl instanceof HTMLElement) {
     metricChargesEl.textContent = formatCurrency(summary.expenseChargesKsh ?? 0);
@@ -1117,28 +1127,13 @@ function renderProfile(payload) {
   }
 
   const room = payload?.room ?? {};
-  const summary = payload?.summary ?? {};
   const building = payload?.building ?? {};
   const profileRows = [
-    ["House", normalizeHouse(room.houseNumber || state.houseNumber)],
-    ["Resident", room.residentName || "Vacant"],
-    ["Phone", room.residentPhone || "-"],
-    [
-      "Verification",
-      String(room?.verificationStatus ?? "").trim() === "pending_review"
-        ? "Pending review"
-        : room.residentName
-          ? "Verified / active"
-          : "-"
-    ],
-    ["Monthly Rent", Number(room.monthlyRentKsh ?? 0) > 0 ? formatCurrency(room.monthlyRentKsh) : "-"],
-    ["Current Rent Due", formatCurrency(summary.currentMonthRentOutstandingKsh ?? 0)],
-    ["Rent Outstanding", formatCurrency(summary.rentOutstandingKsh ?? 0)],
-    ["Utility Arrears", formatCurrency(summary.utilityArrearsKsh ?? 0)],
-    ["Water Meter", room.waterMeterNumber || "Missing"],
-    ["Electric Meter", room.electricityMeterNumber || "Missing"],
-    ["Registered In Building", building.houseRegistered ? "Yes" : "No"],
-    ["Visible To Current Account", building.visibleToLandlord ? "Yes" : "No"]
+    ["Resident status", String(room?.verificationStatus ?? "").trim() === "pending_review" ? "Pending review" : room.residentName ? "Verified / active" : "Vacant"],
+    ["Lease", [formatDateOnly(getAgreement(payload)?.leaseStartDate), formatDateOnly(getAgreement(payload)?.leaseEndDate)].filter((value) => value !== "-").join(" to ") || "Not recorded"],
+    ["Water meter", room.waterMeterNumber || "Not set"],
+    ["Electricity meter", room.electricityMeterNumber || "Not set"],
+    ["House registered", building.houseRegistered ? "Yes" : "No"]
   ];
 
   roomProfileGridEl.innerHTML = profileRows
@@ -1287,11 +1282,6 @@ function renderManagementForms(payload) {
       "monthlyRentKsh",
       formatRoomDefaultPlaceholder(room.buildingDefaultMonthlyRentKsh, formatCurrency)
     );
-    setFormFieldValue(
-      roomRentSetupFormEl,
-      "balanceKsh",
-      numberToInputString(room.rentBalanceKsh)
-    );
     setFormFieldValue(roomRentSetupFormEl, "dueDate", toDateInputValue(room.rentDueDate));
     setFormFieldValue(
       roomRentSetupFormEl,
@@ -1332,6 +1322,31 @@ function renderManagementForms(payload) {
       roomRentSetupSubmitEl.disabled = !canEditRent || state.formSaving;
     }
     syncRentDueDayDefaultAction(room);
+  }
+
+  if (roomBalanceAdjustmentFormEl instanceof HTMLFormElement) {
+    setFormFieldValue(roomBalanceAdjustmentFormEl, "rentBalanceKsh", numberToInputString(room.rentBalanceKsh));
+    setFormFieldValue(roomBalanceAdjustmentFormEl, "reason", "");
+    setFormControlsEnabled(roomBalanceAdjustmentFormEl, canEditRent);
+    if (roomBalanceAdjustmentSubmitEl instanceof HTMLButtonElement) roomBalanceAdjustmentSubmitEl.disabled = !canEditRent || state.formSaving;
+  }
+
+  if (roomPaymentArrangementFormEl instanceof HTMLFormElement) {
+    const arrangement = payload?.rentPaymentArrangement ?? null;
+    setFormFieldValue(roomPaymentArrangementFormEl, "promisedDate", arrangement?.promisedDate ?? "");
+    setFormFieldValue(roomPaymentArrangementFormEl, "note", arrangement?.note ?? "");
+    setFormControlsEnabled(roomPaymentArrangementFormEl, canEditRent && Boolean(room.hasActiveResident));
+    if (roomPaymentArrangementSubmitEl instanceof HTMLButtonElement) {
+      roomPaymentArrangementSubmitEl.disabled = !canEditRent || !room.hasActiveResident || Number(room.rentBalanceKsh ?? 0) <= 0 || state.formSaving;
+    }
+    setPillText(roomPaymentArrangementStateEl, arrangement?.status === "missed" ? "Missed" : arrangement?.status === "fulfilled" ? "Cleared" : arrangement ? "Active" : "No arrangement");
+    if (roomPaymentArrangementSummaryEl instanceof HTMLElement) {
+      roomPaymentArrangementSummaryEl.textContent = arrangement
+        ? `${formatCurrency(arrangement.balanceAtPromiseKsh)} was outstanding when promised for ${formatDateOnly(arrangement.promisedDate)}.${arrangement.note ? ` Note: ${arrangement.note}` : ""}`
+        : room.hasActiveResident
+          ? `Current rent balance: ${formatCurrency(room.rentBalanceKsh)}. This records the date the resident agreed to clear this balance.`
+          : "An active resident is required to record a payment arrangement.";
+    }
   }
 
   renderIdentityDocumentPreview();
@@ -1893,12 +1908,18 @@ function setRoomFormsSaving(saving) {
   const rentEnabled = !saving && canEditRentSetup();
   setFormControlsEnabled(roomAgreementFormEl, tenantEnabled);
   setFormControlsEnabled(roomRentSetupFormEl, rentEnabled);
+  setFormControlsEnabled(roomPaymentArrangementFormEl, rentEnabled && Boolean(state.data?.room?.hasActiveResident) && Number(state.data?.room?.rentBalanceKsh ?? 0) > 0);
+  setFormControlsEnabled(roomBalanceAdjustmentFormEl, rentEnabled);
   if (roomAgreementSubmitEl instanceof HTMLButtonElement) {
     roomAgreementSubmitEl.disabled = !tenantEnabled;
   }
   if (roomRentSetupSubmitEl instanceof HTMLButtonElement) {
     roomRentSetupSubmitEl.disabled = !rentEnabled;
   }
+  if (roomPaymentArrangementSubmitEl instanceof HTMLButtonElement) {
+    roomPaymentArrangementSubmitEl.disabled = !rentEnabled || !state.data?.room?.hasActiveResident || Number(state.data?.room?.rentBalanceKsh ?? 0) <= 0;
+  }
+  if (roomBalanceAdjustmentSubmitEl instanceof HTMLButtonElement) roomBalanceAdjustmentSubmitEl.disabled = !rentEnabled;
 }
 
 function describeMissingFinalizeFields(payload) {
@@ -2018,7 +2039,6 @@ async function saveRoomRentSetup(event) {
     roomDefaultMonthlyRentKsh ??
     toOptionalNumber(room.configuredMonthlyRentKsh ?? room.monthlyRentKsh) ??
     0;
-  const requestedBalanceKsh = toOptionalNumber(getFormFieldValue(form, "balanceKsh"));
   const currentBalanceKsh = toOptionalNumber(room.rentBalanceKsh) ?? 0;
   const dueDate = dateInputToIso(getFormFieldValue(form, "dueDate"));
   const roomDefaultPaymentDueDay = toOptionalNumber(
@@ -2045,21 +2065,6 @@ async function saveRoomRentSetup(event) {
   if (depositPaidKsh != null && depositKsh != null && depositPaidKsh > depositKsh) {
     showError("Deposit paid cannot be more than the agreed deposit amount.");
     return;
-  }
-
-  if (requestedBalanceKsh != null && requestedBalanceKsh !== currentBalanceKsh) {
-    const targetLabel =
-      String(room.residentName ?? "").trim() ||
-      `house ${normalizeHouse(room.houseNumber || state.houseNumber)}`;
-    const confirmed = await confirmBalanceAdjustment({
-      currentBalanceKsh,
-      nextBalanceKsh: requestedBalanceKsh,
-      targetLabel
-    });
-    if (!confirmed) {
-      setManagementStatus("Balance adjustment cancelled.");
-      return;
-    }
   }
 
   setRoomFormsSaving(true);
@@ -2103,7 +2108,7 @@ async function saveRoomRentSetup(event) {
       toOptionalNumber(savedSetupRow?.resolvedMonthlyRentKsh) ?? fallbackMonthlyRentKsh;
     const resolvedPaymentDueDay =
       toOptionalNumber(savedSetupRow?.resolvedDueDay) ?? paymentDueDay;
-    const balanceKsh = requestedBalanceKsh ?? currentBalanceKsh ?? monthlyRentKsh;
+    const balanceKsh = currentBalanceKsh ?? monthlyRentKsh;
 
     await requestJson(`/api/landlord/rent-due/${encodeURIComponent(state.houseNumber)}`, {
       method: "PUT",
@@ -2153,6 +2158,87 @@ async function saveRoomRentSetup(event) {
     const message = error instanceof Error ? error.message : "Unable to save rent setup.";
     showError(message);
     setManagementStatus("Rent setup save failed.");
+  } finally {
+    setRoomFormsSaving(false);
+  }
+}
+
+async function saveRentBalanceAdjustment(event) {
+  event.preventDefault();
+  if (state.loading || state.formSaving || !canEditRentSetup()) return;
+  const form = event.currentTarget;
+  if (!(form instanceof HTMLFormElement)) return;
+  const room = getRoom();
+  const nextBalance = toOptionalNumber(getFormFieldValue(form, "rentBalanceKsh"));
+  const reason = String(getFormFieldValue(form, "reason") ?? "").trim();
+  const currentBalanceKsh = Math.max(0, Math.round(Number(room.rentBalanceKsh ?? 0)));
+  if (nextBalance == null || reason.length < 3) {
+    showError("Enter the correct balance and a reason of at least 3 characters.");
+    return;
+  }
+  const nextBalanceKsh = Math.round(nextBalance);
+  const confirmed = await confirmBalanceAdjustment({
+    currentBalanceKsh,
+    nextBalanceKsh,
+    targetLabel: `${room.residentName || "Resident"} • House ${normalizeHouse(room.houseNumber || state.houseNumber)}`
+  });
+  if (!confirmed) return;
+  setRoomFormsSaving(true);
+  showError("");
+  setManagementStatus("Updating rent balance...");
+  try {
+    await requestJson(`/api/landlord/buildings/${encodeURIComponent(state.buildingId)}/houses/${encodeURIComponent(state.houseNumber)}/balance-adjustments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ rentBalanceKsh: nextBalanceKsh, reason, markChecked: true })
+    });
+    await loadRoomAccount();
+    setFormFieldValue(form, "rentBalanceKsh", String(nextBalanceKsh));
+    setFormFieldValue(form, "reason", "");
+    setManagementStatus("Rent balance updated. The before/after amounts and reason are in the account audit.");
+    notifyStatus("Rent balance updated and audited.");
+  } catch (error) {
+    if (error?.status === 401) {
+      redirectToLogin();
+      return;
+    }
+    showError(error instanceof Error ? error.message : "Unable to update rent balance.");
+    setManagementStatus("Rent balance was not changed.");
+  } finally {
+    setRoomFormsSaving(false);
+  }
+}
+
+async function savePaymentArrangement(event) {
+  event.preventDefault();
+  if (state.loading || state.formSaving || !canEditRentSetup()) return;
+  const form = event.currentTarget;
+  if (!(form instanceof HTMLFormElement)) return;
+  const promisedDate = String(getFormFieldValue(form, "promisedDate") ?? "").trim();
+  const note = normalizeOptionalString(getFormFieldValue(form, "note"));
+  if (!promisedDate) {
+    showError("Choose the date the resident promised to pay.");
+    return;
+  }
+  setRoomFormsSaving(true);
+  showError("");
+  setManagementStatus("Recording payment arrangement...");
+  try {
+    await requestJson(`/api/landlord/buildings/${encodeURIComponent(state.buildingId)}/rooms/${encodeURIComponent(state.houseNumber)}/payment-arrangement`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ promisedDate, note })
+    });
+    await loadRoomAccount();
+    setManagementStatus("Payment arrangement recorded and visible to the resident.");
+    notifyStatus("Payment arrangement recorded.");
+  } catch (error) {
+    if (error?.status === 401) {
+      redirectToLogin();
+      return;
+    }
+    showError(error instanceof Error ? error.message : "Unable to record payment arrangement.");
+    setManagementStatus("Payment arrangement could not be saved.");
   } finally {
     setRoomFormsSaving(false);
   }
@@ -2386,6 +2472,14 @@ async function init() {
     const route = parseRoomRoute();
     state.buildingId = route.buildingId;
     state.houseNumber = route.houseNumber;
+    if (roomRentSetupCorrectionLinkEl instanceof HTMLAnchorElement) {
+      const params = new URLSearchParams({
+        rentSetup: "1",
+        buildingId: state.buildingId,
+        houseNumber: state.houseNumber
+      });
+      roomRentSetupCorrectionLinkEl.href = `/landlord?${params.toString()}`;
+    }
     setStatus("Loading house account...");
     await loadRoomAccount();
   } catch (error) {
@@ -2422,6 +2516,16 @@ roomBillingHoldFormEl?.addEventListener("submit", createBillingHold);
 roomBillingHoldsEl?.addEventListener("click", handleBillingHoldClick);
 roomAgreementFormEl?.addEventListener("submit", saveRoomAgreement);
 roomRentSetupFormEl?.addEventListener("submit", saveRoomRentSetup);
+roomPaymentArrangementFormEl?.addEventListener("submit", savePaymentArrangement);
+roomBalanceAdjustmentFormEl?.addEventListener("submit", saveRentBalanceAdjustment);
+roomOpenRentHistoryBtnEl?.addEventListener("click", () => {
+  if (roomBillingHistoryDetailsEl instanceof HTMLDetailsElement) {
+    roomBillingHistoryDetailsEl.open = true;
+  }
+  window.requestAnimationFrame(() => {
+    roomRentPaymentsSectionEl?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+});
 roomRentDueDayDefaultActionEl?.addEventListener("click", (event) => {
   event.preventDefault();
   if (!state.buildingId) {

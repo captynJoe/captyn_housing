@@ -216,6 +216,7 @@ export interface UtilityMeterReadingEvent {
   billId?: string;
   dueDate?: string;
   status: "charged" | "unbilled";
+  correctionReason?: string;
 }
 
 export interface UtilityBillingPersistedState {
@@ -604,6 +605,32 @@ export class UtilityBillingService {
     };
     this.meterReadingHistory.push(event);
     return { ...event };
+  }
+
+  getMeterReadingEvent(eventId: string): UtilityMeterReadingEvent | null {
+    const event = this.meterReadingHistory.find((item) => item.id === eventId);
+    return event ? { ...event } : null;
+  }
+
+  updateMeterReadingEvent(eventId: string, update: Partial<UtilityMeterReadingEvent>) {
+    const index = this.meterReadingHistory.findIndex((item) => item.id === eventId);
+    if (index < 0) return null;
+    const current = this.meterReadingHistory[index];
+    const next = {
+      ...current,
+      ...update,
+      id: current.id,
+      buildingId: current.buildingId,
+      houseNumber: current.houseNumber,
+      utilityType: current.utilityType,
+      recordedAt: current.recordedAt
+    };
+    if (next.previousReading != null && next.currentReading < next.previousReading) {
+      throw new Error("Corrected reading cannot be lower than its starting reading.");
+    }
+    this.meterReadingHistory[index] = next;
+    this.emitStateChange();
+    return { ...next };
   }
 
   listMeterReadingHistory(buildingId: string, houseNumber?: string, limit = 500) {

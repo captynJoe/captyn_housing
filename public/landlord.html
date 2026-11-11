@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=044c9c08af" />
-    <link rel="stylesheet" href="/landlord.css?v=219787e7a6" />
+    <link rel="stylesheet" href="/landlord.css?v=862ab39b00" />
     <script src="/captyn-theme.js?v=6944e37fb6"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=d9fd4fe626" />
     <link rel="stylesheet" href="/landlord-shell.css?v=8811880344" />
@@ -188,7 +188,7 @@
                   <th>House</th>
                   <th>Status</th>
                   <th>Monthly Rent</th>
-                  <th>Paid This Month</th>
+                  <th title="May include a manually marked amount; Latest Payment shows recorded receipts.">Rent Paid / Marked</th>
                   <th>Late Fee</th>
                   <th>Due This Month</th>
                   <th>Total Outstanding</th>
@@ -896,7 +896,7 @@
                   <th>House</th>
                   <th>Status</th>
                   <th>Monthly Rent</th>
-                  <th>Paid This Month</th>
+                  <th title="May include a manually marked amount; Latest Payment shows recorded receipts.">Rent Paid / Marked</th>
                   <th>Late Fee</th>
                   <th>Due This Month</th>
                   <th>Arrears</th>
@@ -1632,82 +1632,102 @@
 
       <div id="rent-sheet-backdrop" class="landlord-drawer-backdrop hidden"></div>
       <aside id="rent-sheet-modal" class="landlord-sheet-modal hidden" aria-label="Rent setup sheet">
-        <header class="landlord-drawer-head">
+        <header class="landlord-drawer-head rent-sheet-header">
           <h2>Rent Setup Sheet</h2>
+          <label class="rent-sheet-building-picker">
+            <span>Building</span>
+            <select id="rent-sheet-building-select"></select>
+          </label>
           <button id="close-rent-sheet-btn" type="button" class="ghost-btn">Close</button>
         </header>
 
         <form id="rent-sheet-form" class="package-card landlord-sheet-form rent-sheet-form">
+          <details class="rent-sheet-defaults" aria-labelledby="rent-sheet-defaults-title">
+            <summary class="rent-sheet-defaults-summary">
+              <span>
+                <strong id="rent-sheet-defaults-title">Building defaults</strong>
+                <small>Set the standard rent and billing terms for this building</small>
+              </span>
+              <span class="rent-sheet-defaults-toggle">Edit defaults</span>
+            </summary>
+            <div class="rent-sheet-defaults-content">
+              <div class="rent-sheet-default-grid">
+              <label>
+                Monthly rent (KSh)
+                <input id="rent-sheet-default-monthly-rent" type="number" min="0" step="1" placeholder="Not set" />
+              </label>
+              <label>
+                Deposit required (KSh)
+                <input id="rent-sheet-default-deposit" type="number" min="0" step="1" placeholder="Not set" />
+              </label>
+              <label>
+                Rent due day
+                <input id="rent-sheet-default-due-day" type="number" min="1" max="31" step="1" placeholder="Not set" />
+              </label>
+              <label>
+                Grace period (days)
+                <input id="rent-sheet-default-grace-days" type="number" min="0" max="31" step="1" placeholder="0" />
+              </label>
+              <label>
+                Start charging from
+                <input id="rent-sheet-charge-start-date" type="date" />
+              </label>
+              </div>
+              <details class="rent-sheet-note-details">
+              <summary>Add a note for this setup</summary>
+              <label>
+                Note (optional)
+                <input
+                  id="rent-sheet-note"
+                  type="text"
+                  maxlength="280"
+                  placeholder="House rent setup by landlord."
+                />
+              </label>
+              </details>
+              <p class="rent-sheet-help">
+                Defaults fill in blank house settings. Existing opening balances should include rent still owed only; record old receipts in Payment Corrections.
+              </p>
+            </div>
+          </details>
 
-          <div class="inline-fields compact-fields">
-            <label>
-              Building
-              <select id="rent-sheet-building-select"></select>
-            </label>
-            <label>
-              Building Default Rent
-              <input id="rent-sheet-default-monthly-rent" type="number" min="0" step="1" placeholder="Set" />
-            </label>
-            <label>
-              Default Deposit
-              <input id="rent-sheet-default-deposit" type="number" min="0" step="1" placeholder="Set" />
-            </label>
-            <label>
-              Due Day
-              <input id="rent-sheet-default-due-day" type="number" min="1" max="31" step="1" placeholder="Set" />
-            </label>
-            <label>
-              Grace Days
-              <input id="rent-sheet-default-grace-days" type="number" min="0" max="31" step="1" placeholder="Set" />
-            </label>
-            <label>
-              Charge Start Date
-              <input id="rent-sheet-charge-start-date" type="date" />
-            </label>
+          <section class="rent-sheet-houses-section" aria-labelledby="rent-sheet-houses-title">
+            <div class="rent-sheet-section-heading rent-sheet-houses-heading">
+              <div>
+                <h3 id="rent-sheet-houses-title">House settings</h3>
+                <p>Set exceptions and opening balances house by house.</p>
+              </div>
+              <div class="rent-sheet-counts" aria-live="polite">
+                <span><strong id="rent-sheet-count-total">0</strong> houses</span>
+                <span><strong id="rent-sheet-count-occupied">0</strong> occupied</span>
+                <span><strong id="rent-sheet-count-needs-rent">0</strong> need rent setup</span>
+              </div>
+            </div>
+            <div class="rent-sheet-tools">
+              <label class="rent-sheet-search">
+                <span class="sr-only">Search houses or residents</span>
+                <input id="rent-sheet-search" type="search" placeholder="Search house or resident…" autocomplete="off" />
+              </label>
+              <label class="rent-sheet-filter-label">
+                <span class="sr-only">Filter houses</span>
+                <select id="rent-sheet-filter">
+                  <option value="all">All houses</option>
+                  <option value="occupied">Occupied</option>
+                  <option value="vacant">Vacant</option>
+                  <option value="needs-rent">Needs rent setup</option>
+                </select>
+              </label>
+              <button id="rent-sheet-reload-btn" type="button" class="ghost-btn">Reload houses</button>
+            </div>
+            <div id="rent-sheet-body" class="rent-sheet-houses" aria-live="polite"></div>
+          </section>
+
+          <div class="rent-sheet-footer">
+            <p id="rent-sheet-status" class="status-text" role="status"></p>
+            <div class="action-row">
+              <button id="rent-sheet-submit-btn" type="submit">Save rent setup</button>
+            </div>
           </div>
-
-          <label>
-            Note (optional)
-            <input
-              id="rent-sheet-note"
-              type="text"
-              maxlength="280"
-              placeholder="House rent setup by landlord."
-            />
-          </label>
-
-          <p class="status-text">
-            Monthly rent sets the recurring amount. Current Balance is rent still owed. Deposit Required, Deposit Paid, and Deposit Due track the tenant agreement. For old receipts, split each receipt in Payment Corrections; enter opening balances here only when those receipts are not recorded.
-          </p>
-          <div class="table-wrap utility-sheet-table-wrap rent-sheet-table-wrap">
-            <table class="utility-sheet-table">
-              <thead>
-                <tr>
-                  <th>House</th>
-                  <th>Resident</th>
-                  <th>Source</th>
-                  <th>Resolved Rent</th>
-                  <th>House Default Rent</th>
-                  <th>Deposit Required</th>
-                  <th>Deposit Paid</th>
-                  <th>Deposit Due</th>
-                  <th>Due Day</th>
-                  <th>Grace</th>
-                  <th>Charge Rent</th>
-                  <th>Current Balance (KSh)</th>
-                  <th>Paid This Month</th>
-                  <th>Arrears</th>
-                </tr>
-              </thead>
-              <tbody id="rent-sheet-body"></tbody>
-            </table>
-          </div>
-
-          <div class="action-row">
-            <button id="rent-sheet-submit-btn" type="submit">Save Rent Setup</button>
-            <button id="rent-sheet-reload-btn" type="button" class="ghost-btn">Reload Houses</button>
-          </div>
-          <p id="rent-sheet-status" class="status-text"></p>
         </form>
       </aside>
 
@@ -2135,6 +2155,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=20261110-portfolio-access"></script>
+    <script type="module" src="/landlord.js?v=41dfd1f0da"></script>
   </body>
 </html>

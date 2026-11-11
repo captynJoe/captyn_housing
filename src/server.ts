@@ -314,6 +314,7 @@ const talksasaTimeoutMs = Number(process.env.TALKSASA_HTTP_TIMEOUT_MS ?? 12000);
 const notificationSweepToken = String(process.env.NOTIFICATION_SWEEP_TOKEN ?? "").trim();
 const ADMIN_AUTH_STATE_KEY = "admin_auth_v1";
 const RENT_LEDGER_STATE_KEY = "rent_ledger_v1";
+const RENT_PAYMENT_ARRANGEMENTS_STATE_KEY = "rent_payment_arrangements_v1";
 const UTILITY_BILLING_STATE_KEY = "utility_billing_v1";
 const UTILITY_BULK_SUBMISSION_AUDIT_STATE_KEY = "utility_bulk_submission_audit_v1";
 const USER_SUPPORT_STATE_KEY = "user_support_v1";
@@ -1389,6 +1390,8 @@ async function bootstrap() {
     ResidentPasswordRecoveryRequestRecord
   >();
   const residentPaymentReports = new Map<string, ResidentPaymentReportRecord>();
+  const rentPaymentArrangements = new Map<string, { id: string; buildingId: string; houseNumber: string; residentUserId?: string; balanceAtPromiseKsh: number; promisedDate: string; note?: string; status: "active" | "fulfilled" | "missed" | "cancelled"; createdAt: string; updatedAt: string; createdByName: string }>();
+  const rentPaymentArrangementKey = (buildingId: string, houseNumber: string) => `${normalizeBuildingId(buildingId)}:${normalizeHouseNumber(houseNumber)}`;
   const accountPasswordRecoveryRequests = new Map<
     string,
     AccountPasswordRecoveryRequestRecord
@@ -3826,6 +3829,7 @@ async function bootstrap() {
       const [
         adminAuthState,
         rentState,
+        rentPaymentArrangementState,
         utilityState,
         userSupportState,
         paymentAccessState,
@@ -3842,6 +3846,7 @@ async function bootstrap() {
       ] = await Promise.all([
         loadAppStateJsonSafely<AdminAuthPersistedState>(ADMIN_AUTH_STATE_KEY),
         loadAppStateJsonSafely<RentLedgerPersistedState>(RENT_LEDGER_STATE_KEY),
+        loadAppStateJsonSafely<Array<{ id: string; buildingId: string; houseNumber: string; residentUserId?: string; balanceAtPromiseKsh: number; promisedDate: string; note?: string; status: "active" | "fulfilled" | "missed" | "cancelled"; createdAt: string; updatedAt: string; createdByName: string }>>(RENT_PAYMENT_ARRANGEMENTS_STATE_KEY),
         loadAppStateJsonSafely<UtilityBillingPersistedState>(
           UTILITY_BILLING_STATE_KEY
         ),
@@ -3881,6 +3886,11 @@ async function bootstrap() {
 
       adminAuthService.importState(adminAuthState);
       rentLedgerService.importState(rentState);
+      rentPaymentArrangements.clear();
+      for (const item of Array.isArray(rentPaymentArrangementState) ? rentPaymentArrangementState : []) {
+        if (!item?.buildingId || !item?.houseNumber || !item?.promisedDate) continue;
+        rentPaymentArrangements.set(rentPaymentArrangementKey(item.buildingId, item.houseNumber), item);
+      }
       const utilityStateNormalized = utilityBillingService.importState(utilityState);
       userSupportService.importState(userSupportState);
       paymentAccessService.importState(paymentAccessState);
@@ -6733,6 +6743,7 @@ async function bootstrap() {
       },
       utilityBills,
       rentPayments,
+      rentPaymentArrangement: getRentPaymentArrangement(building.id, normalizedHouseNumber, room.rentBalanceKsh),
       utilityPayments,
       expenditures,
       tickets,
@@ -6894,6 +6905,54 @@ async function bootstrap() {
           dueDate: buildAgreementFallbackRentDueDate(
             agreement.paymentDueDay ?? undefined,
             agreement.leaseStartDate
+          ),
+          latestPaymentReference: undefined,
+          latestPaymentAt: undefined,
+          latestPaymentAmountKsh: undefined
+        });
+      }
+
+      const roomRentDefaults = await repositoryContext.prisma.roomRentDefault.findMany({
+        where: {
+          buildingId: { in: [...visibleBuildingIds] },
+          active: true,
+          monthlyRentKsh: { gt: 0 }
+        },
+        select: {
+          buildingId: true,
+          houseNumber: true,
+          monthlyRentKsh: true,
+          paymentDueDay: true
+        },
+        orderBy: { updatedAt: "desc" }
+      });
+      for (const roomDefault of roomRentDefaults) {
+        const houseNumber = normalizeHouseNumber(roomDefault.houseNumber);
+        const key = `${normalizeBuildingId(roomDefault.buildingId)}:${houseNumber}`;
+        if (!activeRentRoomKeys.has(key) || collectionRowsByKey.has(key)) {
+          continue;
+        }
+
+        const monthlyRentKsh = Math.max(0, Number(roomDefault.monthlyRentKsh ?? 0));
+        if (monthlyRentKsh <= 0) {
+          continue;
+        }
+
+        collectionRowsByKey.set(key, {
+          buildingId: roomDefault.buildingId,
+          houseNumber,
+          paymentStatus: "NOT_PAID",
+          monthlyRentKsh,
+          balanceKsh: monthlyRentKsh,
+          paidAmountKsh: 0,
+          currentMonthPaidKsh: 0,
+          currentMonthOutstandingKsh: monthlyRentKsh,
+          arrearsKsh: 0,
+          totalPaidKsh: 0,
+          currentMonthLatePenaltyKsh: 0,
+          totalLatePenaltyKsh: 0,
+          dueDate: buildAgreementFallbackRentDueDate(
+            roomDefault.paymentDueDay ?? undefined
           ),
           latestPaymentReference: undefined,
           latestPaymentAt: undefined,
@@ -7404,6 +7463,34 @@ async function bootstrap() {
       RENT_LEDGER_STATE_KEY,
       rentLedgerService.exportState()
     );
+  };
+
+  const persistRentPaymentArrangements = async () => {
+    if (!appStateService) return;
+    await appStateService.queueSetJson(
+      RENT_PAYMENT_ARRANGEMENTS_STATE_KEY,
+      [...rentPaymentArrangements.values()]
+    );
+  };
+
+  const getRentPaymentArrangement = (buildingId: string, houseNumber: string, currentBalanceKsh?: number) => {
+    const item = rentPaymentArrangements.get(rentPaymentArrangementKey(buildingId, houseNumber));
+    if (!item || item.status === "cancelled") return null;
+    const balance = Math.max(0, Math.round(Number(currentBalanceKsh ?? item.balanceAtPromiseKsh)));
+    const today = new Date().toISOString().slice(0, 10);
+    const status = item.status === "fulfilled" || balance <= 0
+      ? "fulfilled"
+      : item.promisedDate < today
+        ? "missed"
+        : "active";
+    if (status === "fulfilled" && item.status !== "fulfilled" && currentBalanceKsh != null) {
+      item.status = "fulfilled";
+      item.updatedAt = new Date().toISOString();
+      void persistRentPaymentArrangements().catch((error) =>
+        console.warn("Failed to persist completed rent payment arrangement:", error)
+      );
+    }
+    return { ...item, status, currentBalanceKsh: balance };
   };
 
   const ensureRecurringUtilityBillsCurrent = async (
@@ -13385,6 +13472,10 @@ async function bootstrap() {
           notifications,
           paymentInstructions,
           rentDue,
+          rentPaymentArrangement: (() => {
+            const arrangement = getRentPaymentArrangement(session.buildingId, session.houseNumber, rentDue ? Number(rentDue.balanceKsh ?? 0) : undefined);
+            return arrangement && arrangement.residentUserId === session.userId ? arrangement : null;
+          })(),
           balanceAdjustment: balanceAdjustment
             ? {
                 kind: balanceAdjustment.kind,
@@ -17931,6 +18022,54 @@ async function bootstrap() {
     }
   });
 
+  app.post(
+    "/api/landlord/buildings/:buildingId/rooms/:houseNumber/payment-arrangement",
+    async (req, res, next) => {
+      try {
+        const context = await resolveLandlordAccessContext(req, res);
+        if (!context) return;
+        if (context.role === "caretaker") return res.status(403).json({ error: "Only management can record payment arrangements." });
+        const building = await store.getBuilding(req.params.buildingId?.trim() ?? "");
+        if (!building) return res.status(404).json({ error: "Building not found." });
+        if (!(await canManageBuildingFromLandlordContext(context, building.id))) return res.status(403).json({ error: "Building access denied." });
+        const houseNumber = normalizeHouseNumber(houseNumberQuerySchema.parse({ houseNumber: req.params.houseNumber }).houseNumber);
+        const promisedDate = typeof req.body?.promisedDate === "string" ? req.body.promisedDate.trim() : "";
+        const parsedPromiseDate = new Date(`${promisedDate}T00:00:00.000Z`);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(promisedDate) || Number.isNaN(parsedPromiseDate.getTime()) || parsedPromiseDate.toISOString().slice(0, 10) !== promisedDate) {
+          return res.status(400).json({ error: "Choose a valid promised payment date." });
+        }
+        const rentDue = rentLedgerService.getRentDue(building.id, houseNumber);
+        const registryRows = await buildLandlordUtilityRegistryRows(building.id, [houseNumber]);
+        const registryRow = registryRows.find((row) => normalizeHouseNumber(row.houseNumber) === houseNumber);
+        const balanceAtPromiseKsh = Math.max(0, Math.round(Number(rentDue?.balanceKsh ?? registryRow?.rentBalanceKsh ?? 0)));
+        if (balanceAtPromiseKsh <= 0) return res.status(409).json({ error: "This house has no rent balance to arrange." });
+        const active = userAccountService
+          ? await userAccountService.getActiveTenantAgreement({ buildingId: building.id, houseNumber })
+          : null;
+        if (!active?.resident?.userId) return res.status(409).json({ error: "An active resident account is required to record a payment arrangement." });
+        const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 280) : "";
+        const now = new Date().toISOString();
+        const arrangement = {
+          id: randomUUID(), buildingId: normalizeBuildingId(building.id), houseNumber,
+          residentUserId: active.resident.userId, balanceAtPromiseKsh, promisedDate,
+          ...(note ? { note } : {}), status: "active" as const, createdAt: now, updatedAt: now,
+          createdByName: actorFromLandlordContext(context).name ?? "Management"
+        };
+        rentPaymentArrangements.set(rentPaymentArrangementKey(building.id, houseNumber), arrangement);
+        await persistRentPaymentArrangements();
+        await recordRoomAccountAuditEvent({
+          buildingId: building.id, houseNumber, action: "rent.payment_arrangement.created",
+          summary: `Payment arrangement recorded for KSh ${balanceAtPromiseKsh.toLocaleString("en-US")}, promised by ${promisedDate}.`,
+          actor: actorFromLandlordContext(context),
+          metadata: { promisedDate, balanceAtPromiseKsh, note: note || undefined }
+        });
+        return res.status(201).json({ data: getRentPaymentArrangement(building.id, houseNumber, balanceAtPromiseKsh), role: context.role });
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
   app.get(
     "/api/landlord/buildings/:buildingId/rooms/:houseNumber/ledger",
     async (req, res, next) => {
@@ -18624,6 +18763,9 @@ async function bootstrap() {
           return;
         }
         const { context, building } = resolved;
+        if (context.role === "caretaker") {
+          return res.status(403).json({ error: "Caretaker access cannot change house balances." });
+        }
         if (!repositoryContext.prisma) {
           return res.status(503).json({
             error: "Balance adjustments need the database so every change is recorded."
@@ -18649,11 +18791,26 @@ async function bootstrap() {
           [];
 
         if (parsed.rentBalanceKsh !== undefined) {
-          const rent = rentLedgerService.getRentDue(building.id, houseNumber);
+          let rent = rentLedgerService.getRentDue(building.id, houseNumber);
           if (!rent) {
-            return res.status(409).json({
-              error: `Set up rent for ${houseNumber} before adjusting its rent balance.`
+            const registryRow = (await buildLandlordUtilityRegistryRows(building.id, [houseNumber]))
+              .find((item) => normalizeHouseNumber(item.houseNumber) === houseNumber);
+            const monthlyRentKsh = Math.max(0, Math.round(Number(
+              registryRow?.configuredMonthlyRentKsh ?? registryRow?.monthlyRentKsh ?? 0
+            )));
+            if (monthlyRentKsh <= 0) {
+              return res.status(409).json({
+                error: `Set up a monthly rent amount for ${houseNumber} before adjusting its balance.`
+              });
+            }
+            const openingBalanceKsh = Math.max(0, Math.round(Number(registryRow?.rentBalanceKsh ?? 0)));
+            rent = rentLedgerService.upsertRentDue(building.id, houseNumber, {
+              monthlyRentKsh,
+              balanceKsh: openingBalanceKsh,
+              dueDate: registryRow?.rentDueDate ?? buildAgreementFallbackRentDueDate(registryRow?.configuredPaymentDueDay),
+              note: "Rent ledger initialized for an audited balance correction."
             });
+            await persistRentLedgerStateNow();
           }
           const previousKsh = Math.max(0, Number(rent.balanceKsh ?? 0));
           if (previousKsh !== parsed.rentBalanceKsh) {
@@ -18768,6 +18925,110 @@ async function bootstrap() {
         remindDaysBefore: METER_READING_REMIND_DAYS_BEFORE,
         role: context.role
       });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.post("/api/landlord/buildings/:buildingId/meter-readings/:eventId/correction", async (req, res, next) => {
+    try {
+      const resolved = await resolveManagedBuildingForRequest(req, res);
+      if (!resolved) return;
+      const { context, building } = resolved;
+      const eventId = String(req.params.eventId ?? "").trim();
+      const event = utilityBillingService.getMeterReadingEvent(eventId);
+      if (!event || event.buildingId !== building.id) {
+        return res.status(404).json({ error: "Meter reading not found." });
+      }
+      const latest = utilityBillingService.listLatestMeterReadings(building.id).find(
+        (item) => item.utilityType === event.utilityType && normalizeHouseNumber(item.houseNumber) === event.houseNumber
+      );
+      if (!latest || latest.recordedAt !== event.recordedAt || latest.currentReading !== event.currentReading) {
+        return res.status(409).json({ error: "Only the latest reading can be corrected here. Correct later readings first." });
+      }
+      const reading = Number(req.body?.reading);
+      const reason = String(req.body?.reason ?? "").trim();
+      if (!Number.isFinite(reading) || reading < 0 || reading >= event.currentReading) {
+        return res.status(400).json({ error: "Enter a valid reading lower than the current recorded value." });
+      }
+      if (event.previousReading != null && reading < event.previousReading) {
+        return res.status(400).json({ error: `The corrected reading cannot be below its starting value of ${event.previousReading}.` });
+      }
+      if (reason.length < 3 || reason.length > 280) {
+        return res.status(400).json({ error: "Enter a correction reason of 3 to 280 characters." });
+      }
+
+      let correctedBill = null;
+      let correctedUnits = 0;
+      let correctedChargeKsh = 0;
+      let extraUnits = 0;
+      if (event.status === "charged") {
+        const bill = utilityBillingService.listBills({
+          buildingId: building.id,
+          houseNumber: event.houseNumber,
+          utilityType: event.utilityType,
+          limit: 1000
+        }).find((item) => item.id === event.billId);
+        if (!bill) {
+          return res.status(409).json({ error: "The linked bill could not be found, so this reading was not changed." });
+        }
+        if (bill.payments.length > 0) {
+          return res.status(409).json({ error: "This bill already has payments. Reconcile those payments before changing its reading." });
+        }
+        const startReading = event.previousReading ?? bill.previousReading;
+        const result = utilityBillingService.recordUsageReading({
+          utilityType: event.utilityType,
+          billUtilityType: bill.utilityType,
+          buildingId: building.id,
+          houseNumber: event.houseNumber,
+          billingMonth: bill.billingMonth,
+          previousReading: startReading,
+          currentReading: reading,
+          includedUnits: event.includedUnits,
+          ratePerUnitKsh: event.ratePerUnitKsh,
+          recordedAt: event.recordedAt
+        });
+        correctedBill = result.bill;
+        correctedUnits = result.charge.unitsConsumed;
+        correctedChargeKsh = result.charge.amountKsh;
+        extraUnits = result.charge.extraUnits;
+      } else {
+        utilityBillingService.recordBaselineReading({
+          utilityType: event.utilityType,
+          buildingId: building.id,
+          houseNumber: event.houseNumber,
+          reading,
+          recordedAt: event.recordedAt
+        });
+      }
+
+      const updated = utilityBillingService.updateMeterReadingEvent(event.id, {
+        currentReading: reading,
+        unitsConsumed: correctedUnits,
+        chargeAmountKsh: correctedChargeKsh,
+        extraUnits,
+        correctionReason: reason
+      });
+      await persistUtilityBillingStateNow();
+      await recordRoomAccountAuditEvent({
+        buildingId: building.id,
+        houseNumber: event.houseNumber,
+        action: "utility.meter_reading.corrected",
+        summary: `${event.utilityType} meter reading for ${new Date(event.recordedAt).toLocaleDateString("en-GB")} corrected from ${event.currentReading} to ${reading}: ${reason}`,
+        actor: actorFromLandlordContext(context),
+        metadata: {
+          eventId: event.id,
+          utilityType: event.utilityType,
+          readingDate: event.recordedAt,
+          previousReading: event.previousReading,
+          oldReading: event.currentReading,
+          correctedReading: reading,
+          oldChargeAmountKsh: event.chargeAmountKsh,
+          correctedChargeAmountKsh: correctedChargeKsh,
+          reason
+        }
+      });
+      return res.json({ data: updated, bill: correctedBill });
     } catch (error) {
       return next(error);
     }

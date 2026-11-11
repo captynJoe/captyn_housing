@@ -664,6 +664,52 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
     </div>`;
   }
 
+  async function correctLatestReading(houseNumber: string, button: HTMLElement) {
+    const eventId = String(button.dataset.eventId ?? "").trim();
+    const utility = button.dataset.utility === "electricity" ? "electricity" : "water";
+    const row = rowFor(houseNumber);
+    const event = row?.[utility].history?.find((item) => item.id === eventId);
+    if (!event || !eventId) return;
+    const readingText = window.prompt(
+      `Correct the ${UTILITY_LABEL[utility].toLowerCase()} reading recorded ${formatShortDate(event.recordedAt)}.
+Current value: ${formatFigure(event.currentReading)}
+Enter the corrected value:`,
+      String(event.currentReading)
+    );
+    if (readingText == null) return;
+    const reading = Number(readingText.trim());
+    if (!Number.isFinite(reading) || reading < 0 || reading >= event.currentReading) {
+      deps.onError(new Error("Enter a valid value lower than the current recorded reading."), "Reading correction not saved.");
+      return;
+    }
+    const reason = window.prompt("Why is this meter reading being corrected?", "Correct reading recorded on " + formatShortDate(event.recordedAt));
+    if (reason == null) return;
+    if (reason.trim().length < 3) {
+      deps.onError(new Error("Enter a correction reason of at least 3 characters."), "Reading correction not saved.");
+      return;
+    }
+    button.setAttribute("aria-busy", "true");
+    button.setAttribute("disabled", "true");
+    try {
+      await deps.requestJson(
+        `/api/landlord/buildings/${encodeURIComponent(buildingId)}/meter-readings/${encodeURIComponent(eventId)}/correction`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ reading, reason: reason.trim() })
+        }
+      );
+      deps.onStatus(`${UTILITY_LABEL[utility]} reading for house ${houseNumber} corrected; its original date remains ${formatShortDate(event.recordedAt)}.`);
+      deps.onSaved?.();
+      await load();
+    } catch (error) {
+      deps.onError(error, `Unable to correct the ${UTILITY_LABEL[utility].toLowerCase()} reading.`);
+    } finally {
+      button.removeAttribute("aria-busy");
+      button.removeAttribute("disabled");
+    }
+  }
+
   async function resumeBilling(houseNumber: string) {
     const row = rowFor(houseNumber);
     const hold = row?.billingHold;
@@ -759,7 +805,26 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
       })
       .join("");
 
-    rows.forEach((row) => renderCardState(row.houseNumber));
+    rows.forEach((row) => {
+      renderCardState(row.houseNumber);
+      for (const utility of METER_UTILITIES) {
+        const historyList = cardFor(row.houseNumber)?.querySelector<HTMLElement>(
+          ".mr-history-list"
+        );
+        const latest = row[utility].history?.[0];
+        if (!historyList || !latest || historyList.querySelector("[data-action='correct-meter-reading']")) {
+          continue;
+        }
+        const correction = document.createElement("button");
+        correction.type = "button";
+        correction.className = "mr-link mr-correct-reading";
+        correction.dataset.action = "correct-meter-reading";
+        correction.dataset.utility = utility;
+        correction.dataset.eventId = latest.id;
+        correction.textContent = "Correct latest " + UTILITY_LABEL[utility].toLowerCase() + " reading (" + formatShortDate(latest.recordedAt) + ")";
+        historyList.prepend(correction);
+      }
+    });
   }
 
   function render() {
@@ -944,6 +1009,11 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
 
     if (target.dataset.action === "save-room") {
       void saveRoom(houseNumber);
+      return;
+    }
+
+    if (target.dataset.action === "correct-meter-reading") {
+      void correctLatestReading(houseNumber, target);
       return;
     }
 

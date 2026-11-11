@@ -3407,3 +3407,711 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
     font-weight: 800;
   }
 }
+
+/* Rent setup: focused, responsive house cards instead of a wide spreadsheet. */
+#rent-sheet-backdrop {
+  z-index: 59;
+  background: rgba(3, 12, 9, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+#rent-sheet-modal {
+  z-index: 60;
+  inset: max(14px, 2vh) max(14px, 2vw);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 16px;
+  background: var(--captyn-panel, #0f1f18);
+  border-color: var(--captyn-line, rgba(255, 255, 255, 0.12));
+  color: var(--captyn-ink, #eef1fb);
+}
+
+#rent-sheet-modal .landlord-drawer-head {
+  position: sticky;
+  top: -16px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 10px;
+  margin: 0;
+  background: var(--captyn-panel, #0f1f18);
+}
+
+#rent-sheet-modal .landlord-drawer-head h2 {
+  margin: 0;
+  color: var(--captyn-ink-strong, #fff);
+  font-size: clamp(1.2rem, 2vw, 1.65rem);
+}
+
+#rent-sheet-form.rent-sheet-form {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 4px 0 2px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  align-content: stretch;
+}
+
+.rent-sheet-defaults,
+.rent-sheet-houses-section {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--captyn-line, rgba(255, 255, 255, 0.12));
+  border-radius: 14px;
+  background: var(--captyn-panel-strong, #13251c);
+}
+
+.rent-sheet-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.rent-sheet-section-heading h3 {
+  margin: 0;
+  color: var(--captyn-ink-strong, #fff);
+  font-size: 1rem;
+}
+
+.rent-sheet-section-heading p,
+.rent-sheet-help {
+  margin: 4px 0 0;
+  color: var(--captyn-muted, #96b8a8);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.rent-sheet-default-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.rent-sheet-default-grid label,
+.rent-house-primary-fields label,
+.rent-house-advanced-grid label,
+.rent-sheet-note-details label {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-width: 0;
+  margin: 0;
+  color: var(--captyn-muted, #96b8a8);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.rent-sheet-default-grid .rent-sheet-building-field {
+  grid-column: span 2;
+}
+
+#rent-sheet-modal :is(input:not([type="checkbox"]), select) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--captyn-line, rgba(255, 255, 255, 0.12));
+  border-radius: 10px;
+  background: var(--captyn-panel, #0f1f18);
+  color: var(--captyn-ink-strong, #fff);
+  font-size: 0.9rem;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+#rent-sheet-modal :is(input, select):focus-visible {
+  outline: 2px solid var(--captyn-accent, #1dc995);
+  outline-offset: 1px;
+}
+
+.rent-sheet-note-details {
+  margin-top: 10px;
+}
+
+.rent-sheet-note-details summary,
+.rent-house-advanced summary {
+  width: fit-content;
+  color: var(--captyn-accent, #1dc995);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.rent-sheet-note-details label {
+  margin-top: 8px;
+}
+
+.rent-sheet-help {
+  margin-top: 10px;
+}
+
+.rent-sheet-houses-section {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: 0;
+  gap: 10px;
+}
+
+.rent-sheet-houses-heading {
+  align-items: center;
+  margin-bottom: 0;
+}
+
+.rent-sheet-counts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.rent-sheet-counts span {
+  padding: 6px 9px;
+  border: 1px solid var(--captyn-line, rgba(255, 255, 255, 0.12));
+  border-radius: 999px;
+  color: var(--captyn-muted, #96b8a8);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.rent-sheet-counts strong {
+  color: var(--captyn-ink-strong, #fff);
+}
+
+.rent-sheet-tools {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(140px, 200px) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.rent-sheet-tools .ghost-btn {
+  min-height: 40px;
+  color: var(--captyn-ink, #eef1fb);
+  border-color: var(--captyn-line, rgba(255, 255, 255, 0.12));
+}
+
+.rent-sheet-houses {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 4px 2px 1px;
+  overscroll-behavior: contain;
+}
+
+.rent-house-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--captyn-line, rgba(255, 255, 255, 0.12));
+  border-radius: 12px;
+  background: var(--captyn-panel, #0f1f18);
+}
+
+.rent-house-card[hidden] {
+  display: none;
+}
+
+.rent-house-card-head,
+.rent-house-identity {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 9px;
+}
+
+.rent-house-card-head {
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.rent-house-number {
+  display: grid;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 10px;
+  background: rgba(29, 201, 149, 0.12);
+  color: var(--captyn-accent, #1dc995);
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.rent-house-resident {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.rent-house-resident strong {
+  overflow: hidden;
+  color: var(--captyn-ink-strong, #fff);
+  font-size: 0.88rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rent-house-resident span {
+  color: var(--captyn-muted, #96b8a8);
+  font-size: 0.73rem;
+}
+
+.rent-house-occupancy {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border: 1px solid var(--captyn-line, rgba(255, 255, 255, 0.12));
+  border-radius: 999px;
+  color: var(--captyn-muted, #96b8a8);
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+.rent-house-occupancy.is-occupied {
+  color: var(--captyn-accent, #1dc995);
+  background: rgba(29, 201, 149, 0.08);
+}
+
+.rent-house-summary {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 1px;
+  text-align: right;
+}
+
+.rent-house-summary span,
+.rent-house-summary small,
+.rent-house-deposit-due span,
+.rent-house-readonly span {
+  color: var(--captyn-muted, #96b8a8);
+  font-size: 0.65rem;
+}
+
+.rent-house-summary strong {
+  color: var(--captyn-ink-strong, #fff);
+  font-size: 0.98rem;
+}
+
+.rent-house-summary small {
+  font-size: 0.61rem;
+}
+
+.rent-house-warning {
+  margin: -2px 0 10px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(220, 148, 48, 0.12);
+  color: #f1bd6a;
+  font-size: 0.75rem;
+}
+
+.rent-house-primary-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.rent-house-primary-fields label {
+  font-size: 0.63rem;
+}
+
+.rent-house-primary-fields input {
+  min-height: 38px !important;
+}
+
+.rent-house-deposit-due {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.rent-house-deposit-due strong,
+.rent-house-readonly strong {
+  color: var(--captyn-ink-strong, #fff);
+  font-size: 0.78rem;
+}
+
+.rent-house-advanced {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--captyn-line, rgba(255, 255, 255, 0.1));
+}
+
+.rent-house-advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.rent-house-advanced-grid label {
+  font-size: 0.62rem;
+}
+
+.rent-house-advanced-grid label small {
+  color: var(--captyn-muted, #96b8a8);
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.rent-house-checkbox {
+  display: flex !important;
+  align-items: center;
+  gap: 8px !important;
+  padding: 8px;
+  border: 1px solid var(--captyn-line, rgba(255, 255, 255, 0.12));
+  border-radius: 9px;
+  color: var(--captyn-ink, #eef1fb) !important;
+  letter-spacing: normal !important;
+  text-transform: none !important;
+}
+
+.rent-house-checkbox input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--captyn-accent, #1dc995);
+}
+
+.rent-house-readonly {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--captyn-line, rgba(255, 255, 255, 0.12));
+  border-radius: 9px;
+}
+
+.rent-sheet-empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 24px;
+  border: 1px dashed var(--captyn-line, rgba(255, 255, 255, 0.18));
+  border-radius: 12px;
+  color: var(--captyn-muted, #96b8a8);
+  text-align: center;
+}
+
+.rent-sheet-footer {
+  position: sticky;
+  bottom: -2px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 2px calc(2px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--captyn-line, rgba(255, 255, 255, 0.12));
+  background: var(--captyn-panel, #0f1f18);
+}
+
+.rent-sheet-footer .status-text {
+  min-height: 1em;
+  margin: 0;
+}
+
+.rent-sheet-footer .action-row {
+  display: flex;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.rent-sheet-footer #rent-sheet-submit-btn {
+  min-height: 42px;
+  padding-inline: 22px;
+}
+
+@media (max-width: 1100px) {
+  .rent-sheet-houses {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  #rent-sheet-modal {
+    inset: 0;
+    gap: 4px;
+    padding: 12px 10px max(10px, env(safe-area-inset-bottom, 0px));
+    border-radius: 0;
+  }
+
+  #rent-sheet-modal .landlord-drawer-head {
+    top: -12px;
+    padding-bottom: 8px;
+  }
+
+  #rent-sheet-form.rent-sheet-form {
+    gap: 10px;
+    padding-inline: 0;
+  }
+
+  .rent-sheet-defaults,
+  .rent-sheet-houses-section {
+    padding: 11px;
+    border-radius: 11px;
+  }
+
+  .rent-sheet-default-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .rent-sheet-default-grid .rent-sheet-building-field {
+    grid-column: 1 / -1;
+  }
+
+  .rent-sheet-houses-heading {
+    display: grid;
+    gap: 8px;
+  }
+
+  .rent-sheet-counts {
+    justify-content: flex-start;
+  }
+
+  .rent-sheet-tools {
+    grid-template-columns: minmax(0, 1fr) minmax(110px, 0.6fr);
+  }
+
+  .rent-sheet-tools .ghost-btn {
+    grid-column: 1 / -1;
+  }
+
+  .rent-house-primary-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .rent-house-advanced-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rent-house-card-head {
+    align-items: flex-start;
+  }
+
+  .rent-house-identity {
+    flex-wrap: wrap;
+  }
+
+  .rent-house-occupancy {
+    margin-left: 47px;
+  }
+
+  .rent-sheet-footer {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .rent-sheet-footer .action-row,
+  .rent-sheet-footer #rent-sheet-submit-btn {
+    width: 100%;
+  }
+}
+
+/* Keep the house list above the fold; building terms are secondary and collapsed. */
+#rent-sheet-modal .rent-sheet-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 280px) auto;
+  align-items: center;
+  gap: 14px;
+}
+
+.rent-sheet-building-picker {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  color: var(--captyn-muted, #96b8a8);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.rent-sheet-building-picker select {
+  min-height: 38px !important;
+}
+
+.rent-sheet-defaults {
+  padding: 0;
+  overflow: hidden;
+}
+
+.rent-sheet-defaults-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 13px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.rent-sheet-defaults-summary::-webkit-details-marker {
+  display: none;
+}
+
+.rent-sheet-defaults-summary > span:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.rent-sheet-defaults-summary strong {
+  color: var(--captyn-ink-strong, #fff);
+  font-size: 0.86rem;
+}
+
+.rent-sheet-defaults-summary small {
+  color: var(--captyn-muted, #96b8a8);
+  font-size: 0.72rem;
+}
+
+.rent-sheet-defaults-toggle {
+  flex: 0 0 auto;
+  color: var(--captyn-accent, #1dc995);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.rent-sheet-defaults[open] .rent-sheet-defaults-toggle {
+  font-size: 0;
+}
+
+.rent-sheet-defaults[open] .rent-sheet-defaults-toggle::after {
+  content: "Hide defaults";
+  font-size: 0.74rem;
+}
+
+.rent-sheet-defaults-content {
+  padding: 0 13px 12px;
+}
+
+@media (max-width: 680px) {
+  #rent-sheet-modal .rent-sheet-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 10px;
+  }
+
+  #rent-sheet-modal .rent-sheet-header h2 {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .rent-sheet-building-picker {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  #rent-sheet-modal .rent-sheet-header #close-rent-sheet-btn {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .rent-sheet-defaults-summary {
+    padding: 9px 10px;
+  }
+
+  .rent-sheet-defaults-content {
+    padding: 0 10px 10px;
+  }
+}
+
+.rent-payment-arrangement {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border, #2c493d);
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--surface-2, #10251d) 78%, transparent);
+}
+.rent-payment-arrangement p { margin: 0.35rem 0 0; }
+.resident-arrangement-missed { border-color: #b7791f; }
+
+
+/* House account: prioritize a small set of actions and progressively disclose administration/history. */
+.room-account-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.room-account-actions-panel .room-management-form {
+  align-content: start;
+  background: var(--surface, rgba(255,255,255,.72));
+}
+.room-account-disclosure > summary {
+  list-style: none;
+}
+.room-account-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.room-account-disclosure-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+  padding: 3px 0;
+  font-size: 1.05rem;
+  font-weight: 750;
+}
+.room-account-disclosure-summary::after {
+  content: "+";
+  margin-left: auto;
+  color: var(--accent, #00a77b);
+  font-size: 1.25rem;
+}
+.room-account-disclosure[open] > .room-account-disclosure-summary::after {
+  content: "−";
+}
+.room-account-disclosure-summary small {
+  color: var(--muted, #72877d);
+  font-size: .82rem;
+  font-weight: 500;
+}
+.room-account-disclosure-content {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+.room-account-disclosure-content > .panel {
+  margin: 0;
+}
+.room-account-metrics .metric-card strong {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .room-account-actions-grid { grid-template-columns: 1fr; }
+  .room-account-disclosure-summary { align-items: flex-start; flex-wrap: wrap; }
+  .room-account-disclosure-summary small { order: 3; flex-basis: 100%; }
+}
+.room-account-actions-panel .room-management-form > .status-text { margin: 0; }
+.room-account-actions-panel .room-management-fields label { min-width: 0; }
+
+.room-history-link {
+  justify-self: start;
+  width: auto;
+  padding: .55rem .8rem;
+  border: 1px solid var(--border, #2c493d);
+  border-radius: .65rem;
+  color: var(--accent, #00a77b);
+  background: transparent;
+}
+#room-rent-payments-section { scroll-margin-top: 1rem; }

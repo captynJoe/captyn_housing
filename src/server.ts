@@ -19034,6 +19034,93 @@ async function bootstrap() {
     }
   });
 
+  app.post("/api/landlord/buildings/:buildingId/meter-readings/baseline-correction", async (req, res, next) => {
+    try {
+      const resolved = await resolveManagedBuildingForRequest(req, res);
+      if (!resolved) return;
+      const { context, building } = resolved;
+      const houseNumber = normalizeHouseNumber(String(req.body?.houseNumber ?? ""));
+      const utilityType = req.body?.utilityType === "electricity" ? "electricity" : req.body?.utilityType === "water" ? "water" : null;
+      const reading = Number(req.body?.reading);
+      const readingDate = typeof req.body?.readingDate === "string" ? req.body.readingDate.trim() : "";
+      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+      if (!utilityType || !houseNumber || !(building.houseNumbers ?? []).some((item) => normalizeHouseNumber(item) === houseNumber)) {
+        return res.status(400).json({ error: "Choose a valid house and utility." });
+      }
+      if (!Number.isFinite(reading) || reading < 0) {
+        return res.status(400).json({ error: "Enter a valid meter reading of zero or more." });
+      }
+      const parsedDate = new Date(`${readingDate}T12:00:00.000Z`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(readingDate) || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== readingDate) {
+        return res.status(400).json({ error: "Enter the reading date in YYYY-MM-DD format." });
+      }
+      if (readingDate > new Date().toISOString().slice(0, 10)) {
+        return res.status(400).json({ error: "The reading date cannot be in the future." });
+      }
+      if (reason.length < 3 || reason.length > 280) {
+        return res.status(400).json({ error: "Enter a reason of 3 to 280 characters." });
+      }
+
+      const latestEvent = utilityBillingService.listMeterReadingHistory(building.id, houseNumber, 2_000)
+        .find((item) => item.utilityType === utilityType);
+      const latestReading = utilityBillingService.listLatestMeterReadings(building.id)
+        .find((item) => item.utilityType === utilityType && normalizeHouseNumber(item.houseNumber) === houseNumber);
+      if (!latestEvent || !latestReading || latestEvent.currentReading !== latestReading.currentReading) {
+        return res.status(409).json({ error: "The latest meter reading changed. Reload the page and try again." });
+      }
+      if (Number(latestEvent.unitsConsumed ?? 0) > 0) {
+        return res.status(409).json({ error: "This meter has billed usage since its last baseline. Reconcile that bill before setting a lower baseline." });
+      }
+      if (reading >= latestReading.currentReading) {
+        return res.status(400).json({ error: "This action is for a reading lower than the last recorded value." });
+      }
+      if (readingDate < latestEvent.recordedAt.slice(0, 10)) {
+        return res.status(400).json({ error: "The new baseline date cannot be earlier than the existing reading." });
+      }
+
+      const recordedAt = parsedDate.toISOString();
+      const meterNumber = utilityBillingService.getMeter(utilityType, building.id, houseNumber)?.meterNumber ?? "";
+      utilityBillingService.recordBaselineReading({ utilityType, buildingId: building.id, houseNumber, reading, recordedAt });
+      const event = utilityBillingService.recordMeterReadingEvent({
+        utilityType,
+        buildingId: building.id,
+        houseNumber,
+        meterNumber,
+        previousReading: null,
+        currentReading: reading,
+        unitsConsumed: 0,
+        recordedAt,
+        billingMonth: billingMonthFromDate(parsedDate),
+        chargeAmountKsh: 0,
+        includedUnits: 0,
+        extraUnits: 0,
+        ratePerUnitKsh: getMeterReadingRates(building.id)[utilityType] ?? 0,
+        status: "unbilled",
+        correctionReason: reason
+      });
+      await persistUtilityBillingStateNow();
+      await recordRoomAccountAuditEvent({
+        buildingId: building.id,
+        houseNumber,
+        action: "utility.meter_reading.baseline_corrected",
+        summary: `${utilityType} meter baseline set to ${reading} as of ${readingDate}; previous value was ${latestReading.currentReading}: ${reason}`,
+        actor: actorFromLandlordContext(context),
+        metadata: {
+          utilityType,
+          readingDate,
+          previousReading: latestReading.currentReading,
+          correctedReading: reading,
+          sourceEventId: latestEvent.id,
+          newEventId: event.id,
+          reason
+        }
+      });
+      return res.status(201).json({ data: event, previousReading: latestReading.currentReading, billChanged: false });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   app.post("/api/landlord/buildings/:buildingId/meter-readings", async (req, res, next) => {
     try {
       const resolved = await resolveManagedBuildingForRequest(req, res);

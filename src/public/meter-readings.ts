@@ -462,6 +462,18 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
         }
       }
       previewEl.textContent = text;
+      const lowerReadingButton = card.querySelector<HTMLButtonElement>(
+        `[data-action="accept-lower-reading"][data-utility="${utility}"]`
+      );
+      const draftReading = parseFigure(draft?.[utility]?.reading);
+      if (lowerReadingButton) {
+        lowerReadingButton.hidden = !(
+          preview.error?.toLowerCase().includes("lower than") &&
+          draftReading != null &&
+          row[utility].lastReading != null &&
+          draftReading < row[utility].lastReading
+        );
+      }
     }
 
     const payload = buildRoomSavePayload(row, draft, rates, allowances());
@@ -609,6 +621,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
         </div>
         <div class="mr-utility-foot">
           <span class="mr-preview" data-preview="${utility}" aria-live="polite"></span>
+          <button type="button" class="mr-link mr-lower-reading" data-action="accept-lower-reading" data-utility="${utility}" hidden>Accept as new baseline (no charge now)</button>
           <span class="mr-meter">${renderMeterNumber(row.houseNumber, utility, info)}</span>
         </div>
         ${history}
@@ -630,6 +643,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
       </div>
       <div class="mr-utility-foot">
         <span class="mr-preview" data-preview="${utility}" aria-live="polite"></span>
+        <button type="button" class="mr-link mr-lower-reading" data-action="accept-lower-reading" data-utility="${utility}" hidden>Accept as new baseline (no charge now)</button>
         <span class="mr-meter">${renderMeterNumber(row.houseNumber, utility, info)}</span>
       </div>
       ${history}
@@ -704,6 +718,53 @@ Enter the corrected value:`,
       await load();
     } catch (error) {
       deps.onError(error, `Unable to correct the ${UTILITY_LABEL[utility].toLowerCase()} reading.`);
+    } finally {
+      button.removeAttribute("aria-busy");
+      button.removeAttribute("disabled");
+    }
+  }
+
+  async function acceptLowerReadingAsBaseline(houseNumber: string, button: HTMLElement) {
+    const utility = button.dataset.utility === "electricity" ? "electricity" : "water";
+    const row = rowFor(houseNumber);
+    const reading = parseFigure(drafts.get(houseNumber)?.[utility]?.reading);
+    const lastReading = row?.[utility].lastReading;
+    if (!row || reading == null || lastReading == null || reading >= lastReading) return;
+
+    const readingDate = window.prompt(
+      `When was the ${UTILITY_LABEL[utility].toLowerCase()} reading ${formatFigure(reading)} taken? Enter YYYY-MM-DD. This records a new baseline and does not change the old bill.`,
+      "2026-11-06"
+    );
+    if (readingDate == null) return;
+    const reason = window.prompt(
+      "Why is this lower reading being accepted? For example: corrected meter entry or meter reset.",
+      "Corrected reading as of " + readingDate.trim()
+    );
+    if (reason == null) return;
+    if (reason.trim().length < 3) {
+      deps.onError(new Error("Enter a reason of at least 3 characters."), "Reading not saved.");
+      return;
+    }
+
+    button.setAttribute("aria-busy", "true");
+    button.setAttribute("disabled", "true");
+    try {
+      await deps.requestJson(
+        `/api/landlord/buildings/${encodeURIComponent(buildingId)}/meter-readings/baseline-correction`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ houseNumber, utilityType: utility, reading, readingDate: readingDate.trim(), reason: reason.trim() })
+        }
+      );
+      drafts.delete(houseNumber);
+      deps.onStatus(
+        `House ${houseNumber} ${UTILITY_LABEL[utility].toLowerCase()} baseline set to ${formatFigure(reading)} as of ${formatShortDate(readingDate.trim())}. The previous bill was left unchanged.`
+      );
+      deps.onSaved?.();
+      await load();
+    } catch (error) {
+      deps.onError(error, `Unable to save the ${UTILITY_LABEL[utility].toLowerCase()} baseline.`);
     } finally {
       button.removeAttribute("aria-busy");
       button.removeAttribute("disabled");
@@ -1014,6 +1075,11 @@ Enter the corrected value:`,
 
     if (target.dataset.action === "correct-meter-reading") {
       void correctLatestReading(houseNumber, target);
+      return;
+    }
+
+    if (target.dataset.action === "accept-lower-reading") {
+      void acceptLowerReadingAsBaseline(houseNumber, target);
       return;
     }
 

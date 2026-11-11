@@ -1,7 +1,7 @@
 import { initResponsiveTables } from "./mobile-table.js?v=3e39d752dc";
 import { notifyError, notifyStatus } from "./notifications.js?v=62acc56b74";
 import { applyHouseSheetImport, buildXlsx, describeHouseSheetPlan, houseSheetRowsFromRegistry, houseSheetTable, parseHouseSheet, prepareHouseSheetImport, readSpreadsheet } from "./house-sheet.js?v=e453a69103";
-import { createMeterReadingsView } from "./meter-readings.js?v=0df79e3c03";
+import { createMeterReadingsView } from "./meter-readings.js?v=a15419bd54";
 import { createBalancesView } from "./balances-view.js?v=59a3d1aef4";
 import { createUploadedImageGallery, renderSelectedImagePreviews, uploadImageFiles, validateImageFiles } from "./media-upload.js?v=549f6d7675";
 import { applyDocumentBranding, getLandlordPortalTitle, getLandlordShellBrand } from "./portal-branding.js?v=9b283694b2";

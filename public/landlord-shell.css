@@ -867,6 +867,16 @@ body.landlord-rooms-route .lh-workspace {
   font-weight: 600;
 }
 
+.mr-utility-foot [hidden] {
+  display: none !important;
+}
+
+.mr-lower-reading {
+  flex: 0 0 100%;
+  text-align: left;
+  font-weight: 700;
+}
+
 .mr-meter {
   display: flex;
   align-items: center;

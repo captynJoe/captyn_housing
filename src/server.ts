@@ -15698,6 +15698,7 @@ async function bootstrap() {
         totalLatePenaltyKsh: row.totalLatePenaltyKsh,
         currentMonthPaidKsh: row.currentMonthRentPaidKsh,
         arrearsKsh: row.rentArrearsKsh,
+        openingArrears: rentLedgerService.getRentDue(building.id, row.houseNumber)?.openingArrears ?? null,
         dueDate: row.rentDueDate,
         paymentStatus: row.rentPaymentStatus
       }))
@@ -15935,17 +15936,60 @@ async function bootstrap() {
           const requestedBalanceKsh = normalizeOptionalNonNegativeInteger(
             sourceRow?.balanceKsh
           );
-          const balanceKsh =
+          const requestedOpeningArrearsKsh = normalizeOptionalNonNegativeInteger(
+            sourceRow?.openingArrearsKsh
+          );
+          let openingArrears = existing?.openingArrears;
+          let openingArrearsAdditionKsh = 0;
+          if (existing?.openingArrears && requestedOpeningArrearsKsh != null) {
+            if (
+              requestedOpeningArrearsKsh !== existing.openingArrears.amountKsh ||
+              (sourceRow?.openingArrearsAsOf && sourceRow.openingArrearsAsOf !== existing.openingArrears.asOfDate)
+            ) {
+              return res.status(409).json({
+                error: `Opening arrears for ${houseNumber} have already been recorded. Use Payment Corrections to change the balance.`
+              });
+            }
+          } else if (!existing?.openingArrears && (requestedOpeningArrearsKsh ?? 0) > 0) {
+            const asOfDate = normalizeDateOnly(sourceRow?.openingArrearsAsOf);
+            if (!asOfDate || new Date(`${asOfDate}T00:00:00.000Z`).toISOString().slice(0, 10) !== asOfDate) {
+              return res.status(400).json({
+                error: `Add a valid “as of” date for opening arrears in house ${houseNumber}.`
+              });
+            }
+            if (
+              !refreshed.hasActiveResident ||
+              !paymentAccessService.isEnabled(building.id, "rent")
+            ) {
+              return res.status(400).json({
+                error: `Opening arrears can only be recorded for an occupied house with rent billing enabled (${houseNumber}).`
+              });
+            }
+            openingArrearsAdditionKsh = requestedOpeningArrearsKsh ?? 0;
+            openingArrears = {
+              amountKsh: openingArrearsAdditionKsh,
+              asOfDate,
+              note: sourceRow?.openingArrearsNote?.trim() || undefined,
+              recordedAt: new Date().toISOString()
+            };
+          }
+          const baseBalanceKsh =
             requestedBalanceKsh != null
               ? requestedBalanceKsh
               : currentMonthPaidKsh == null
                 ? Math.max(0, Number(existing?.balanceKsh ?? 0))
                 : existingArrearsKsh + Math.max(0, monthlyRentKsh - currentMonthPaidKsh);
+          const balanceKsh = baseBalanceKsh + openingArrearsAdditionKsh;
+          if (balanceKsh > 5_000_000) {
+            return res.status(400).json({
+              error: `Rent balance for ${houseNumber} cannot exceed KSh 5,000,000.`
+            });
+          }
           let rentSnapshot = existing;
           if (
             refreshed.hasActiveResident &&
             paymentAccessService.isEnabled(building.id, "rent") &&
-            (existing || monthlyRentKsh > 0 || requestedBalanceKsh != null)
+            (existing || monthlyRentKsh > 0 || requestedBalanceKsh != null || openingArrearsAdditionKsh > 0)
           ) {
             rentSnapshot = rentLedgerService.upsertRentDue(building.id, houseNumber, {
               monthlyRentKsh,
@@ -15954,6 +15998,22 @@ async function bootstrap() {
               note:
                 parsed.note?.trim() ||
                 `House Default saved for ${building.name} ${houseNumber}.`
+            }, { openingArrears });
+          }
+
+          if (openingArrearsAdditionKsh > 0 && openingArrears && rentSnapshot) {
+            await recordRoomAccountAuditEvent({
+              buildingId: building.id,
+              houseNumber,
+              action: "rent.opening_arrears.recorded",
+              summary: `Recorded opening rent arrears of KSh ${openingArrearsAdditionKsh.toLocaleString("en-US")} as of ${openingArrears.asOfDate}.`,
+              actor,
+              metadata: {
+                amountKsh: openingArrears.amountKsh,
+                asOfDate: openingArrears.asOfDate,
+                note: openingArrears.note ?? null,
+                balanceKsh
+              }
             });
           }
 

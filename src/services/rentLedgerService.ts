@@ -71,6 +71,13 @@ export interface RentLatePenaltyCharge {
   note?: string;
 }
 
+export interface RentOpeningArrears {
+  amountKsh: number;
+  asOfDate: string;
+  note?: string;
+  recordedAt: string;
+}
+
 export interface RentDueRecord {
   buildingId: string;
   houseNumber: string;
@@ -78,6 +85,7 @@ export interface RentDueRecord {
   balanceKsh: number;
   dueDate: string;
   note?: string;
+  openingArrears?: RentOpeningArrears;
   updatedAt: string;
   payments: RentPaymentEvent[];
   latePenaltyCharges: RentLatePenaltyCharge[];
@@ -395,6 +403,15 @@ export class RentLedgerService {
           balanceKsh: Number(record.balanceKsh ?? 0),
           dueDate: record.dueDate,
           note: record.note,
+          openingArrears:
+            record.openingArrears && Number(record.openingArrears.amountKsh) > 0
+              ? {
+                  amountKsh: Math.max(0, Math.round(Number(record.openingArrears.amountKsh))),
+                  asOfDate: String(record.openingArrears.asOfDate ?? ""),
+                  note: typeof record.openingArrears.note === "string" ? record.openingArrears.note : undefined,
+                  recordedAt: String(record.openingArrears.recordedAt ?? record.updatedAt ?? nowIso())
+                }
+              : undefined,
           updatedAt: record.updatedAt || nowIso(),
           payments: Array.isArray(record.payments)
             ? record.payments.map((payment) => ({
@@ -490,7 +507,8 @@ export class RentLedgerService {
   upsertRentDue(
     buildingId: string,
     houseNumber: string,
-    input: UpsertRentDueInput
+    input: UpsertRentDueInput,
+    options?: { openingArrears?: RentOpeningArrears }
   ): RentDueSnapshot {
     const normalizedBuildingId = normalizeBuildingId(buildingId);
     const normalizedHouse = normalizeHouseNumber(houseNumber);
@@ -525,6 +543,7 @@ export class RentLedgerService {
       balanceKsh: input.balanceKsh,
       dueDate: input.dueDate,
       note: input.note?.trim(),
+      openingArrears: options?.openingArrears ?? existing?.openingArrears,
       updatedAt: nowIso(),
       payments,
       latePenaltyCharges:

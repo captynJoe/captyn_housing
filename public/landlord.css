@@ -3801,6 +3801,82 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
   border-radius: 9px;
 }
 
+.rent-opening-arrears {
+  margin-top: 8px;
+  border: 1px solid var(--captyn-line, rgba(255, 255, 255, 0.14));
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.rent-opening-arrears > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 11px;
+  cursor: pointer;
+  color: var(--captyn-accent, #1dc995);
+  font-size: 0.76rem;
+  list-style-position: inside;
+}
+
+.rent-opening-arrears > summary span {
+  color: var(--captyn-muted, #96b8a8);
+  font-size: 0.68rem;
+}
+
+.rent-opening-arrears-recorded {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--captyn-line, rgba(255, 255, 255, 0.14));
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.rent-opening-arrears-recorded > span {
+  color: var(--captyn-muted, #96b8a8);
+  font-size: 0.72rem;
+}
+
+.rent-opening-arrears-recorded > strong {
+  color: var(--captyn-ink-strong, #fff);
+  font-size: 0.78rem;
+}
+
+.rent-opening-arrears-fields {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+  border: 1px dashed var(--captyn-line, rgba(255, 255, 255, 0.16));
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.rent-opening-arrears-fields p,
+.rent-opening-arrears-recorded small {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--captyn-muted, #96b8a8);
+  font-size: 0.72rem;
+}
+
+.rent-opening-arrears-fields label {
+  font-size: 0.62rem;
+}
+
+.rent-opening-arrears-recorded {
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
 .rent-sheet-empty {
   grid-column: 1 / -1;
   margin: 0;
@@ -3902,6 +3978,10 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
 
   .rent-house-advanced-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rent-opening-arrears-fields {
+    grid-template-columns: 1fr;
   }
 
   .rent-house-card-head {

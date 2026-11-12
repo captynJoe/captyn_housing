@@ -4804,6 +4804,9 @@ function renderRentSheetRows(rows) {
         const depositKsh = item.depositKsh == null ? "" : optionalInputValue(item.depositKsh);
         const resolvedDepositKsh = Math.max(0, Math.round(Number(item.depositKsh ?? state.rentSheetDefaults.depositKsh ?? 0)));
         const depositPaidKsh = Math.max(0, Math.round(Number(item.depositPaidKsh ?? 0)));
+        const openingArrears = item.openingArrears && Number(item.openingArrears.amountKsh) > 0
+            ? item.openingArrears
+            : null;
         const roomDefaultDueDay = optionalInputValue(item.roomDefaultDueDay);
         const roomDefaultGraceDays = optionalInputValue(item.roomDefaultGraceDays);
         const rentPlaceholder = rentDefaultPlaceholder(state.rentSheetDefaults.monthlyRentKsh, formatCurrency);
@@ -4827,6 +4830,7 @@ function renderRentSheetRows(rows) {
         card.dataset.originalBalanceKsh = String(balanceKsh);
         card.dataset.originalDepositKsh = String(Math.max(0, Math.round(Number(item.depositKsh ?? 0))));
         card.dataset.originalDepositPaidKsh = String(depositPaidKsh);
+        card.dataset.openingArrearsRecorded = openingArrears ? "true" : "false";
         card.dataset.resolvedDepositKsh = String(resolvedDepositKsh);
         card.innerHTML = `
       <div class="rent-house-card-head">
@@ -4888,6 +4892,17 @@ function renderRentSheetRows(rows) {
           <div class="rent-house-readonly"><span>Rent arrears</span><strong>${escapeHtml(formatCurrency(arrearsKsh))}</strong></div>
         </div>
       </details>
+      ${openingArrears
+            ? `<div class="rent-opening-arrears-recorded"><span>Opening arrears recorded · ${escapeHtml(openingArrears.asOfDate)}</span><strong>${escapeHtml(formatCurrency(openingArrears.amountKsh))}</strong>${openingArrears.note ? `<small>${escapeHtml(openingArrears.note)}</small>` : ""}</div>`
+            : `<details class="rent-opening-arrears">
+            <summary><strong>Set opening arrears</strong><span>One-time past rent balance</span></summary>
+            <div class="rent-opening-arrears-fields">
+              <p>Add past rent owed here. It increases the current balance once and does not create past monthly bills. Use Payment Corrections for old receipts.</p>
+              <label>Arrears amount (KSh)<input class="registry-table-input utility-sheet-input" data-field="openingArrearsKsh" type="number" min="0" max="5000000" step="1" value="" placeholder="No opening arrears" /></label>
+              <label>Balance as of<input class="registry-table-input utility-sheet-input" data-field="openingArrearsAsOf" type="date" value="" /></label>
+              <label>Reason / note (optional)<input class="registry-table-input utility-sheet-input" data-field="openingArrearsNote" type="text" maxlength="280" placeholder="e.g. Balance agreed on move-in" /></label>
+            </div>
+          </details>`}
     `;
         const depositTotalInput = card.querySelector('input[data-field="depositKsh"]');
         const depositPaidInput = card.querySelector('input[data-field="depositPaidKsh"]');
@@ -4977,6 +4992,9 @@ function buildRentSheetPayload() {
         const activeInput = tr.querySelector('input[data-field="active"]');
         const currentBalanceInput = tr.querySelector('input[data-field="balanceKsh"]');
         const currentMonthPaidInput = tr.querySelector('input[data-field="currentMonthPaidKsh"]');
+        const openingArrearsInput = tr.querySelector('input[data-field="openingArrearsKsh"]');
+        const openingArrearsDateInput = tr.querySelector('input[data-field="openingArrearsAsOf"]');
+        const openingArrearsNoteInput = tr.querySelector('input[data-field="openingArrearsNote"]');
         if (!(rentInput instanceof HTMLInputElement)) {
             return;
         }
@@ -5029,6 +5047,15 @@ function buildRentSheetPayload() {
             buildingDefaultMonthlyRentKsh ??
             tr.dataset.resolvedMonthlyRentKsh ??
             0)));
+        const openingArrearsKsh = openingArrearsInput instanceof HTMLInputElement
+            ? toOptionalNumber(openingArrearsInput.value)
+            : null;
+        const openingArrearsAsOf = openingArrearsDateInput instanceof HTMLInputElement
+            ? openingArrearsDateInput.value
+            : "";
+        if (openingArrearsKsh != null && openingArrearsKsh > 0 && !openingArrearsAsOf) {
+            throw new Error(`Add the date the opening arrears were confirmed for house ${houseNumber}.`);
+        }
         const paidChanged = currentMonthPaidKsh != null &&
             Math.round(currentMonthPaidKsh) !== originalCurrentMonthPaidKsh;
         if (paidChanged && Math.round(currentMonthPaidKsh) > resolvedMonthlyRentKsh) {
@@ -5041,6 +5068,9 @@ function buildRentSheetPayload() {
             depositPaidKsh: depositPaidChanged ? Math.round(depositPaidKsh) : null,
             balanceKsh: balanceChanged ? Math.round(balanceKsh) : null,
             currentMonthPaidKsh: paidChanged ? Math.round(currentMonthPaidKsh) : null,
+            openingArrearsKsh: openingArrearsKsh == null ? null : Math.round(openingArrearsKsh),
+            openingArrearsAsOf: openingArrearsKsh != null && openingArrearsKsh > 0 ? openingArrearsAsOf : null,
+            openingArrearsNote: openingArrearsNote instanceof HTMLInputElement ? openingArrearsNote.value.trim() || null : null,
             paymentDueDay: paymentDueDay == null ? null : Math.round(paymentDueDay),
             graceDays: graceDays == null ? null : Math.round(graceDays),
             active: activeInput instanceof HTMLInputElement ? activeInput.checked : true
@@ -5071,8 +5101,15 @@ async function loadRentSheetRows() {
     return payload;
 }
 function showRentSheetModal() {
+    const defaults = rentSheetModalEl?.querySelector(".rent-sheet-defaults");
+    if (defaults instanceof HTMLDetailsElement)
+        defaults.open = false;
     rentSheetBackdropEl?.classList.remove("hidden");
     rentSheetModalEl?.classList.remove("hidden");
+    requestAnimationFrame(() => {
+        if (rentSheetFormEl instanceof HTMLElement)
+            rentSheetFormEl.scrollTop = 0;
+    });
 }
 function closeRentSheetModal() {
     rentSheetBackdropEl?.classList.add("hidden");

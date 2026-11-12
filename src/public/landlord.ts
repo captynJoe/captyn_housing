@@ -6343,7 +6343,7 @@ function buildRentSheetPayload() {
       currentMonthPaidKsh: paidChanged ? Math.round(currentMonthPaidKsh) : null,
       openingArrearsKsh: openingArrearsKsh == null ? null : Math.round(openingArrearsKsh),
       openingArrearsAsOf: openingArrearsKsh != null && openingArrearsKsh > 0 ? openingArrearsAsOf : null,
-      openingArrearsNote: openingArrearsNote instanceof HTMLInputElement ? openingArrearsNote.value.trim() || null : null,
+      openingArrearsNote: openingArrearsNoteInput instanceof HTMLInputElement ? openingArrearsNoteInput.value.trim() || null : null,
       paymentDueDay: paymentDueDay == null ? null : Math.round(paymentDueDay),
       graceDays: graceDays == null ? null : Math.round(graceDays),
       active: activeInput instanceof HTMLInputElement ? activeInput.checked : true

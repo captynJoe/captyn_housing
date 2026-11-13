@@ -279,6 +279,30 @@ const collectionsReportBodyEl = document.getElementById("collections-report-body
 const collectionsReportSummaryEl = document.getElementById("collections-report-summary");
 const refreshCollectionsReportBtnEl = document.getElementById("refresh-collections-report");
 const exportCollectionsReportBtnEl = document.getElementById("export-collections-report");
+const performanceBuildingEl = document.getElementById("building-performance-building");
+const performanceMonthEl = document.getElementById("building-performance-month");
+const performanceSummaryEl = document.getElementById("building-performance-summary");
+const performanceTotalEl = document.getElementById("performance-total-received");
+const performanceRentEl = document.getElementById("performance-rent-received");
+const performanceUtilitiesEl = document.getElementById("performance-utilities-received");
+const performanceDepositsEl = document.getElementById("performance-deposits-received");
+const performanceExpensesEl = document.getElementById("performance-expenses");
+const performanceExpenseCountEl = document.getElementById("performance-expense-count");
+const performanceNetEl = document.getElementById("performance-net");
+const performanceRemittedEl = document.getElementById("performance-remitted");
+const performanceRemittanceCountEl = document.getElementById("performance-remittance-count");
+const performanceRemittancesEl = document.getElementById("performance-remittances");
+const agentRemittanceFormEl = document.getElementById("agent-remittance-form");
+const agentRemittanceNameEl = document.getElementById("agent-remittance-name");
+const agentRemittanceAmountEl = document.getElementById("agent-remittance-amount");
+const agentRemittanceDateEl = document.getElementById("agent-remittance-date");
+const agentRemittanceReferenceEl = document.getElementById("agent-remittance-reference");
+const agentRemittanceNoteEl = document.getElementById("agent-remittance-note");
+const performancePaymentCountEl = document.getElementById("performance-payment-count");
+const performanceCollectorsEl = document.getElementById("performance-collectors");
+const performanceBreakdownEl = document.getElementById("performance-expense-breakdown");
+const performancePaymentsBodyEl = document.getElementById("performance-payments-body");
+const refreshPerformanceBtnEl = document.getElementById("refresh-building-performance");
 const paymentCorrectionBuildingSelectEl = document.getElementById("payment-correction-building-select");
 const paymentCorrectionHouseEl = document.getElementById("payment-correction-house");
 const paymentCorrectionUtilityTypeEl = document.getElementById("payment-correction-utility-type");
@@ -305,6 +329,7 @@ const rentPaymentAllocationHelpEl = document.getElementById("rent-payment-alloca
 const rentPaymentProviderEl = document.getElementById("rent-payment-provider");
 const rentPaymentPaidAtEl = document.getElementById("rent-payment-paid-at");
 const rentPaymentReferenceEl = document.getElementById("rent-payment-reference");
+const rentPaymentCollectedByEl = document.getElementById("rent-payment-collected-by");
 const rentPaymentHelpEl = document.getElementById("rent-payment-help");
 const rentPaymentDetailsEl = document.getElementById("rent-payment-details");
 const openRentSheetBtnEl = document.getElementById("open-rent-sheet-btn");
@@ -315,6 +340,7 @@ const rentSheetFormEl = document.getElementById("rent-sheet-form");
 const rentSheetBuildingSelectEl = document.getElementById("rent-sheet-building-select");
 const rentSheetDefaultMonthlyRentEl = document.getElementById("rent-sheet-default-monthly-rent");
 const rentSheetDefaultDepositEl = document.getElementById("rent-sheet-default-deposit");
+const rentSheetDefaultUtilityDepositEl = document.getElementById("rent-sheet-default-utility-deposit");
 const rentSheetDefaultDueDayEl = document.getElementById("rent-sheet-default-due-day");
 const rentSheetDefaultGraceDaysEl = document.getElementById("rent-sheet-default-grace-days");
 const rentSheetChargeStartDateEl = document.getElementById("rent-sheet-charge-start-date");
@@ -403,6 +429,7 @@ const utilityPaymentProviderEl = document.getElementById("utility-payment-provid
 const utilityPaymentPaidAtEl = document.getElementById("utility-payment-paid-at");
 const utilityPaymentReferenceEl = document.getElementById("utility-payment-reference");
 const utilityPaymentNoteEl = document.getElementById("utility-payment-note");
+const utilityPaymentCollectedByEl = document.getElementById("utility-payment-collected-by");
 const utilityPaymentHelpEl = document.getElementById("utility-payment-help");
 const utilityPaymentsBodyEl = document.getElementById("utility-payments-body");
 const refreshPaymentsBtnEl = document.getElementById("refresh-payments");
@@ -412,6 +439,8 @@ const expenditureCategoryEl = document.getElementById("expenditure-category");
 const expenditureAmountEl = document.getElementById("expenditure-amount");
 const expenditureTitleEl = document.getElementById("expenditure-title");
 const expenditureNoteEl = document.getElementById("expenditure-note");
+const expenditurePaidAtEl = document.getElementById("expenditure-paid-at");
+const expenditurePayeeEl = document.getElementById("expenditure-payee");
 const expenditureChargeableEl = document.getElementById("expenditure-chargeable");
 const expenditureSubmitBtnEl = document.getElementById("expenditure-submit-btn");
 const expendituresBodyEl = document.getElementById("expenditures-body");
@@ -720,6 +749,9 @@ function isOwnerAccessRole() {
 }
 function isLandlordViewAvailableForRole(view) {
     const normalizedView = String(view ?? "").trim();
+    if (normalizedView === "performance") {
+        return isOwnerAccessRole() || isStaffRole();
+    }
     if (isCaretakerRole()) {
         return (normalizedView === "overview" ||
             normalizedView === "tenants" ||
@@ -1145,7 +1177,8 @@ function setActiveLandlordView(nextView, options = {}) {
         normalizedView === "rent" ||
         normalizedView === "expenses" ||
         normalizedView === "balances" ||
-        normalizedView === "reports"
+        normalizedView === "reports" ||
+        normalizedView === "performance"
         ? normalizedView
         : "overview";
     const targetView = isLandlordViewAvailableForRole(requestedTargetView)
@@ -1177,6 +1210,10 @@ function setActiveLandlordView(nextView, options = {}) {
         void balancesView.load().catch((error) => {
             handleLandlordError(error, "Unable to load balances.");
         });
+    }
+    if (targetView === "performance" && (previousView !== "performance" || options.forceLoad) && !options.skipLoad) {
+        syncPerformanceBuildingOptions();
+        void loadBuildingPerformance().catch((error) => handleLandlordError(error, "Unable to load building performance."));
     }
     if (targetView === "reports" && (previousView !== "reports" || options.forceLoad) && !options.skipLoad) {
         syncCollectionsReportBuildingOptions();
@@ -4763,6 +4800,7 @@ function setRentSheetDefaultInputs(data) {
     state.rentSheetDefaults = {
         monthlyRentKsh: data?.buildingDefaultMonthlyRentKsh ?? null,
         depositKsh: data?.buildingDefaultDepositKsh ?? null,
+        utilityDepositKsh: data?.buildingDefaultUtilityDepositKsh ?? null,
         dueDay: data?.buildingDefaultDueDay ?? null,
         graceDays: data?.buildingDefaultGraceDays ?? 0,
         chargeStartDate: String(data?.chargeStartDate ?? "")
@@ -4772,6 +4810,9 @@ function setRentSheetDefaultInputs(data) {
     }
     if (rentSheetDefaultDepositEl instanceof HTMLInputElement) {
         rentSheetDefaultDepositEl.value = optionalInputValue(data?.buildingDefaultDepositKsh);
+    }
+    if (rentSheetDefaultUtilityDepositEl instanceof HTMLInputElement) {
+        rentSheetDefaultUtilityDepositEl.value = optionalInputValue(data?.buildingDefaultUtilityDepositKsh);
     }
     if (rentSheetDefaultDueDayEl instanceof HTMLInputElement) {
         rentSheetDefaultDueDayEl.value = optionalInputValue(data?.buildingDefaultDueDay);
@@ -4804,6 +4845,9 @@ function renderRentSheetRows(rows) {
         const depositKsh = item.depositKsh == null ? "" : optionalInputValue(item.depositKsh);
         const resolvedDepositKsh = Math.max(0, Math.round(Number(item.depositKsh ?? state.rentSheetDefaults.depositKsh ?? 0)));
         const depositPaidKsh = Math.max(0, Math.round(Number(item.depositPaidKsh ?? 0)));
+        const utilityDepositKsh = item.utilityDepositKsh == null ? "" : optionalInputValue(item.utilityDepositKsh);
+        const resolvedUtilityDepositKsh = Math.max(0, Math.round(Number(item.utilityDepositKsh ?? state.rentSheetDefaults.utilityDepositKsh ?? 0)));
+        const utilityDepositPaidKsh = Math.max(0, Math.round(Number(item.utilityDepositPaidKsh ?? 0)));
         const openingArrears = item.openingArrears && Number(item.openingArrears.amountKsh) > 0
             ? item.openingArrears
             : null;
@@ -4811,6 +4855,7 @@ function renderRentSheetRows(rows) {
         const roomDefaultGraceDays = optionalInputValue(item.roomDefaultGraceDays);
         const rentPlaceholder = rentDefaultPlaceholder(state.rentSheetDefaults.monthlyRentKsh, formatCurrency);
         const depositPlaceholder = rentDefaultPlaceholder(state.rentSheetDefaults.depositKsh, formatCurrency);
+        const utilityDepositPlaceholder = rentDefaultPlaceholder(state.rentSheetDefaults.utilityDepositKsh, formatCurrency);
         const dueDayPlaceholder = rentDefaultPlaceholder(state.rentSheetDefaults.dueDay, formatRentDueDay);
         const graceDaysPlaceholder = rentDefaultPlaceholder(state.rentSheetDefaults.graceDays, formatRentGraceDays);
         const sourceLabel = rentSetupSourceLabel(item.rentSetupSource);
@@ -4830,6 +4875,8 @@ function renderRentSheetRows(rows) {
         card.dataset.originalBalanceKsh = String(balanceKsh);
         card.dataset.originalDepositKsh = String(Math.max(0, Math.round(Number(item.depositKsh ?? 0))));
         card.dataset.originalDepositPaidKsh = String(depositPaidKsh);
+        card.dataset.originalUtilityDepositPaidKsh = String(utilityDepositPaidKsh);
+        card.dataset.resolvedUtilityDepositKsh = String(resolvedUtilityDepositKsh);
         card.dataset.openingArrearsRecorded = openingArrears ? "true" : "false";
         card.dataset.resolvedDepositKsh = String(resolvedDepositKsh);
         card.innerHTML = `
@@ -4863,7 +4910,13 @@ function renderRentSheetRows(rows) {
           <input class="registry-table-input utility-sheet-input" data-field="depositPaidKsh" type="number" min="0" step="1" value="${escapeHtml(depositPaidKsh)}" aria-label="Deposit paid for house ${escapeHtml(houseNumber)}" />
         </label>
       </div>
-      <div class="rent-house-deposit-due"><span>Deposit still due</span><strong data-field="depositDueKsh">${escapeHtml(formatCurrency(Math.max(0, resolvedDepositKsh - depositPaidKsh)))}</strong></div>
+      <div class="rent-house-deposit-due"><span>Rent deposit still due</span><strong data-field="depositDueKsh">${escapeHtml(formatCurrency(Math.max(0, resolvedDepositKsh - depositPaidKsh)))}</strong></div>
+      <div class="rent-house-primary-fields rent-house-utility-deposit-fields">
+        <label>Utility deposit required (KSh)<input class="registry-table-input utility-sheet-input" data-field="utilityDepositKsh" type="number" min="0" step="1" value="${escapeHtml(utilityDepositKsh)}" placeholder="${escapeHtml(utilityDepositPlaceholder)}" /></label>
+        <label>Utility deposit paid (KSh)<input class="registry-table-input utility-sheet-input" data-field="utilityDepositPaidKsh" type="number" min="0" step="1" value="${escapeHtml(utilityDepositPaidKsh)}" aria-label="Utility deposit paid for house ${escapeHtml(houseNumber)}" /></label>
+        <div class="rent-house-deposit-due"><span>Utility deposit still due</span><strong data-field="utilityDepositDueKsh">${escapeHtml(formatCurrency(Math.max(0, resolvedUtilityDepositKsh - utilityDepositPaidKsh)))}</strong></div>
+      </div>
+      ${item.hasActiveResident && item.utilityDepositNeedsSetup ? '<p class="rent-house-warning">Set this tenant’s utility deposit. Existing tenants are not assigned an assumed amount.</p>' : ""}
       <details class="rent-house-advanced">
         <summary>Billing dates, charge control and balances</summary>
         <div class="rent-house-advanced-grid">
@@ -4917,6 +4970,19 @@ function renderRentSheetRows(rows) {
         };
         depositTotalInput?.addEventListener("input", updateDepositDue);
         depositPaidInput?.addEventListener("input", updateDepositDue);
+        const utilityDepositTotalInput = card.querySelector('input[data-field="utilityDepositKsh"]');
+        const utilityDepositPaidInput = card.querySelector('input[data-field="utilityDepositPaidKsh"]');
+        const utilityDepositDueValue = card.querySelector('[data-field="utilityDepositDueKsh"]');
+        const updateUtilityDepositDue = () => {
+            const total = utilityDepositTotalInput instanceof HTMLInputElement
+                ? toOptionalNumber(utilityDepositTotalInput.value) ?? Number(card.dataset.resolvedUtilityDepositKsh ?? state.rentSheetDefaults.utilityDepositKsh ?? 0)
+                : Number(card.dataset.resolvedUtilityDepositKsh ?? 0);
+            const paid = utilityDepositPaidInput instanceof HTMLInputElement ? toOptionalNumber(utilityDepositPaidInput.value) ?? 0 : 0;
+            if (utilityDepositDueValue instanceof HTMLElement)
+                utilityDepositDueValue.textContent = formatCurrency(Math.max(0, total - paid));
+        };
+        utilityDepositTotalInput?.addEventListener("input", updateUtilityDepositDue);
+        utilityDepositPaidInput?.addEventListener("input", updateUtilityDepositDue);
         rentSheetBodyEl.append(card);
     });
     updateRentSheetHouseControls();
@@ -4957,6 +5023,9 @@ function buildRentSheetPayload() {
     const buildingDefaultDepositKsh = rentSheetDefaultDepositEl instanceof HTMLInputElement
         ? toOptionalNumber(rentSheetDefaultDepositEl.value)
         : null;
+    const buildingDefaultUtilityDepositKsh = rentSheetDefaultUtilityDepositEl instanceof HTMLInputElement
+        ? toOptionalNumber(rentSheetDefaultUtilityDepositEl.value)
+        : null;
     const buildingDefaultDueDay = rentSheetDefaultDueDayEl instanceof HTMLInputElement
         ? toOptionalNumber(rentSheetDefaultDueDayEl.value)
         : null;
@@ -4970,7 +5039,10 @@ function buildRentSheetPayload() {
         throw new Error("Building Default rent cannot be negative.");
     }
     if (buildingDefaultDepositKsh != null && buildingDefaultDepositKsh < 0) {
-        throw new Error("Default deposit cannot be negative.");
+        throw new Error("Rent deposit cannot be negative.");
+    }
+    if (buildingDefaultUtilityDepositKsh != null && buildingDefaultUtilityDepositKsh < 0) {
+        throw new Error("Utility deposit cannot be negative.");
     }
     if (buildingDefaultDueDay != null &&
         (buildingDefaultDueDay < 1 || buildingDefaultDueDay > 31)) {
@@ -4987,6 +5059,8 @@ function buildRentSheetPayload() {
         const rentInput = tr.querySelector('input[data-field="monthlyRentKsh"]');
         const depositInput = tr.querySelector('input[data-field="depositKsh"]');
         const depositPaidInput = tr.querySelector('input[data-field="depositPaidKsh"]');
+        const utilityDepositInput = tr.querySelector('input[data-field="utilityDepositKsh"]');
+        const utilityDepositPaidInput = tr.querySelector('input[data-field="utilityDepositPaidKsh"]');
         const dueDayInput = tr.querySelector('input[data-field="paymentDueDay"]');
         const graceDaysInput = tr.querySelector('input[data-field="graceDays"]');
         const activeInput = tr.querySelector('input[data-field="active"]');
@@ -5018,6 +5092,21 @@ function buildRentSheetPayload() {
         }
         const originalDepositPaidKsh = Math.max(0, Math.round(Number(tr.dataset.originalDepositPaidKsh ?? 0)));
         const depositPaidChanged = depositPaidKsh != null && Math.round(depositPaidKsh) !== originalDepositPaidKsh;
+        const utilityDepositKsh = utilityDepositInput instanceof HTMLInputElement
+            ? toOptionalNumber(utilityDepositInput.value)
+            : null;
+        const utilityDepositPaidKsh = utilityDepositPaidInput instanceof HTMLInputElement
+            ? toOptionalNumber(utilityDepositPaidInput.value)
+            : null;
+        if (utilityDepositKsh != null && utilityDepositKsh < 0)
+            throw new Error(`Utility deposit for ${houseNumber} cannot be negative.`);
+        if (utilityDepositPaidKsh != null && utilityDepositPaidKsh < 0)
+            throw new Error(`Utility deposit paid for ${houseNumber} cannot be negative.`);
+        const resolvedUtilityDepositKsh = Math.max(0, Math.round(Number(utilityDepositKsh ?? buildingDefaultUtilityDepositKsh ?? tr.dataset.resolvedUtilityDepositKsh ?? 0)));
+        if (utilityDepositPaidKsh != null && utilityDepositPaidKsh > resolvedUtilityDepositKsh)
+            throw new Error(`Utility deposit paid for ${houseNumber} cannot exceed the required utility deposit.`);
+        const originalUtilityDepositPaidKsh = Math.max(0, Math.round(Number(tr.dataset.originalUtilityDepositPaidKsh ?? 0)));
+        const utilityDepositPaidChanged = utilityDepositPaidKsh != null && Math.round(utilityDepositPaidKsh) !== originalUtilityDepositPaidKsh;
         const paymentDueDay = dueDayInput instanceof HTMLInputElement ? toOptionalNumber(dueDayInput.value) : null;
         if (paymentDueDay != null && (paymentDueDay < 1 || paymentDueDay > 31)) {
             throw new Error(`Due day for ${houseNumber} must be from 1 to 31.`);
@@ -5066,6 +5155,8 @@ function buildRentSheetPayload() {
             monthlyRentKsh: monthlyRentKsh == null ? null : Math.round(monthlyRentKsh),
             depositKsh: depositKsh == null ? null : Math.round(depositKsh),
             depositPaidKsh: depositPaidChanged ? Math.round(depositPaidKsh) : null,
+            utilityDepositKsh: utilityDepositKsh == null ? null : Math.round(utilityDepositKsh),
+            utilityDepositPaidKsh: utilityDepositPaidChanged ? Math.round(utilityDepositPaidKsh) : null,
             balanceKsh: balanceChanged ? Math.round(balanceKsh) : null,
             currentMonthPaidKsh: paidChanged ? Math.round(currentMonthPaidKsh) : null,
             openingArrearsKsh: openingArrearsKsh == null ? null : Math.round(openingArrearsKsh),
@@ -5079,6 +5170,7 @@ function buildRentSheetPayload() {
     return {
         buildingDefaultMonthlyRentKsh: buildingDefaultMonthlyRentKsh == null ? null : Math.round(buildingDefaultMonthlyRentKsh),
         buildingDefaultDepositKsh: buildingDefaultDepositKsh == null ? null : Math.round(buildingDefaultDepositKsh),
+        buildingDefaultUtilityDepositKsh: buildingDefaultUtilityDepositKsh == null ? null : Math.round(buildingDefaultUtilityDepositKsh),
         buildingDefaultDueDay: buildingDefaultDueDay == null ? null : Math.round(buildingDefaultDueDay),
         buildingDefaultGraceDays: buildingDefaultGraceDays == null ? 0 : Math.round(buildingDefaultGraceDays),
         chargeStartDate: chargeStartDate || null,
@@ -5555,7 +5647,7 @@ function renderExpenditures(rows) {
     expendituresBodyEl.replaceChildren();
     if (!Array.isArray(rows) || rows.length === 0) {
         const row = document.createElement("tr");
-        row.innerHTML = '<td colspan="10">No expenditure recorded for this building yet.</td>';
+        row.innerHTML = '<td colspan="12">No expenditure recorded for this building yet.</td>';
         expendituresBodyEl.append(row);
         return;
     }
@@ -5568,11 +5660,13 @@ function renderExpenditures(rows) {
             : formatRoleLabel(item.createdByRole);
         row.innerHTML = `
       <td>${formatDateTime(item.createdAt)}</td>
+      <td>${formatDateTime(item.paidAt ?? item.createdAt)}</td>
       <td>${escapeHtml(buildingLabel)}</td>
       <td>${escapeHtml(item.houseNumber ?? "-")}</td>
       <td>${escapeHtml(formatExpenditureCategory(item.category))}</td>
       <td>${escapeHtml(item.title)}</td>
       <td>${escapeHtml(formatCurrency(item.amountKsh))}</td>
+      <td>${escapeHtml(item.payeeName || "Unknown")}</td>
       <td>${escapeHtml(item.chargeableToResident ? "Yes" : "No")}</td>
       <td>${escapeHtml(actorLabel)}</td>
       <td>${escapeHtml(item.note ?? "-")}</td>
@@ -5955,7 +6049,8 @@ function renderMoveOutSettlement(summary, context) {
     if (moveOutSettlementTotalsEl instanceof HTMLElement) {
         const totals = [
             ["Gross Balance", summary?.grossOutstandingKsh ?? total],
-            ["Deposit Held", summary?.depositKsh ?? 0],
+            ["Rent Deposit Held", summary?.rentDepositKsh ?? summary?.depositKsh ?? 0],
+            ["Utility Deposit Held", summary?.utilityDepositKsh ?? 0],
             ["Deposit Applied", summary?.depositAppliedKsh ?? 0],
             ["Refund Due", summary?.depositRefundKsh ?? 0],
             ["Remaining Pending", total],
@@ -6122,13 +6217,31 @@ function renderOverviewCollections(rows) {
     }
     overviewCollectionsBodyEl.replaceChildren();
     const visibleRows = getRowsForFocusedBuilding(rows);
-    if (visibleRows.length === 0) {
+    const visibleResidentRows = getRowsForFocusedBuilding(state.residentDirectory);
+    const rowByRoomKey = new Map(visibleRows.map((item) => [
+        `${getRecordBuildingId(item)}::${normalizeHouse(item.houseNumber)}`,
+        item
+    ]));
+    visibleResidentRows.forEach((resident) => {
+        const key = `${getRecordBuildingId(resident)}::${normalizeHouse(resident.houseNumber)}`;
+        if (!key.endsWith("::") && !rowByRoomKey.has(key)) {
+            rowByRoomKey.set(key, {
+                buildingId: resident.buildingId,
+                houseNumber: resident.houseNumber,
+                monthlyRentKsh: resident.monthlyRentKsh ?? resident.configuredMonthlyRentKsh ?? 0,
+                balanceKsh: 0,
+                currentMonthOutstandingKsh: 0
+            });
+        }
+    });
+    const allHouseRows = [...rowByRoomKey.values()];
+    if (allHouseRows.length === 0) {
         const row = document.createElement("tr");
-        row.innerHTML = '<td colspan="12">No rent collection records for the current building.</td>';
+        row.innerHTML = '<td colspan="12">No houses found for the current building.</td>';
         overviewCollectionsBodyEl.append(row);
         return;
     }
-    const rankedRows = [...visibleRows].sort(compareStableRoomOrder);
+    const rankedRows = allHouseRows.sort(compareStableRoomOrder);
     rankedRows.forEach((item) => {
         const row = document.createElement("tr");
         const buildingLabel = getBuildingDisplayNameById(item.buildingId, "-");
@@ -6149,12 +6262,18 @@ function renderOverviewCollections(rows) {
         const totalOutstandingKsh = resident
             ? getResidentOperationalOutstandingKsh(resident, utilitySummary)
             : Number(item.balanceKsh ?? dueThisMonthKsh ?? 0);
-        const rentVisualState = resident
-            ? {
-                label: getResidentBillingStatusLabel(resident),
-                toneClass: getResidentBillingToneClass(resident, utilitySummary)
-            }
-            : getRentCollectionVisualState(item);
+        const isVacant = Boolean(resident &&
+            !resident.hasActiveResident &&
+            !resident.residentUserId &&
+            !resident.residentName);
+        const rentVisualState = isVacant
+            ? { label: "Vacant", toneClass: "is-muted" }
+            : resident
+                ? {
+                    label: getResidentBillingStatusLabel(resident),
+                    toneClass: getResidentBillingToneClass(resident, utilitySummary)
+                }
+                : getRentCollectionVisualState(item);
         const latestPayment = Number(item.latestPaymentAmountKsh ?? 0) > 0
             ? formatCurrency(item.latestPaymentAmountKsh)
             : "-";
@@ -7727,6 +7846,100 @@ function syncPaymentCorrectionBuildingOptions() {
             : fallback;
     });
 }
+function syncPerformanceBuildingOptions() {
+    if (!(performanceBuildingEl instanceof HTMLSelectElement))
+        return;
+    const previous = String(performanceBuildingEl.value || "");
+    performanceBuildingEl.replaceChildren();
+    state.buildings.forEach((building) => {
+        const option = document.createElement("option");
+        option.value = building.id;
+        option.textContent = building.name || building.id;
+        performanceBuildingEl.append(option);
+    });
+    if ([...performanceBuildingEl.options].some((option) => option.value === previous)) {
+        performanceBuildingEl.value = previous;
+    }
+}
+function renderBuildingPerformance(data) {
+    if (!data)
+        return;
+    const setText = (element, value) => { if (element instanceof HTMLElement)
+        element.textContent = value; };
+    setText(performanceSummaryEl, `${getBuildingDisplayNameById(data.buildingId, data.buildingId)} · ${data.month}`);
+    setText(performanceTotalEl, formatCurrency(data.totalReceivedKsh));
+    setText(performanceRentEl, formatCurrency(data.rentReceivedKsh));
+    setText(performanceUtilitiesEl, formatCurrency(data.utilitiesReceivedKsh));
+    setText(performanceDepositsEl, formatCurrency(data.depositsReceivedKsh));
+    setText(performanceExpensesEl, formatCurrency(data.expenseTotalKsh));
+    setText(performanceExpenseCountEl, `${data.expenseCount} cost entries`);
+    setText(performanceNetEl, formatCurrency(data.netAfterCostsKsh));
+    setText(performanceRemittedEl, formatCurrency(data.remittedToOwnerKsh));
+    setText(performanceRemittanceCountEl, `${Array.isArray(data.remittances) ? data.remittances.length : 0} transfers`);
+    setText(performancePaymentCountEl, `${data.paymentCount} payment entries`);
+    if (performanceCollectorsEl instanceof HTMLElement) {
+        performanceCollectorsEl.replaceChildren();
+        const rows = Array.isArray(data.collectors) ? data.collectors : [];
+        if (!rows.length)
+            performanceCollectorsEl.innerHTML = '<p class="status-text">No collections in this month.</p>';
+        rows.forEach((item) => {
+            const row = document.createElement("div");
+            row.className = "performance-row";
+            row.innerHTML = `<strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(formatCurrency(item.amountKsh))} · ${Number(item.count)} payments</span>`;
+            performanceCollectorsEl.append(row);
+        });
+    }
+    if (performanceBreakdownEl instanceof HTMLElement) {
+        performanceBreakdownEl.replaceChildren();
+        const rows = Array.isArray(data.expenses) ? data.expenses : [];
+        if (!rows.length)
+            performanceBreakdownEl.innerHTML = '<p class="status-text">No costs recorded in this month.</p>';
+        rows.forEach((item) => {
+            const row = document.createElement("div");
+            row.className = "performance-row";
+            const category = String(item.category || "other").replaceAll("_", " ");
+            row.innerHTML = `<span><strong>${escapeHtml(category)}</strong><small>Paid to ${escapeHtml(item.payeeName)}</small></span><strong>${escapeHtml(formatCurrency(item.amountKsh))}</strong>`;
+            performanceBreakdownEl.append(row);
+        });
+    }
+    if (performanceRemittancesEl instanceof HTMLElement) {
+        performanceRemittancesEl.replaceChildren();
+        const transfers = Array.isArray(data.remittances) ? data.remittances : [];
+        if (!transfers.length)
+            performanceRemittancesEl.innerHTML = '<p class="status-text">No agent remittances recorded in this month.</p>';
+        transfers.forEach((item) => {
+            const row = document.createElement("div");
+            row.className = "performance-row";
+            row.innerHTML = `<span><strong>${escapeHtml(item.agentName)}</strong><small>${escapeHtml(formatDateTime(item.paidAt))}${item.reference ? ` · ${escapeHtml(item.reference)}` : ""}</small></span><strong>${escapeHtml(formatCurrency(item.amountKsh))}</strong>`;
+            performanceRemittancesEl.append(row);
+        });
+    }
+    if (performancePaymentsBodyEl instanceof HTMLElement) {
+        performancePaymentsBodyEl.replaceChildren();
+        const rows = Array.isArray(data.payments) ? data.payments : [];
+        if (!rows.length)
+            performancePaymentsBodyEl.innerHTML = '<tr><td colspan="6">No payments recorded in this month.</td></tr>';
+        rows.forEach((item) => {
+            const row = document.createElement("tr");
+            row.innerHTML = `<td>${escapeHtml(formatDateTime(item.paidAt))}</td><td>${escapeHtml(item.houseNumber || "-")}</td><td>${escapeHtml(item.type)}</td><td>${escapeHtml(formatCurrency(item.amountKsh))}</td><td>${escapeHtml(String(item.provider || "-").toUpperCase())}</td><td>${escapeHtml(item.collectedByName || "Unknown")}</td>`;
+            performancePaymentsBodyEl.append(row);
+        });
+    }
+}
+async function loadBuildingPerformance() {
+    syncPerformanceBuildingOptions();
+    if (!(performanceBuildingEl instanceof HTMLSelectElement) || !(performanceMonthEl instanceof HTMLInputElement))
+        return;
+    const now = new Date();
+    if (!performanceMonthEl.value)
+        performanceMonthEl.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const buildingId = String(performanceBuildingEl.value || "");
+    if (!buildingId)
+        throw new Error("No building is available for performance reporting.");
+    const params = new URLSearchParams({ buildingId, month: performanceMonthEl.value });
+    const response = await requestJson(`/api/landlord/building-performance?${params.toString()}`);
+    renderBuildingPerformance(response.data);
+}
 function syncCollectionsReportBuildingOptions() {
     if (!(collectionsReportBuildingEl instanceof HTMLSelectElement)) {
         return;
@@ -8275,6 +8488,7 @@ function createUtilityPaymentPayload() {
             provider: String(utilityPaymentProviderEl?.value ?? "cash"),
             providerReference: String(utilityPaymentReferenceEl?.value ?? "").trim() || undefined,
             paidAt: toIsoFromDateTimeLocal(utilityPaymentPaidAtEl?.value) || undefined,
+            collectedByName: String(utilityPaymentCollectedByEl?.value ?? "").trim() || undefined,
             note: String(utilityPaymentNoteEl?.value ?? "").trim() || undefined
         }
     };
@@ -8344,7 +8558,8 @@ function createRentPaymentPayload() {
             depositAmountKsh: Math.max(0, Number(rentPaymentDepositAmountEl?.value ?? 0)),
             provider: String(rentPaymentProviderEl?.value ?? "cash"),
             providerReference: String(rentPaymentReferenceEl?.value ?? "").trim() || undefined,
-            paidAt: toIsoFromDateTimeLocal(rentPaymentPaidAtEl?.value) || undefined
+            paidAt: toIsoFromDateTimeLocal(rentPaymentPaidAtEl?.value) || undefined,
+            collectedByName: String(rentPaymentCollectedByEl?.value ?? "").trim() || undefined
         }
     };
 }
@@ -8456,7 +8671,7 @@ function renderResidentPaymentReports(reports = []) {
         card.innerHTML = `
       <div class="resident-payment-report-review-main">
         <strong>${escapeHtml(report.residentName || "Resident")} • House ${escapeHtml(report.houseNumber)}</strong>
-        <span>${escapeHtml(report.paymentType === "utilities" ? `Utilities • ${report.utilityType || "Utility type missing"}` : "Rent")} • ${escapeHtml(formatCurrency(report.amountKsh))} • ${escapeHtml(String(report.provider || "").toUpperCase())}</span>
+        <span>${escapeHtml(report.paymentType === "utilities" ? `Utilities • ${report.utilityType || "Utility type missing"}` : report.paymentType === "rent_deposit" ? "Rent deposit" : report.paymentType === "utility_deposit" ? "Utility deposit" : "Rent")} • ${escapeHtml(formatCurrency(report.amountKsh))} • ${escapeHtml(String(report.provider || "").toUpperCase())}</span>
         <span>Reference: ${escapeHtml(report.providerReference || "-")} • Paid ${escapeHtml(formatDateTime(report.paidAt))}</span>
         ${report.note ? `<small>${escapeHtml(report.note)}</small>` : ""}
         <span class="resident-payment-report-state status-${escapeHtml(report.status)}">${escapeHtml(report.status === "approved" ? "Confirmed" : report.status === "rejected" ? `Needs attention${report.reviewNote ? `: ${report.reviewNote}` : ""}` : "Awaiting review")}</span>
@@ -10454,6 +10669,7 @@ overviewUtilityPaymentFormEl?.addEventListener("submit", (event) => {
                     provider: "cash",
                     providerReference: providerReference || undefined,
                     paidAt,
+                    collectedByName: String(overviewUtilityPaymentFormEl.querySelector("[name=collectedByName]")?.value ?? "").trim() || undefined,
                     note: `${statusLabel} bill recorded from overview quick payment.`
                 })
             });
@@ -11092,6 +11308,35 @@ collectionsReportBuildingEl?.addEventListener("change", () => {
         handleLandlordError(error, "Unable to load the collections report.");
     });
 });
+agentRemittanceFormEl?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const buildingId = String(performanceBuildingEl instanceof HTMLSelectElement ? performanceBuildingEl.value : "").trim();
+    const agentName = String(agentRemittanceNameEl instanceof HTMLInputElement ? agentRemittanceNameEl.value : "").trim();
+    const amountKsh = Number(agentRemittanceAmountEl instanceof HTMLInputElement ? agentRemittanceAmountEl.value : NaN);
+    if (!buildingId || !agentName || !Number.isFinite(amountKsh) || amountKsh <= 0) {
+        showError("Choose a building, agent, and a valid remittance amount.");
+        return;
+    }
+    void (async () => {
+        try {
+            await requestJson("/api/landlord/agent-remittances", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+                    buildingId, agentName, amountKsh,
+                    paidAt: toIsoFromDateTimeLocal(agentRemittanceDateEl instanceof HTMLInputElement ? agentRemittanceDateEl.value : "") || undefined,
+                    reference: String(agentRemittanceReferenceEl instanceof HTMLInputElement ? agentRemittanceReferenceEl.value : "").trim() || undefined,
+                    note: String(agentRemittanceNoteEl instanceof HTMLInputElement ? agentRemittanceNoteEl.value : "").trim() || undefined
+                }) });
+            agentRemittanceFormEl.reset();
+            setStatus("Agent remittance recorded.");
+            await loadBuildingPerformance();
+        }
+        catch (error) {
+            handleLandlordError(error, "Unable to record agent remittance.");
+        }
+    })();
+});
+performanceBuildingEl?.addEventListener("change", () => { void loadBuildingPerformance().catch((error) => handleLandlordError(error, "Unable to load building performance.")); });
+performanceMonthEl?.addEventListener("change", () => { void loadBuildingPerformance().catch((error) => handleLandlordError(error, "Unable to load building performance.")); });
+refreshPerformanceBtnEl?.addEventListener("click", () => { void loadBuildingPerformance().catch((error) => handleLandlordError(error, "Unable to refresh building performance.")); });
 collectionsReportFromEl?.addEventListener("change", renderCollectionsReport);
 collectionsReportToEl?.addEventListener("change", renderCollectionsReport);
 exportCollectionsReportBtnEl?.addEventListener("click", exportCollectionsReportCsv);
@@ -11213,6 +11458,8 @@ expenditureFormEl?.addEventListener("submit", (event) => {
                     category,
                     title,
                     amountKsh,
+                    paidAt: toIsoFromDateTimeLocal(expenditurePaidAtEl?.value) || undefined,
+                    payeeName: String(expenditurePayeeEl?.value ?? "").trim() || undefined,
                     chargeableToResident,
                     note
                 })
@@ -11229,6 +11476,10 @@ expenditureFormEl?.addEventListener("submit", (event) => {
             if (expenditureNoteEl instanceof HTMLTextAreaElement) {
                 expenditureNoteEl.value = "";
             }
+            if (expenditurePaidAtEl instanceof HTMLInputElement)
+                expenditurePaidAtEl.value = "";
+            if (expenditurePayeeEl instanceof HTMLInputElement)
+                expenditurePayeeEl.value = "";
             if (expenditureChargeableEl instanceof HTMLInputElement) {
                 expenditureChargeableEl.checked = false;
             }

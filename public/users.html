@@ -582,6 +582,8 @@
                       <select id="resident-payment-report-type" required>
                         <option value="rent">Rent</option>
                         <option value="utilities">Utilities</option>
+                        <option value="rent_deposit">Rent deposit</option>
+                        <option value="utility_deposit">Utility deposit</option>
                       </select>
                     </label>
                     <label id="resident-payment-report-utility-field" class="hidden">Utility bill
@@ -603,8 +605,11 @@
                     </label>
                     <input id="resident-payment-report-date" type="date" class="hidden" aria-hidden="true" />
                   </div>
-                  <label>Payment reference
-                    <input id="resident-payment-report-reference" type="text" maxlength="120" placeholder="e.g. M-PESA receipt code" required />
+                  <label>Payment reference (recommended)
+                    <input id="resident-payment-report-reference" type="text" maxlength="120" placeholder="Receipt or bank transaction code, if available" />
+                  </label>
+                  <label>Paid to (optional)
+                    <input id="resident-payment-report-received-by" type="text" maxlength="120" placeholder="Owner, agent, or staff member" />
                   </label>
                   <details class="resident-payment-note"><summary>Add a note (optional)</summary><label>Note<input id="resident-payment-report-note" type="text" maxlength="500" placeholder="Anything management should know" /></label></details>
                   <div class="action-row"><button id="resident-payment-report-submit" type="submit">Submit payment for confirmation</button></div>
@@ -897,6 +902,6 @@
       </article>
     </section>
 
-    <script type="module" src="/resident-app/assets/resident.js?v=098126e99d"></script>
+    <script type="module" src="/resident-app/assets/resident.js?v=2dee64d23d"></script>
   </body>
 </html>

@@ -230,6 +230,8 @@ type TenantAgreementRecord = Prisma.TenantAgreementGetPayload<{
     monthlyRentKsh: true;
     depositKsh: true;
     depositPaidKsh: true;
+    utilityDepositKsh: true;
+    utilityDepositPaidKsh: true;
     paymentDueDay: true;
     specialTerms: true;
     status: true;
@@ -293,6 +295,8 @@ function mapTenantAgreement(record: TenantAgreementRecord) {
     monthlyRentKsh: record.monthlyRentKsh ?? undefined,
     depositKsh: record.depositKsh ?? undefined,
     depositPaidKsh: record.depositPaidKsh ?? undefined,
+    utilityDepositKsh: record.utilityDepositKsh ?? undefined,
+    utilityDepositPaidKsh: record.utilityDepositPaidKsh ?? undefined,
     paymentDueDay: record.paymentDueDay ?? undefined,
     specialTerms: record.specialTerms ?? undefined,
     status: record.status,
@@ -2496,6 +2500,8 @@ export class UserAccountService {
         monthlyRentKsh: true,
         depositKsh: true,
         depositPaidKsh: true,
+        utilityDepositKsh: true,
+        utilityDepositPaidKsh: true,
         paymentDueDay: true,
         specialTerms: true,
         status: true,
@@ -2542,7 +2548,7 @@ export class UserAccountService {
     }
     const agreement = await this.prisma.tenantAgreement.findUnique({
       where: { tenancyId: tenancy.id },
-      select: { depositKsh: true, depositPaidKsh: true, updatedAt: true }
+      select: { depositKsh: true, depositPaidKsh: true, utilityDepositKsh: true, utilityDepositPaidKsh: true, updatedAt: true }
     });
     if (!agreement || agreement.depositKsh == null) {
       throw new Error("TENANT_DEPOSIT_NOT_CONFIGURED");
@@ -2561,6 +2567,50 @@ export class UserAccountService {
     if (updated.count !== 1) {
       throw new Error("TENANT_AGREEMENT_CHANGED_RETRY");
     }
+    return nextPaidKsh;
+  }
+
+  async adjustActiveTenantUtilityDepositPaid(input: {
+    buildingId: string;
+    houseNumber: string;
+    deltaKsh: number;
+    requiredKsh?: number;
+  }): Promise<number> {
+    const houseNumber = normalizeHouseNumber(input.houseNumber);
+    const tenancy = await this.prisma.tenancy.findFirst({
+      where: { buildingId: input.buildingId, active: true, unit: { houseNumber, isActive: true } },
+      select: { id: true, userId: true },
+      orderBy: { createdAt: "desc" }
+    });
+    if (!tenancy) throw new Error("ACTIVE_TENANCY_NOT_FOUND");
+    const agreement = await this.prisma.tenantAgreement.findUnique({
+      where: { tenancyId: tenancy.id },
+      select: { utilityDepositKsh: true, utilityDepositPaidKsh: true, updatedAt: true }
+    });
+    const requiredKsh = agreement?.utilityDepositKsh ?? input.requiredKsh ?? null;
+    if (requiredKsh == null) throw new Error("TENANT_UTILITY_DEPOSIT_NOT_CONFIGURED");
+    const nextPaidKsh = Math.round(Number(agreement?.utilityDepositPaidKsh ?? 0) + input.deltaKsh);
+    if (nextPaidKsh < 0) throw new Error("UTILITY_DEPOSIT_ALLOCATION_EXCEEDS_PAID");
+    if (nextPaidKsh > requiredKsh) throw new Error("UTILITY_DEPOSIT_ALLOCATION_EXCEEDS_REQUIRED");
+    if (!agreement) {
+      await this.prisma.tenantAgreement.create({
+        data: {
+          tenancyId: tenancy.id,
+          buildingId: input.buildingId,
+          houseNumber,
+          residentUserId: tenancy.userId,
+          utilityDepositKsh: requiredKsh,
+          utilityDepositPaidKsh: nextPaidKsh,
+          status: "awaiting_resident"
+        }
+      });
+      return nextPaidKsh;
+    }
+    const updated = await this.prisma.tenantAgreement.updateMany({
+      where: { tenancyId: tenancy.id, updatedAt: agreement.updatedAt },
+      data: { utilityDepositKsh: requiredKsh, utilityDepositPaidKsh: nextPaidKsh }
+    });
+    if (updated.count !== 1) throw new Error("TENANT_AGREEMENT_CHANGED_RETRY");
     return nextPaidKsh;
   }
 
@@ -2590,6 +2640,22 @@ export class UserAccountService {
       throw new Error("ACTIVE_TENANCY_NOT_FOUND");
     }
 
+    const existingAgreement = await this.prisma.tenantAgreement.findUnique({
+      where: { tenancyId: tenancy.id },
+      select: {
+        monthlyRentKsh: true,
+        depositKsh: true,
+        depositPaidKsh: true,
+        utilityDepositKsh: true,
+        utilityDepositPaidKsh: true,
+        leaseStartDate: true,
+        leaseEndDate: true,
+        paymentDueDay: true,
+        specialTerms: true,
+        status: true
+      }
+    });
+
     const normalizedPayload = {
       identityType: input.payload.identityType ?? null,
       identityNumber: normalizeOptionalText(input.payload.identityNumber) ?? null,
@@ -2616,8 +2682,10 @@ export class UserAccountService {
         ? new Date(`${input.payload.leaseEndDate}T00:00:00.000Z`)
         : null,
       monthlyRentKsh: input.payload.monthlyRentKsh ?? null,
-      depositKsh: input.payload.depositKsh ?? null,
-      depositPaidKsh: input.payload.depositPaidKsh ?? null,
+      depositKsh: input.payload.depositKsh ?? existingAgreement?.depositKsh ?? null,
+      depositPaidKsh: input.payload.depositPaidKsh ?? existingAgreement?.depositPaidKsh ?? null,
+      utilityDepositKsh: input.payload.utilityDepositKsh ?? existingAgreement?.utilityDepositKsh ?? null,
+      utilityDepositPaidKsh: input.payload.utilityDepositPaidKsh ?? existingAgreement?.utilityDepositPaidKsh ?? null,
       paymentDueDay: input.payload.paymentDueDay ?? null,
       specialTerms: normalizeOptionalText(input.payload.specialTerms) ?? null
     };
@@ -2638,13 +2706,10 @@ export class UserAccountService {
       };
     }
 
-    const existingAgreement = await this.prisma.tenantAgreement.findUnique({
-      where: { tenancyId: tenancy.id },
-      select: { monthlyRentKsh: true, depositKsh: true, leaseStartDate: true, leaseEndDate: true, paymentDueDay: true, specialTerms: true, status: true }
-    });
     const leaseTermsChanged = Boolean(input.payload.requestAcknowledgment || (existingAgreement && (
       existingAgreement.monthlyRentKsh !== normalizedPayload.monthlyRentKsh ||
       existingAgreement.depositKsh !== normalizedPayload.depositKsh ||
+      existingAgreement.utilityDepositKsh !== normalizedPayload.utilityDepositKsh ||
       existingAgreement.paymentDueDay !== normalizedPayload.paymentDueDay ||
       existingAgreement.specialTerms !== normalizedPayload.specialTerms ||
       (existingAgreement.leaseStartDate?.toISOString().slice(0, 10) ?? null) !== (normalizedPayload.leaseStartDate?.toISOString().slice(0, 10) ?? null) ||
@@ -2664,7 +2729,7 @@ export class UserAccountService {
         buildingId: input.buildingId,
         houseNumber,
         residentUserId: tenancy.userId,
-        status: (normalizedPayload.monthlyRentKsh != null || normalizedPayload.depositKsh != null || normalizedPayload.specialTerms != null || normalizedPayload.leaseStartDate != null) ? "awaiting_resident" : "not_requested",
+        status: (normalizedPayload.monthlyRentKsh != null || normalizedPayload.depositKsh != null || normalizedPayload.utilityDepositKsh != null || normalizedPayload.specialTerms != null || normalizedPayload.leaseStartDate != null) ? "awaiting_resident" : "not_requested",
         ...normalizedPayload
       },
       select: {
@@ -2690,6 +2755,8 @@ export class UserAccountService {
         monthlyRentKsh: true,
         depositKsh: true,
         depositPaidKsh: true,
+        utilityDepositKsh: true,
+        utilityDepositPaidKsh: true,
         paymentDueDay: true,
         specialTerms: true,
         status: true,
@@ -2732,7 +2799,7 @@ export class UserAccountService {
         data: {
           tenantAgreementId: agreement.id, method: input.method, actorUserId: input.actorUserId ?? input.residentUserId,
           actorName: input.actorName, note: normalizeOptionalText(input.note) ?? null,
-          termsSnapshot: { leaseStartDate: agreement.leaseStartDate?.toISOString() ?? null, leaseEndDate: agreement.leaseEndDate?.toISOString() ?? null, monthlyRentKsh: agreement.monthlyRentKsh, depositKsh: agreement.depositKsh, paymentDueDay: agreement.paymentDueDay, specialTerms: agreement.specialTerms }
+          termsSnapshot: { leaseStartDate: agreement.leaseStartDate?.toISOString() ?? null, leaseEndDate: agreement.leaseEndDate?.toISOString() ?? null, monthlyRentKsh: agreement.monthlyRentKsh, depositKsh: agreement.depositKsh, utilityDepositKsh: agreement.utilityDepositKsh, paymentDueDay: agreement.paymentDueDay, specialTerms: agreement.specialTerms }
         }
       });
       return agreement;

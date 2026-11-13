@@ -24,6 +24,7 @@ interface RecordRentPaymentInput {
   paymentProfileName?: string;
   paymentAccountReference?: string;
   source?: RentPaymentSource;
+  collectedByName?: string;
 }
 
 export const RENT_LEGACY_BUILDING_ID = "__LEGACY__";
@@ -48,6 +49,7 @@ export interface RentPaymentEvent {
   paidAt: string;
   createdAt: string;
   source?: RentPaymentSource;
+  collectedByName?: string;
 }
 
 interface ReminderState {
@@ -788,7 +790,8 @@ export class RentLedgerService {
         paymentProfileName: input.paymentProfileName ?? existingEvent.paymentProfileName,
         paymentAccountReference:
           input.paymentAccountReference ?? existingEvent.paymentAccountReference,
-        source: "manual"
+        source: "manual",
+        collectedByName: existingEvent.collectedByName
       });
 
       return {
@@ -813,7 +816,8 @@ export class RentLedgerService {
         paymentProfileId: previousEvent.paymentProfileId,
         paymentProfileName: previousEvent.paymentProfileName,
         paymentAccountReference: previousEvent.paymentAccountReference,
-        source: previousEvent.source
+        source: previousEvent.source,
+        collectedByName: previousEvent.collectedByName
       });
       throw error;
     }
@@ -1067,7 +1071,8 @@ export class RentLedgerService {
       paymentAccountReference: input.paymentAccountReference,
       paidAt,
       createdAt: nowIso(),
-      source: input.source
+      source: input.source,
+      collectedByName: input.collectedByName?.trim() || undefined
     };
 
     const record = this.resolveRecord(normalizedBuildingId, normalizedHouse);

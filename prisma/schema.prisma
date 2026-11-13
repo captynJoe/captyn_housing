@@ -418,6 +418,8 @@ model TenantAgreement {
   monthlyRentKsh            Int?
   depositKsh                Int?
   depositPaidKsh            Int?
+  utilityDepositKsh         Int?
+  utilityDepositPaidKsh     Int?
   paymentDueDay             Int?
   specialTerms              String?
   status                    String                  @default("not_requested")

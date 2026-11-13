@@ -150,6 +150,7 @@ const residentPaymentReportAmountEl = document.getElementById("resident-payment-
 const residentPaymentReportProviderEl = document.getElementById("resident-payment-report-provider");
 const residentPaymentReportDateEl = document.getElementById("resident-payment-report-date");
 const residentPaymentReportReferenceEl = document.getElementById("resident-payment-report-reference");
+const residentPaymentReportReceivedByEl = document.getElementById("resident-payment-report-received-by");
 const residentPaymentReportNoteEl = document.getElementById("resident-payment-report-note");
 const residentPaymentReportSubmitEl = document.getElementById("resident-payment-report-submit");
 const residentPaymentReportsListEl = document.getElementById("resident-payment-reports-list");
@@ -2965,6 +2966,14 @@ function renderRentDue(rentDue, fallbackMessage) {
       <dd>${formatCurrency(rentDue.currentMonthLatePenaltyKsh ?? 0)}</dd>
     </div>
     <div>
+      <dt>Rent Deposit Due</dt>
+      <dd>${rentDue.rentDepositDueKsh == null ? "Not set" : formatCurrency(rentDue.rentDepositDueKsh)}</dd>
+    </div>
+    <div>
+      <dt>Utility Deposit Due</dt>
+      <dd>${rentDue.utilityDepositNeedsSetup ? "Management is setting this up" : rentDue.utilityDepositDueKsh == null ? "Not set" : formatCurrency(rentDue.utilityDepositDueKsh)}</dd>
+    </div>
+    <div>
       <dt>Charge Overdue</dt>
       <dd>${formatCurrency(rentDue.expenseBalanceKsh ?? rentDue.expenseArrearsKsh ?? 0)}</dd>
     </div>
@@ -3358,7 +3367,11 @@ function renderResidentPaymentReports(reports = []) {
         const title = document.createElement("strong");
         const paymentLabel = report.paymentType === "utilities"
             ? `Utilities${report.utilityType ? ` • ${String(report.utilityType).replace(/^./, (letter) => letter.toUpperCase())}` : ""}`
-            : "Rent";
+            : report.paymentType === "rent_deposit"
+                ? "Rent deposit"
+                : report.paymentType === "utility_deposit"
+                    ? "Utility deposit"
+                    : "Rent";
         title.textContent = `${paymentLabel} • ${formatCurrency(Number(report.amountKsh || 0))}`;
         const status = document.createElement("span");
         status.className = `item-chip resident-report-status status-${report.status}`;
@@ -3394,11 +3407,14 @@ async function submitResidentPaymentReport(event) {
                 provider: residentPaymentReportProviderEl.value,
                 paidAt: residentPaymentReportDateEl.value,
                 providerReference: residentPaymentReportReferenceEl.value.trim(),
+                receivedByName: residentPaymentReportReceivedByEl instanceof HTMLInputElement ? residentPaymentReportReceivedByEl.value.trim() : undefined,
                 note: residentPaymentReportNoteEl.value.trim()
             })
         }, { auth: true });
         residentPaymentReportAmountEl.value = "";
         residentPaymentReportReferenceEl.value = "";
+        if (residentPaymentReportReceivedByEl instanceof HTMLInputElement)
+            residentPaymentReportReceivedByEl.value = "";
         residentPaymentReportNoteEl.value = "";
         showFeedback("Payment report sent. Your balance will update after management confirms it.", "success");
         await loadTenantData();
@@ -4817,11 +4833,13 @@ function startResidentPortal() {
         residentPaymentReportUtilityFieldEl.classList.toggle("hidden", !isUtilities);
         residentPaymentReportUtilityTypeEl.required = isUtilities;
         residentPaymentReportUtilityTypeEl.disabled = !isUtilities;
-        const cash = residentPaymentReportProviderEl.value === "cash";
-        residentPaymentReportReferenceEl.required = !cash;
-        residentPaymentReportReferenceEl.placeholder = cash
-            ? "Optional for cash; add a note if useful"
-            : "e.g. M-PESA receipt code";
+        const provider = residentPaymentReportProviderEl.value;
+        residentPaymentReportReferenceEl.required = false;
+        residentPaymentReportReferenceEl.placeholder = provider === "mpesa"
+            ? "M-PESA receipt code (recommended)"
+            : provider === "bank"
+                ? "Bank transaction code (recommended)"
+                : "Optional; add payment details in the note if useful";
     };
     residentPaymentReportProviderEl.addEventListener("change", syncResidentPaymentReportFields);
     residentPaymentReportTypeEl.addEventListener("change", syncResidentPaymentReportFields);

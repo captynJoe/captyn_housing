@@ -14,6 +14,7 @@ type UtilityPaymentSource = "manual" | "resident" | "mpesa" | "settlement";
 type InternalRecordUtilityPaymentInput = Omit<RecordUtilityPaymentInput, "provider"> & {
   provider: UtilityPaymentProvider;
   source?: UtilityPaymentSource;
+  collectedByName?: string;
 };
 
 export interface UtilityMeterRecord {
@@ -37,6 +38,7 @@ export interface UtilityPaymentEvent {
   note?: string;
   createdAt: string;
   source?: UtilityPaymentSource;
+  collectedByName?: string;
 }
 
 export interface UtilityPaymentAllocation {
@@ -2007,7 +2009,8 @@ export class UtilityBillingService {
         paidAt,
         note: input.note?.trim() || undefined,
         createdAt,
-        source: input.source
+        source: input.source,
+        collectedByName: input.collectedByName?.trim() || undefined
       };
 
       bill.payments.unshift(event);
@@ -2251,7 +2254,8 @@ export class UtilityBillingService {
         providerReference: input.providerReference,
         paidAt: input.paidAt ?? rollbackEvent?.paidAt,
         note: input.note ?? rollbackEvent?.note,
-        source: "manual"
+        source: "manual",
+        collectedByName: rollbackEvent?.collectedByName
       });
 
       return {
@@ -2270,7 +2274,8 @@ export class UtilityBillingService {
           providerReference: rollbackEvent.providerReference,
           paidAt: rollbackEvent.paidAt,
           note: rollbackEvent.note,
-          source: rollbackEvent.source
+          source: rollbackEvent.source,
+          collectedByName: rollbackEvent.collectedByName
         });
       }
       throw error;
@@ -2656,7 +2661,8 @@ export class UtilityBillingService {
       paidAt,
       note: input.note?.trim() || undefined,
       createdAt: nowIso(),
-      source: input.source
+      source: input.source,
+      collectedByName: input.collectedByName?.trim() || undefined
     };
   }
 

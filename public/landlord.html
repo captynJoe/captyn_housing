@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=044c9c08af" />
-    <link rel="stylesheet" href="/landlord.css?v=49a2d60134" />
+    <link rel="stylesheet" href="/landlord.css?v=bf2c50b078" />
     <script src="/captyn-theme.js?v=6944e37fb6"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=d9fd4fe626" />
     <link rel="stylesheet" href="/landlord-shell.css?v=ef1318231c" />
@@ -98,6 +98,7 @@
             <button type="button" class="lh-nav-btn" data-landlord-view="overview" data-landlord-section-target="overview-collections-panel">Dashboard</button>
             <button type="button" class="lh-nav-btn" data-landlord-view="tenants" data-landlord-section-target="residents-section">Houses</button>
             <button type="button" class="lh-nav-btn" data-landlord-view="rent" data-landlord-section-target="overview-rent-status-section">Rent</button>
+            <button type="button" class="lh-nav-btn" data-landlord-view="performance" data-landlord-section-target="building-performance-section">Performance</button>
             <button type="button" class="lh-nav-btn" data-landlord-view="reports" data-landlord-section-target="collections-report-section">Collections</button>
             <button type="button" class="lh-nav-btn" data-landlord-view="balances" data-landlord-section-target="balances-section">Balances</button>
             <button type="button" class="lh-nav-btn" data-landlord-view="applications" data-landlord-section-target="applications-section">
@@ -794,6 +795,7 @@
               <thead>
                 <tr>
                   <th>Created</th>
+                  <th>Paid on</th>
                   <th>Building</th>
                   <th>House</th>
                   <th>Tenant</th>
@@ -910,6 +912,56 @@
               </thead>
               <tbody id="rent-status-body"></tbody>
             </table>
+          </div>
+        </section>
+
+        <section class="panel wide-panel landlord-view hidden" data-landlord-view-panel="performance" id="building-performance-section">
+          <div class="panel-head">
+            <div>
+              <h2>Building Performance</h2>
+              <p id="building-performance-summary" class="status-text">Monthly collections, operating costs, and collection attribution.</p>
+            </div>
+            <button id="refresh-building-performance" type="button">Refresh</button>
+          </div>
+          <div class="package-card">
+            <div class="inline-fields compact-fields">
+              <label>Building<select id="building-performance-building"></select></label>
+              <label>Month<input id="building-performance-month" type="month" /></label>
+            </div>
+            <p class="status-text">Collections include rent, utilities, and deposits. Deposits are shown separately from rent income. Agent salaries and commissions belong in Costs with the agent's name as the payee. A transfer of collected funds from an agent to the owner is not new income or an expense. Older records without collection or payee details appear as Unknown.</p>
+          </div>
+          <div class="resident-overview-cards performance-cards">
+            <article class="resident-overview-card"><span>Total received</span><strong id="performance-total-received">-</strong><small id="performance-payment-count">-</small></article>
+            <article class="resident-overview-card"><span>Rent received</span><strong id="performance-rent-received">-</strong></article>
+            <article class="resident-overview-card"><span>Utilities received</span><strong id="performance-utilities-received">-</strong></article>
+            <article class="resident-overview-card"><span>Deposits received</span><strong id="performance-deposits-received">-</strong></article>
+            <article class="resident-overview-card"><span>Operating costs</span><strong id="performance-expenses">-</strong><small id="performance-expense-count">-</small></article>
+            <article class="resident-overview-card"><span>Cash after costs</span><strong id="performance-net">-</strong></article>
+            <article class="resident-overview-card"><span>Agent remittances to owner</span><strong id="performance-remitted">-</strong><small id="performance-remittance-count">-</small></article>
+          </div>
+          <div class="performance-breakdowns">
+            <div class="package-card"><h3>Collections by recipient</h3><p class="status-text">Based on the person entered when the payment was recorded.</p><div id="performance-collectors" class="stack-list"></div></div>
+            <div class="package-card"><h3>Costs by category and payee</h3><div id="performance-expense-breakdown" class="stack-list"></div></div>
+          </div>
+          <div class="performance-breakdowns">
+            <form id="agent-remittance-form" class="package-card">
+              <h3>Record agent remittance</h3>
+              <p class="status-text">Record money an agent has handed over to the owner. This transfer is not counted again as income or a cost.</p>
+              <div class="inline-fields compact-fields">
+                <label>Agent name<input id="agent-remittance-name" type="text" maxlength="120" required /></label>
+                <label>Amount (KSh)<input id="agent-remittance-amount" type="number" min="1" step="1" required /></label>
+                <label>Received on<input id="agent-remittance-date" type="datetime-local" /></label>
+              </div>
+              <div class="inline-fields compact-fields">
+                <label>Reference (optional)<input id="agent-remittance-reference" type="text" maxlength="120" /></label>
+                <label>Note (optional)<input id="agent-remittance-note" type="text" maxlength="500" /></label>
+              </div>
+              <button type="submit">Save remittance</button>
+            </form>
+            <div class="package-card"><h3>Agent remittance history</h3><div id="performance-remittances" class="stack-list"></div></div>
+          </div>
+          <div class="table-wrap">
+            <table><thead><tr><th>Date</th><th>House</th><th>Type</th><th>Amount</th><th>Method</th><th>Collected by</th></tr></thead><tbody id="performance-payments-body"></tbody></table>
           </div>
         </section>
 
@@ -1329,6 +1381,10 @@
                 Paid At (optional)
                 <input id="utility-payment-paid-at" type="datetime-local" />
               </label>
+              <label>
+                Collected by (optional)
+                <input id="utility-payment-collected-by" type="text" maxlength="120" placeholder="Agent or staff name" />
+              </label>
             </div>
             <div class="inline-fields compact-fields">
               <label>
@@ -1582,6 +1638,7 @@
                   <th>Category</th>
                   <th>Title</th>
                   <th>Amount</th>
+                  <th>Paid to</th>
                   <th>Resident Charge</th>
                   <th>Recorded By</th>
                   <th>Note</th>
@@ -1646,7 +1703,7 @@
             <summary class="rent-sheet-defaults-summary">
               <span>
                 <strong id="rent-sheet-defaults-title">Building defaults</strong>
-                <small>Set the standard rent and billing terms for this building</small>
+                <small>Set rent, rent deposit, utility deposit, and billing terms</small>
               </span>
               <span class="rent-sheet-defaults-toggle">Edit defaults</span>
             </summary>
@@ -1657,8 +1714,12 @@
                 <input id="rent-sheet-default-monthly-rent" type="number" min="0" step="1" placeholder="Not set" />
               </label>
               <label>
-                Deposit required (KSh)
+                Rent deposit required (KSh)
                 <input id="rent-sheet-default-deposit" type="number" min="0" step="1" placeholder="Not set" />
+              </label>
+              <label>
+                Utility deposit required (KSh)
+                <input id="rent-sheet-default-utility-deposit" type="number" min="0" step="1" placeholder="Not set" />
               </label>
               <label>
                 Rent due day
@@ -1779,15 +1840,17 @@
             </label>
           </div>
 
-          <label>
-            Receipt / Note (optional)
+          <div class="inline-fields compact-fields">
+            <label>Collected by (optional)<input name="collectedByName" type="text" maxlength="120" placeholder="Agent or staff name" /></label>
+            <label>Receipt / Note (optional)
             <input
               id="overview-utility-payment-reference"
               type="text"
               maxlength="120"
               placeholder="Optional for cash"
             />
-          </label>
+            </label>
+          </div>
 
           <p id="overview-utility-payment-help" class="status-text"></p>
 
@@ -2155,6 +2218,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=a30c35a0cc"></script>
+    <script type="module" src="/landlord.js?v=3952c93f05"></script>
   </body>
 </html>

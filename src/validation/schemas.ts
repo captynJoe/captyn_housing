@@ -387,6 +387,7 @@ const optionalRentDateSchema = z
 export const landlordRentSetupSheetSchema = z.object({
   buildingDefaultMonthlyRentKsh: optionalRentAmountSchema,
   buildingDefaultDepositKsh: optionalRentAmountSchema,
+  buildingDefaultUtilityDepositKsh: optionalRentAmountSchema,
   buildingDefaultDueDay: optionalRentDueDaySchema,
   buildingDefaultGraceDays: z.number().int().min(0).max(31).optional(),
   chargeStartDate: optionalRentDateSchema,
@@ -398,6 +399,8 @@ export const landlordRentSetupSheetSchema = z.object({
         monthlyRentKsh: optionalRentAmountSchema,
         depositKsh: optionalRentAmountSchema,
         depositPaidKsh: optionalRentAmountSchema,
+        utilityDepositKsh: optionalRentAmountSchema,
+        utilityDepositPaidKsh: optionalRentAmountSchema,
         balanceKsh: optionalRentAmountSchema,
         currentMonthPaidKsh: optionalRentAmountSchema,
         openingArrearsKsh: z.number().int().min(0).max(5_000_000).nullable().optional(),
@@ -493,17 +496,19 @@ export const recordUtilityPaymentSchema = z.object({
   provider: utilityPaymentProviderSchema.default("mpesa"),
   providerReference: z.string().trim().max(120).optional(),
   paidAt: z.string().datetime().optional(),
+  collectedByName: z.string().trim().max(120).optional(),
   note: z.string().trim().max(280).optional()
 });
 
 export const residentPaymentReportSchema = z
   .object({
-    paymentType: z.enum(["rent", "utilities"]),
+    paymentType: z.enum(["rent", "utilities", "rent_deposit", "utility_deposit"]),
     utilityType: utilityTypeSchema.optional(),
     amountKsh: z.number().int().positive().max(500_000),
     provider: utilityPaymentProviderSchema,
     providerReference: z.string().trim().max(120).optional(),
     paidAt: z.string().trim().min(10).max(40),
+    receivedByName: z.string().trim().max(120).optional(),
     note: z.string().trim().max(500).optional()
   })
   .superRefine((value, context) => {
@@ -514,18 +519,11 @@ export const residentPaymentReportSchema = z
         message: "Choose water or electricity for this utility payment."
       });
     }
-    if (value.paymentType === "rent" && value.utilityType) {
+    if (value.paymentType !== "utilities" && value.utilityType) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["utilityType"],
-        message: "A utility type is only used for utility payments."
-      });
-    }
-    if (value.provider !== "cash" && !value.providerReference?.trim()) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["providerReference"],
-        message: "Enter the payment reference."
+        message: "A utility type is only used for utility bill payments."
       });
     }
   });
@@ -854,6 +852,8 @@ export const tenantAgreementUpsertSchema = z
     monthlyRentKsh: z.number().int().min(0).max(10_000_000).optional(),
     depositKsh: z.number().int().min(0).max(10_000_000).optional(),
     depositPaidKsh: z.number().int().min(0).max(10_000_000).optional(),
+    utilityDepositKsh: z.number().int().min(0).max(10_000_000).optional(),
+    utilityDepositPaidKsh: z.number().int().min(0).max(10_000_000).optional(),
     paymentDueDay: z.number().int().min(1).max(31).optional(),
     specialTerms: z.string().trim().max(1_200).optional()
   })
@@ -918,6 +918,13 @@ export const tenantAgreementUpsertSchema = z
         message: "Deposit paid cannot be more than the agreed deposit amount."
       });
     }
+
+    if (value.utilityDepositPaidKsh != null && value.utilityDepositKsh == null) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["utilityDepositKsh"], message: "Set the agreed utility deposit before recording how much has been paid." });
+    }
+    if (value.utilityDepositPaidKsh != null && value.utilityDepositKsh != null && value.utilityDepositPaidKsh > value.utilityDepositKsh) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["utilityDepositPaidKsh"], message: "Utility deposit paid cannot be more than the agreed utility deposit amount." });
+    }
   });
 
 export const landlordTenantAgreementDraftSaveSchema = z
@@ -943,6 +950,8 @@ export const landlordTenantAgreementDraftSaveSchema = z
     monthlyRentKsh: z.number().int().min(0).max(10_000_000).optional(),
     depositKsh: z.number().int().min(0).max(10_000_000).optional(),
     depositPaidKsh: z.number().int().min(0).max(10_000_000).optional(),
+    utilityDepositKsh: z.number().int().min(0).max(10_000_000).optional(),
+    utilityDepositPaidKsh: z.number().int().min(0).max(10_000_000).optional(),
     paymentDueDay: z.number().int().min(1).max(31).optional(),
     specialTerms: optionalTenantTextSchema(1_200),
     acceptanceMethod: z.enum(["resident_portal", "staff_witnessed"]).optional(),
@@ -959,6 +968,12 @@ export const landlordTenantAgreementDraftSaveSchema = z
     }
     if (value.depositPaidKsh != null && value.depositKsh != null && value.depositPaidKsh > value.depositKsh) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["depositPaidKsh"], message: "Deposit paid cannot be more than the agreed deposit amount." });
+    }
+    if (value.utilityDepositPaidKsh != null && value.utilityDepositKsh == null) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["utilityDepositKsh"], message: "Set the agreed utility deposit before recording how much has been paid." });
+    }
+    if (value.utilityDepositPaidKsh != null && value.utilityDepositKsh != null && value.utilityDepositPaidKsh > value.utilityDepositKsh) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["utilityDepositPaidKsh"], message: "Utility deposit paid cannot be more than the agreed utility deposit amount." });
     }
   });
 
@@ -1263,6 +1278,15 @@ export const landlordAssignCaretakerSchema = z.object({
   note: z.string().trim().max(280).optional()
 });
 
+export const landlordAgentRemittanceSchema = z.object({
+  buildingId: nonEmptyString,
+  agentName: nonEmptyString.max(120),
+  amountKsh: z.number().positive().max(10_000_000),
+  paidAt: z.string().datetime().optional(),
+  reference: z.string().trim().max(120).optional(),
+  note: z.string().trim().max(500).optional()
+});
+
 export const landlordExpenditureCreateSchema = z.object({
   buildingId: nonEmptyString,
   houseNumber: nonEmptyString.max(24).optional(),
@@ -1281,6 +1305,8 @@ export const landlordExpenditureCreateSchema = z.object({
   ]),
   title: z.string().trim().min(3).max(120),
   amountKsh: z.number().positive().max(2_000_000),
+  paidAt: z.string().datetime().optional(),
+  payeeName: z.string().trim().max(120).optional(),
   chargeableToResident: z.boolean().optional().default(false),
   note: z.string().trim().max(500).optional()
 });
@@ -1374,6 +1400,7 @@ export const recordAdminRentPaymentSchema = z.object({
   providerReference: nonEmptyString.max(120).optional(),
   billingMonth: billingMonthSchema.optional(),
   paidAt: z.string().datetime().optional(),
+  collectedByName: z.string().trim().max(120).optional(),
   phoneNumber: kenyaPhoneSchema.optional()
 });
 

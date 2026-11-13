@@ -157,6 +157,7 @@ import {
   landlordPaymentProfileUpdateSchema,
   landlordPaymentInstructionsUpdateSchema,
   landlordExpenditureCreateSchema,
+  landlordAgentRemittanceSchema,
   landlordUtilityBulkSubmissionAuditCreateSchema,
   landlordUtilityBulkSubmissionAuditFinalizeSchema,
   createRoomBillingHoldSchema,
@@ -484,10 +485,26 @@ interface BuildingExpenditureRecord {
   createdByRole: "landlord" | "caretaker" | "admin" | "root_admin";
   createdByUserId?: string;
   createdByName?: string;
+  paidAt?: string;
+  payeeName?: string;
+}
+
+interface AgentRemittanceRecord {
+  id: string;
+  buildingId: string;
+  agentName: string;
+  amountKsh: number;
+  paidAt: string;
+  reference?: string;
+  note?: string;
+  createdAt: string;
+  createdByUserId?: string;
+  createdByName?: string;
 }
 
 interface BuildingExpenditurePersistedState {
   records: BuildingExpenditureRecord[];
+  agentRemittances?: AgentRemittanceRecord[];
 }
 
 const LANDLORD_ONLY_BUILDING_EXPENSE_CATEGORIES = new Set<BuildingExpenditureRecord["category"]>([
@@ -525,12 +542,13 @@ interface ResidentPaymentReportRecord {
   residentUserId: string;
   residentName: string;
   residentPhone: string;
-  paymentType: "rent" | "utilities";
+  paymentType: "rent" | "utilities" | "rent_deposit" | "utility_deposit";
   utilityType?: "water" | "electricity";
   amountKsh: number;
   provider: "mpesa" | "cash" | "bank" | "card";
   providerReference?: string;
   paidAt: string;
+  receivedByName?: string;
   note?: string;
   status: "pending" | "approved" | "rejected";
   submittedAt: string;
@@ -541,7 +559,7 @@ interface ResidentPaymentReportRecord {
 }
 
 interface ResidentPaymentReportPersistedRecord extends Omit<ResidentPaymentReportRecord, "paymentType" | "utilityType"> {
-  paymentType: "rent" | "utilities" | "water" | "electricity";
+  paymentType: "rent" | "utilities" | "rent_deposit" | "utility_deposit" | "water" | "electricity";
   utilityType?: "water" | "electricity";
 }
 
@@ -591,6 +609,9 @@ interface LandlordUtilityRegistryRow {
   depositKsh: number;
   depositRequiredKsh?: number;
   depositPaidKsh?: number;
+  utilityDepositRequiredKsh?: number;
+  utilityDepositPaidKsh?: number;
+  utilityDepositNeedsSetup: boolean;
   rentPaymentStatus?: string;
   rentBalanceKsh: number;
   currentRentDueKsh: number;
@@ -1016,10 +1037,13 @@ function buildAgreementFallbackRentDueDate(
 function mapDepositAllocationError(error: unknown): { status: number; message: string } | null {
   if (!(error instanceof Error)) return null;
   const errors: Record<string, { status: number; message: string }> = {
-    TENANT_DEPOSIT_NOT_CONFIGURED: { status: 400, message: "Set the required tenant deposit before allocating payment to deposit." },
+    TENANT_DEPOSIT_NOT_CONFIGURED: { status: 400, message: "Set the required rent deposit before recording a deposit payment." },
+    TENANT_UTILITY_DEPOSIT_NOT_CONFIGURED: { status: 400, message: "Set the required utility deposit before recording a deposit payment." },
     ACTIVE_TENANCY_NOT_FOUND: { status: 400, message: "An active tenant is required to allocate payment to deposit." },
     DEPOSIT_ALLOCATION_EXCEEDS_PAID: { status: 400, message: "The allocation is greater than the deposit amount currently recorded as paid." },
-    DEPOSIT_ALLOCATION_EXCEEDS_REQUIRED: { status: 400, message: "Deposit allocation exceeds the remaining deposit due." },
+    DEPOSIT_ALLOCATION_EXCEEDS_REQUIRED: { status: 400, message: "Rent deposit payment exceeds the remaining deposit due." },
+    UTILITY_DEPOSIT_ALLOCATION_EXCEEDS_PAID: { status: 400, message: "The utility deposit reduction exceeds the amount recorded as paid." },
+    UTILITY_DEPOSIT_ALLOCATION_EXCEEDS_REQUIRED: { status: 400, message: "Utility deposit payment exceeds the remaining deposit due." },
     TENANT_AGREEMENT_CHANGED_RETRY: { status: 409, message: "Tenant deposit details changed. Refresh and try again." }
   };
   return errors[error.message] ?? null;
@@ -1385,6 +1409,7 @@ async function bootstrap() {
     MonthlyCombinedUtilityChargeRecord
   >();
   const buildingExpenditures = new Map<string, BuildingExpenditureRecord>();
+  const agentRemittances = new Map<string, AgentRemittanceRecord>();
   const residentPasswordRecoveryRequests = new Map<
     string,
     ResidentPasswordRecoveryRequestRecord
@@ -1585,6 +1610,9 @@ async function bootstrap() {
   const exportBuildingExpenditureState = (): BuildingExpenditurePersistedState => ({
     records: [...buildingExpenditures.values()]
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((item) => ({ ...item })),
+    agentRemittances: [...agentRemittances.values()]
+      .sort((a, b) => b.paidAt.localeCompare(a.paidAt))
       .map((item) => ({ ...item }))
   });
 
@@ -1592,11 +1620,10 @@ async function bootstrap() {
     state: BuildingExpenditurePersistedState | null | undefined
   ) => {
     buildingExpenditures.clear();
-    if (!state || !Array.isArray(state.records)) {
-      return;
-    }
+    agentRemittances.clear();
+    if (!state) return;
 
-    state.records.forEach((item) => {
+    (Array.isArray(state.records) ? state.records : []).forEach((item) => {
       if (!item?.id || !item?.buildingId || !item?.title) {
         return;
       }
@@ -1609,6 +1636,10 @@ async function bootstrap() {
           ? normalizeHouseNumber(item.houseNumber)
           : undefined
       });
+    });
+    (Array.isArray(state.agentRemittances) ? state.agentRemittances : []).forEach((item) => {
+      if (!item?.id || !item?.buildingId || !item?.agentName || !item?.paidAt || !(Number(item.amountKsh) > 0)) return;
+      agentRemittances.set(item.id, { ...item, buildingId: normalizeBuildingId(item.buildingId) });
     });
   };
 
@@ -3953,7 +3984,12 @@ async function bootstrap() {
               : undefined;
             residentPaymentReports.set(item.id, {
               ...item,
-              paymentType: item.paymentType === "rent" ? "rent" : "utilities",
+              paymentType:
+                item.paymentType === "rent" ||
+                item.paymentType === "rent_deposit" ||
+                item.paymentType === "utility_deposit"
+                  ? item.paymentType
+                  : "utilities",
               utilityType: item.utilityType ?? legacyUtilityType,
               buildingId: normalizeBuildingId(item.buildingId),
               houseNumber: normalizeHouseNumber(item.houseNumber)
@@ -5040,6 +5076,8 @@ async function bootstrap() {
         monthlyRentKsh?: number;
         depositKsh?: number;
         depositPaidKsh?: number;
+        utilityDepositKsh?: number;
+        utilityDepositPaidKsh?: number;
         paymentDueDay?: number;
         leaseStartDate?: string;
         agreementUpdatedAt?: string;
@@ -5103,6 +5141,8 @@ async function bootstrap() {
             monthlyRentKsh: true,
             depositKsh: true,
             depositPaidKsh: true,
+            utilityDepositKsh: true,
+            utilityDepositPaidKsh: true,
             paymentDueDay: true,
             leaseStartDate: true,
             updatedAt: true
@@ -5180,6 +5220,8 @@ async function bootstrap() {
           monthlyRentKsh: agreement.monthlyRentKsh ?? undefined,
           depositKsh: agreement.depositKsh ?? undefined,
           depositPaidKsh: agreement.depositPaidKsh ?? undefined,
+          utilityDepositKsh: agreement.utilityDepositKsh ?? undefined,
+          utilityDepositPaidKsh: agreement.utilityDepositPaidKsh ?? undefined,
           paymentDueDay: agreement.paymentDueDay ?? undefined,
           leaseStartDate: agreement.leaseStartDate?.toISOString().slice(0, 10),
           agreementUpdatedAt: agreement.updatedAt.toISOString()
@@ -5190,6 +5232,10 @@ async function bootstrap() {
     const buildingConfiguration = buildingConfigurationService
       ? await buildingConfigurationService.getForBuilding(buildingId)
       : null;
+    const buildingRentMetadata = normalizeObjectRecord(buildingConfiguration?.metadata);
+    const buildingDefaultUtilityDepositKsh = normalizeOptionalNonNegativeInteger(
+      Number(buildingRentMetadata.utilityDefaultDepositKsh ?? NaN)
+    );
     const roomRentDefaultsByHouse = await listRoomRentDefaultsForBuilding(buildingId);
     const memberRegistryByHouse = await listHouseholdMembersForBuilding(buildingId);
     const utilityDefaultsByHouse = listUtilityChargeDefaultsForBuilding(buildingId);
@@ -5318,6 +5364,11 @@ async function bootstrap() {
         Number(agreement?.depositPaidKsh ?? agreement?.depositKsh ?? 0)
       );
       const depositPaidKsh = Math.max(0, Number(agreement?.depositPaidKsh ?? 0));
+      const utilityDepositRequiredKsh = normalizeOptionalNonNegativeInteger(
+        agreement?.utilityDepositKsh ?? buildingDefaultUtilityDepositKsh
+      );
+      const utilityDepositPaidKsh = Math.max(0, Number(agreement?.utilityDepositPaidKsh ?? 0));
+      const utilityDepositNeedsSetup = Boolean(resident && utilityDepositRequiredKsh == null);
       const fallbackRentBalanceKsh = configuredMonthlyRentKsh > 0 ? configuredMonthlyRentKsh : 0;
       const fallbackRentDueDate =
         configuredMonthlyRentKsh > 0
@@ -5438,6 +5489,9 @@ async function bootstrap() {
             ? undefined
             : Math.max(0, Number(agreement.depositKsh)),
         depositPaidKsh,
+        utilityDepositRequiredKsh: utilityDepositRequiredKsh ?? undefined,
+        utilityDepositPaidKsh,
+        utilityDepositNeedsSetup,
         rentPaymentStatus: visibleRentPaymentStatus,
         rentBalanceKsh: visibleRentBalanceKsh,
         currentRentDueKsh: visibleCurrentRentDueKsh,
@@ -7111,7 +7165,18 @@ async function bootstrap() {
         ...statusDetails,
         rentSetup,
         rentSetupSource: rentSetup.source,
-        paymentDueDay: configuredPaymentDueDay ?? null
+        paymentDueDay: configuredPaymentDueDay ?? null,
+        rentDepositRequiredKsh: registryRow?.depositRequiredKsh ?? null,
+        rentDepositPaidKsh: registryRow?.depositPaidKsh ?? 0,
+        rentDepositDueKsh: registryRow?.depositRequiredKsh == null
+          ? null
+          : Math.max(0, Number(registryRow.depositRequiredKsh) - Number(registryRow.depositPaidKsh ?? 0)),
+        utilityDepositRequiredKsh: registryRow?.utilityDepositRequiredKsh ?? null,
+        utilityDepositPaidKsh: registryRow?.utilityDepositPaidKsh ?? 0,
+        utilityDepositDueKsh: registryRow?.utilityDepositRequiredKsh == null
+          ? null
+          : Math.max(0, Number(registryRow.utilityDepositRequiredKsh) - Number(registryRow.utilityDepositPaidKsh ?? 0)),
+        utilityDepositNeedsSetup: registryRow?.utilityDepositNeedsSetup ?? true
       }
     };
   };
@@ -7531,77 +7596,46 @@ async function bootstrap() {
   };
 
   const calculateDepositMoveOutSettlement = (input: {
-    depositKsh: number;
+    rentDepositKsh: number;
+    utilityDepositKsh: number;
     rentOutstandingKsh: number;
     utilityOutstandingKsh: number;
     roomChargesOutstandingKsh: number;
   }) => {
-    const depositKsh = Math.max(0, Math.round(Number(input.depositKsh ?? 0)));
-    const grossRentOutstandingKsh = Math.max(
-      0,
-      Math.round(Number(input.rentOutstandingKsh ?? 0))
-    );
-    const grossUtilityOutstandingKsh = Math.max(
-      0,
-      Math.round(Number(input.utilityOutstandingKsh ?? 0))
-    );
-    const grossRoomChargesOutstandingKsh = Math.max(
-      0,
-      Math.round(Number(input.roomChargesOutstandingKsh ?? 0))
-    );
-    let remainingDepositKsh = depositKsh;
-    const depositAppliedToRentKsh = Math.min(
-      remainingDepositKsh,
-      grossRentOutstandingKsh
-    );
-    remainingDepositKsh -= depositAppliedToRentKsh;
-    const depositAppliedToUtilityKsh = Math.min(
-      remainingDepositKsh,
-      grossUtilityOutstandingKsh
-    );
-    remainingDepositKsh -= depositAppliedToUtilityKsh;
-    const depositAppliedToRoomChargesKsh = Math.min(
-      remainingDepositKsh,
-      grossRoomChargesOutstandingKsh
-    );
-    remainingDepositKsh -= depositAppliedToRoomChargesKsh;
+    const rentDepositKsh = Math.max(0, Math.round(Number(input.rentDepositKsh ?? 0)));
+    const utilityDepositKsh = Math.max(0, Math.round(Number(input.utilityDepositKsh ?? 0)));
+    const grossRentOutstandingKsh = Math.max(0, Math.round(Number(input.rentOutstandingKsh ?? 0)));
+    const grossUtilityOutstandingKsh = Math.max(0, Math.round(Number(input.utilityOutstandingKsh ?? 0)));
+    const grossRoomChargesOutstandingKsh = Math.max(0, Math.round(Number(input.roomChargesOutstandingKsh ?? 0)));
 
-    const depositAppliedKsh =
-      depositAppliedToRentKsh +
-      depositAppliedToUtilityKsh +
-      depositAppliedToRoomChargesKsh;
-    const rentOutstandingKsh = Math.max(
-      0,
-      grossRentOutstandingKsh - depositAppliedToRentKsh
-    );
-    const utilityOutstandingKsh = Math.max(
-      0,
-      grossUtilityOutstandingKsh - depositAppliedToUtilityKsh
-    );
-    const roomChargesOutstandingKsh = Math.max(
-      0,
-      grossRoomChargesOutstandingKsh - depositAppliedToRoomChargesKsh
-    );
+    const depositAppliedToRentKsh = Math.min(rentDepositKsh, grossRentOutstandingKsh);
+    const rentDepositAfterRentKsh = rentDepositKsh - depositAppliedToRentKsh;
+    const depositAppliedToRoomChargesKsh = Math.min(rentDepositAfterRentKsh, grossRoomChargesOutstandingKsh);
+    const depositAppliedToUtilityKsh = Math.min(utilityDepositKsh, grossUtilityOutstandingKsh);
+    const depositAppliedKsh = depositAppliedToRentKsh + depositAppliedToRoomChargesKsh + depositAppliedToUtilityKsh;
+    const rentOutstandingKsh = Math.max(0, grossRentOutstandingKsh - depositAppliedToRentKsh);
+    const utilityOutstandingKsh = Math.max(0, grossUtilityOutstandingKsh - depositAppliedToUtilityKsh);
+    const roomChargesOutstandingKsh = Math.max(0, grossRoomChargesOutstandingKsh - depositAppliedToRoomChargesKsh);
 
     return {
-      depositKsh,
+      depositKsh: rentDepositKsh + utilityDepositKsh,
+      rentDepositKsh,
+      utilityDepositKsh,
       grossRentOutstandingKsh,
       grossUtilityOutstandingKsh,
       grossRoomChargesOutstandingKsh,
-      grossOutstandingKsh:
-        grossRentOutstandingKsh +
-        grossUtilityOutstandingKsh +
-        grossRoomChargesOutstandingKsh,
+      grossOutstandingKsh: grossRentOutstandingKsh + grossUtilityOutstandingKsh + grossRoomChargesOutstandingKsh,
       depositAppliedKsh,
       depositAppliedToRentKsh,
       depositAppliedToUtilityKsh,
       depositAppliedToRoomChargesKsh,
-      depositRefundKsh: Math.max(0, remainingDepositKsh),
+      rentDepositRefundKsh: Math.max(0, rentDepositAfterRentKsh - depositAppliedToRoomChargesKsh),
+      utilityDepositRefundKsh: Math.max(0, utilityDepositKsh - depositAppliedToUtilityKsh),
+      depositRefundKsh: Math.max(0, rentDepositAfterRentKsh - depositAppliedToRoomChargesKsh) + Math.max(0, utilityDepositKsh - depositAppliedToUtilityKsh),
       rentOutstandingKsh,
       utilityOutstandingKsh,
       roomChargesOutstandingKsh,
-      totalOutstandingKsh:
-        rentOutstandingKsh + utilityOutstandingKsh + roomChargesOutstandingKsh
+      totalOutstandingKsh: rentOutstandingKsh + utilityOutstandingKsh + roomChargesOutstandingKsh
     };
   };
 
@@ -7634,7 +7668,9 @@ async function bootstrap() {
         agreement: {
           select: {
             depositKsh: true,
-            depositPaidKsh: true
+            depositPaidKsh: true,
+            utilityDepositKsh: true,
+            utilityDepositPaidKsh: true
           }
         },
         user: {
@@ -7706,7 +7742,8 @@ async function bootstrap() {
       0
     );
     const depositSettlement = calculateDepositMoveOutSettlement({
-      depositKsh: tenancy.agreement?.depositPaidKsh ?? tenancy.agreement?.depositKsh ?? 0,
+      rentDepositKsh: tenancy.agreement?.depositPaidKsh ?? tenancy.agreement?.depositKsh ?? 0,
+      utilityDepositKsh: tenancy.agreement?.utilityDepositPaidKsh ?? 0,
       rentOutstandingKsh: grossRentOutstandingKsh,
       utilityOutstandingKsh: grossUtilityOutstandingKsh,
       roomChargesOutstandingKsh: grossRoomChargesOutstandingKsh
@@ -7726,6 +7763,10 @@ async function bootstrap() {
       tenancyId: tenancy.id,
       houseNumber: normalizedHouseNumber,
       depositKsh: depositSettlement.depositKsh,
+      rentDepositKsh: depositSettlement.rentDepositKsh,
+      utilityDepositKsh: depositSettlement.utilityDepositKsh,
+      rentDepositRefundKsh: depositSettlement.rentDepositRefundKsh,
+      utilityDepositRefundKsh: depositSettlement.utilityDepositRefundKsh,
       depositAppliedKsh: depositSettlement.depositAppliedKsh,
       depositAppliedToRentKsh: depositSettlement.depositAppliedToRentKsh,
       depositAppliedToUtilityKsh: depositSettlement.depositAppliedToUtilityKsh,
@@ -8115,6 +8156,10 @@ async function bootstrap() {
       roomChargesOutstandingKsh: number;
       totalOutstandingKsh: number;
       depositKsh?: number;
+      rentDepositKsh?: number;
+      utilityDepositKsh?: number;
+      rentDepositRefundKsh?: number;
+      utilityDepositRefundKsh?: number;
       depositAppliedKsh?: number;
       depositAppliedToRentKsh?: number;
       depositAppliedToUtilityKsh?: number;
@@ -8196,6 +8241,10 @@ async function bootstrap() {
           settlement: input.settlement,
           deposit: {
             depositKsh,
+            rentDepositKsh: input.summary.rentDepositKsh,
+            utilityDepositKsh: input.summary.utilityDepositKsh,
+            rentDepositRefundKsh: input.summary.rentDepositRefundKsh,
+            utilityDepositRefundKsh: input.summary.utilityDepositRefundKsh,
             appliedKsh: depositAppliedKsh,
             appliedToRentKsh: input.summary.depositAppliedToRentKsh,
             appliedToUtilityKsh: input.summary.depositAppliedToUtilityKsh,
@@ -12534,6 +12583,29 @@ async function bootstrap() {
     }
   });
 
+  app.post("/api/landlord/agent-remittances", async (req, res, next) => {
+    try {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) return;
+      if (context.role === "caretaker") return res.status(403).json({ error: "House managers cannot record agent remittances." });
+      const parsed = landlordAgentRemittanceSchema.parse(req.body ?? {});
+      const building = await store.getBuilding(parsed.buildingId);
+      if (!building) return res.status(404).json({ error: "Building not found." });
+      if (!(await canManageBuildingFromLandlordContext(context, building.id))) return res.status(403).json({ error: "Building access denied" });
+      const createdAt = new Date().toISOString();
+      const data: AgentRemittanceRecord = {
+        id: randomUUID(), buildingId: building.id, agentName: parsed.agentName,
+        amountKsh: parsed.amountKsh, paidAt: parsed.paidAt ?? createdAt,
+        reference: parsed.reference || undefined, note: parsed.note || undefined,
+        createdAt, createdByUserId: context.userId,
+        createdByName: context.userSession?.fullName || undefined
+      };
+      agentRemittances.set(data.id, data);
+      persistBuildingExpenditureState();
+      return res.status(201).json({ data, role: context.role });
+    } catch (error) { return next(error); }
+  });
+
   app.get("/api/landlord/expenditures", async (req, res, next) => {
     try {
       const context = await resolveLandlordAccessContext(req, res);
@@ -12796,6 +12868,8 @@ async function bootstrap() {
           : Boolean(parsed.chargeableToResident),
         note: parsed.note,
         createdAt,
+        paidAt: parsed.paidAt ?? createdAt,
+        payeeName: parsed.payeeName?.trim() || undefined,
         createdByRole:
           context.role === "caretaker"
             ? "caretaker"
@@ -13526,15 +13600,22 @@ async function bootstrap() {
       if (Number.isNaN(paidAt.getTime()) || paidAt.getTime() > Date.now() + 5 * 60_000) {
         return res.status(400).json({ error: "Enter a valid payment date." });
       }
-      const normalizedProviderReference = providerReference || `CASH-REPORT-${randomUUID()}`;
-      const duplicateReport = [...residentPaymentReports.values()].some((item) =>
+      const normalizedProviderReference = providerReference;
+      const duplicateReport = Boolean(normalizedProviderReference) && [...residentPaymentReports.values()].some((item) =>
         item.buildingId === normalizeBuildingId(session.buildingId) &&
         item.providerReference?.toLowerCase() === normalizedProviderReference.toLowerCase() &&
         item.status !== "rejected"
       );
-      const duplicatePosted = paymentType === "rent"
-        ? rentLedgerService.listPayments({ buildingId: session.buildingId, houseNumber: session.houseNumber }).some((item) => item.providerReference.toLowerCase() === normalizedProviderReference.toLowerCase())
-        : utilityBillingService.listPayments({ buildingId: session.buildingId, houseNumber: session.houseNumber }).some((item) => item.providerReference?.toLowerCase() === normalizedProviderReference.toLowerCase());
+      const duplicatePosted = !normalizedProviderReference
+        ? false
+        : paymentType === "rent"
+          ? rentLedgerService.listPayments({ buildingId: session.buildingId, houseNumber: session.houseNumber }).some((item) => item.providerReference.toLowerCase() === normalizedProviderReference.toLowerCase())
+          : paymentType === "utilities"
+            ? utilityBillingService.listPayments({ buildingId: session.buildingId, houseNumber: session.houseNumber }).some((item) => item.providerReference?.toLowerCase() === normalizedProviderReference.toLowerCase())
+            : [
+                ...rentLedgerService.listPayments({ buildingId: session.buildingId, houseNumber: session.houseNumber }).map((item) => item.providerReference),
+                ...utilityBillingService.listPayments({ buildingId: session.buildingId, houseNumber: session.houseNumber }).map((item) => item.providerReference ?? "")
+              ].some((reference) => reference.toLowerCase() === normalizedProviderReference.toLowerCase());
       if (duplicateReport || duplicatePosted) {
         return res.status(409).json({ error: "That payment reference has already been submitted or recorded." });
       }
@@ -13553,8 +13634,9 @@ async function bootstrap() {
         utilityType,
         amountKsh,
         provider: provider as ResidentPaymentReportRecord["provider"],
-        providerReference: normalizedProviderReference,
+        providerReference: normalizedProviderReference || undefined,
         paidAt: paidAt.toISOString(),
+        receivedByName: parsed.receivedByName?.trim() || undefined,
         note: note || undefined,
         status: "pending",
         submittedAt: new Date().toISOString()
@@ -15670,6 +15752,9 @@ async function bootstrap() {
       buildingDefaultDepositKsh: normalizeOptionalNonNegativeInteger(
         Number(rentSetupMetadata.rentDefaultDepositKsh ?? NaN)
       ),
+      buildingDefaultUtilityDepositKsh: normalizeOptionalNonNegativeInteger(
+        Number(rentSetupMetadata.utilityDefaultDepositKsh ?? NaN)
+      ),
       chargeStartDate: normalizeDateOnly(rentSetupMetadata.rentChargeStartDate),
       buildingDefaultGraceDays: Math.max(0, Number(configuration?.rentGraceDays ?? 0)),
       rows: registryRows.map((row) => ({
@@ -15690,6 +15775,9 @@ async function bootstrap() {
         monthlyRentKsh: row.monthlyRentKsh,
         depositKsh: row.depositRequiredKsh,
         depositPaidKsh: row.depositPaidKsh,
+        utilityDepositKsh: row.utilityDepositRequiredKsh,
+        utilityDepositPaidKsh: row.utilityDepositPaidKsh,
+        utilityDepositNeedsSetup: row.utilityDepositNeedsSetup,
         // Setup shows only a posted rent balance. A monthly rate alone is not a charge.
         balanceKsh:
           rentLedgerService.getRentDue(building.id, row.houseNumber)?.balanceKsh ?? 0,
@@ -15800,6 +15888,9 @@ async function bootstrap() {
         const buildingDefaultDepositKsh = normalizeOptionalNonNegativeInteger(
           parsed.buildingDefaultDepositKsh
         );
+        const buildingDefaultUtilityDepositKsh = normalizeOptionalNonNegativeInteger(
+          parsed.buildingDefaultUtilityDepositKsh
+        );
         const rentChargeStartDate = normalizeDateOnly(parsed.chargeStartDate);
         const registryRows = await buildLandlordUtilityRegistryRows(
           building.id,
@@ -15818,6 +15909,7 @@ async function bootstrap() {
             metadata: {
               ...currentMetadata,
               rentDefaultDepositKsh: buildingDefaultDepositKsh,
+              utilityDefaultDepositKsh: buildingDefaultUtilityDepositKsh,
               rentChargeStartDate
             },
             note: parsed.note
@@ -16028,6 +16120,17 @@ async function bootstrap() {
             const requestedDepositPaidKsh = normalizeOptionalNonNegativeInteger(
               sourceRow?.depositPaidKsh
             );
+            const rowUtilityDepositKsh = normalizeOptionalNonNegativeInteger(
+              sourceRow?.utilityDepositKsh
+            );
+            const utilityDepositKsh =
+              rowUtilityDepositKsh ??
+              buildingDefaultUtilityDepositKsh ??
+              refreshed.utilityDepositRequiredKsh ??
+              null;
+            const requestedUtilityDepositPaidKsh = normalizeOptionalNonNegativeInteger(
+              sourceRow?.utilityDepositPaidKsh
+            );
             const activeAgreement = await userAccountService.getActiveTenantAgreement({
               buildingId: building.id,
               houseNumber
@@ -16040,6 +16143,15 @@ async function bootstrap() {
             ) {
               return res.status(400).json({
                 error: `Deposit paid for ${houseNumber} cannot exceed the required deposit.`
+              });
+            }
+            if (
+              requestedUtilityDepositPaidKsh != null &&
+              utilityDepositKsh != null &&
+              requestedUtilityDepositPaidKsh > utilityDepositKsh
+            ) {
+              return res.status(400).json({
+                error: `Utility deposit paid for ${houseNumber} cannot exceed the required utility deposit.`
               });
             }
             await userAccountService.upsertActiveTenantAgreement({
@@ -16069,6 +16181,15 @@ async function bootstrap() {
                     : Math.min(
                         Math.max(0, Number(currentAgreement?.depositPaidKsh ?? 0)),
                         Math.max(0, Number(depositKsh))
+                      )),
+                utilityDepositKsh: utilityDepositKsh ?? undefined,
+                utilityDepositPaidKsh:
+                  requestedUtilityDepositPaidKsh ??
+                  (utilityDepositKsh == null
+                    ? currentAgreement?.utilityDepositPaidKsh
+                    : Math.min(
+                        Math.max(0, Number(currentAgreement?.utilityDepositPaidKsh ?? 0)),
+                        Math.max(0, Number(utilityDepositKsh))
                       )),
                 paymentDueDay: refreshed.configuredPaymentDueDay,
                 specialTerms: currentAgreement?.specialTerms
@@ -16564,11 +16685,12 @@ async function bootstrap() {
             tenantUserId: report.residentUserId,
             tenantName: report.residentName,
             phoneNumber: report.residentPhone,
+            collectedByName: report.receivedByName,
             source: "manual"
           });
           postedPaymentId = payment.event.id;
           await persistRentLedgerStateNow();
-        } else {
+        } else if (report.paymentType === "utilities") {
           if (!report.utilityType) {
             return res.status(409).json({ error: "This utility report has no water/electricity account selected." });
           }
@@ -16586,9 +16708,37 @@ async function bootstrap() {
             providerReference: reference,
             paidAt: report.paidAt,
             note: report.note || "Resident payment confirmed by management",
+            collectedByName: report.receivedByName,
             source: "manual"
           });
           postedPaymentId = payment.event.id;
+        } else {
+          if (!userAccountService) {
+            return res.status(503).json({ error: "Deposit tracking requires the tenant agreement database." });
+          }
+          try {
+            if (report.paymentType === "rent_deposit") {
+              await userAccountService.adjustActiveTenantDepositPaid({
+                buildingId: report.buildingId,
+                houseNumber: report.houseNumber,
+                deltaKsh: report.amountKsh
+              });
+            } else {
+              const setupRows = await buildLandlordUtilityRegistryRows(report.buildingId, [report.houseNumber]);
+              const setupRow = setupRows.find((row) => normalizeHouseNumber(row.houseNumber) === normalizeHouseNumber(report.houseNumber));
+              await userAccountService.adjustActiveTenantUtilityDepositPaid({
+                buildingId: report.buildingId,
+                houseNumber: report.houseNumber,
+                deltaKsh: report.amountKsh,
+                requiredKsh: setupRow?.utilityDepositRequiredKsh
+              });
+            }
+            postedPaymentId = report.id;
+          } catch (error) {
+            const mapped = mapDepositAllocationError(error);
+            if (mapped) return res.status(mapped.status).json({ error: mapped.message });
+            return next(error);
+          }
         }
       }
 
@@ -16605,13 +16755,94 @@ async function bootstrap() {
       userSupportService.enqueueSystemNotifications(report.buildingId, report.houseNumber, [{
         title: decision === "approve" ? "Payment confirmed" : "Payment report needs attention",
         message: decision === "approve"
-          ? `Management confirmed your ${report.paymentType === "utilities" ? `${report.utilityType ?? "utility"} utility` : "rent"} payment of KSh ${report.amountKsh.toLocaleString("en-KE")}.`
+          ? `Management confirmed your ${report.paymentType === "utilities" ? `${report.utilityType ?? "utility"} utility` : report.paymentType === "rent_deposit" ? "rent deposit" : report.paymentType === "utility_deposit" ? "utility deposit" : "rent"} payment of KSh ${report.amountKsh.toLocaleString("en-KE")}.`
           : `Management could not confirm your payment report. ${reviewNote}`,
         level: decision === "approve" ? "success" : "warning",
         source: "system",
         dedupeKey: `resident-payment-report-${report.id}-${decision}`
       }]);
       return res.json({ data: updated });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.get("/api/landlord/building-performance", async (req, res, next) => {
+    try {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) return;
+      if (context.role === "caretaker") {
+        return res.status(403).json({ error: "Building performance is available to building owners and finance staff." });
+      }
+      const buildingId = typeof req.query.buildingId === "string" ? normalizeBuildingId(req.query.buildingId) : "";
+      const month = typeof req.query.month === "string" ? req.query.month.trim() : "";
+      if (!buildingId || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+        return res.status(400).json({ error: "Choose a building and a valid month." });
+      }
+      const building = await store.getBuilding(buildingId);
+      if (!building) return res.status(404).json({ error: "Building not found." });
+      if (!(await canManageBuildingFromLandlordContext(context, building.id))) {
+        return res.status(403).json({ error: "Building access denied" });
+      }
+      const inMonth = (value?: string) => String(value ?? "").slice(0, 7) === month;
+      const rentPayments = rentLedgerService.listPayments({ buildingId }).filter((item) => inMonth(item.paidAt));
+      const utilityPayments = utilityBillingService.listPayments({ buildingId, limit: 2_000 }).filter((item) => inMonth(item.paidAt));
+      const approvedDeposits = [...residentPaymentReports.values()].filter((item) =>
+        item.buildingId === buildingId && item.status === "approved" &&
+        (item.paymentType === "rent_deposit" || item.paymentType === "utility_deposit") && inMonth(item.paidAt)
+      );
+      const payments = [
+        ...rentPayments.map((item) => ({
+          id: item.id, houseNumber: item.houseNumber, type: "Rent", amountKsh: Number(item.rentAmountKsh ?? (item.amountKsh - Number(item.depositAmountKsh ?? 0))),
+          provider: item.provider, paidAt: item.paidAt, collectedByName: item.collectedByName || (item.source === "mpesa" ? "Online M-PESA" : "Unknown")
+        })),
+        ...utilityPayments.map((item) => ({
+          id: item.id, houseNumber: item.houseNumber, type: item.utilityType === "water" ? "Water" : "Electricity", amountKsh: Number(item.amountKsh ?? 0),
+          provider: item.provider, paidAt: item.paidAt, collectedByName: item.collectedByName || (item.source === "mpesa" ? "Online M-PESA" : "Unknown")
+        })),
+        ...rentPayments.filter((item) => Number(item.depositAmountKsh ?? 0) > 0).map((item) => ({
+          id: `${item.id}:deposit`, houseNumber: item.houseNumber, type: "Rent deposit", amountKsh: Number(item.depositAmountKsh ?? 0),
+          provider: item.provider, paidAt: item.paidAt, collectedByName: item.collectedByName || (item.source === "mpesa" ? "Online M-PESA" : "Unknown")
+        })),
+        ...approvedDeposits.map((item) => ({
+          id: item.id, houseNumber: item.houseNumber, type: item.paymentType === "rent_deposit" ? "Rent deposit" : "Utility deposit", amountKsh: Number(item.amountKsh ?? 0),
+          provider: item.provider, paidAt: item.paidAt, collectedByName: item.receivedByName || "Unknown"
+        }))
+      ].filter((item) => item.amountKsh > 0).sort((a, b) => b.paidAt.localeCompare(a.paidAt));
+      const expenses = [...buildingExpenditures.values()].filter((item) => item.buildingId === buildingId && inMonth(item.paidAt || item.createdAt));
+      const monthlyRemittances = [...agentRemittances.values()].filter((item) => item.buildingId === buildingId && inMonth(item.paidAt));
+      const expenseBreakdown = new Map<string, { category: string; payeeName: string; amountKsh: number; count: number }>();
+      for (const item of expenses) {
+        const payeeName = item.payeeName?.trim() || "Unknown";
+        const key = `${item.category}:${payeeName}`;
+        const current = expenseBreakdown.get(key) ?? { category: item.category, payeeName, amountKsh: 0, count: 0 };
+        current.amountKsh += Number(item.amountKsh ?? 0);
+        current.count += 1;
+        expenseBreakdown.set(key, current);
+      }
+      const totalReceivedKsh = payments.reduce((sum, item) => sum + item.amountKsh, 0);
+      const rentReceivedKsh = payments.filter((item) => item.type === "Rent").reduce((sum, item) => sum + item.amountKsh, 0);
+      const utilitiesReceivedKsh = payments.filter((item) => item.type === "Water" || item.type === "Electricity").reduce((sum, item) => sum + item.amountKsh, 0);
+      const depositsReceivedKsh = payments.filter((item) => item.type.includes("deposit")).reduce((sum, item) => sum + item.amountKsh, 0);
+      const expenseTotalKsh = expenses.reduce((sum, item) => sum + Number(item.amountKsh ?? 0), 0);
+      const collectors = new Map<string, { name: string; amountKsh: number; count: number }>();
+      for (const item of payments) {
+        const name = item.collectedByName || "Unknown";
+        const current = collectors.get(name) ?? { name, amountKsh: 0, count: 0 };
+        current.amountKsh += item.amountKsh;
+        current.count += 1;
+        collectors.set(name, current);
+      }
+      return res.json({ data: {
+        buildingId, month, totalReceivedKsh, rentReceivedKsh, utilitiesReceivedKsh, depositsReceivedKsh,
+        expenseTotalKsh, netAfterCostsKsh: totalReceivedKsh - expenseTotalKsh,
+        remittedToOwnerKsh: monthlyRemittances.reduce((sum, item) => sum + item.amountKsh, 0),
+        remittances: monthlyRemittances.sort((a, b) => b.paidAt.localeCompare(a.paidAt)),
+        paymentCount: payments.length, expenseCount: expenses.length,
+        collectors: [...collectors.values()].sort((a, b) => b.amountKsh - a.amountKsh),
+        expenses: [...expenseBreakdown.values()].sort((a, b) => b.amountKsh - a.amountKsh),
+        payments
+      }, role: context.role });
     } catch (error) {
       return next(error);
     }
@@ -16781,6 +17012,7 @@ async function bootstrap() {
         phoneNumber: parsed.phoneNumber,
         billingMonth: parsed.billingMonth,
         paidAt: parsed.paidAt,
+        collectedByName: parsed.collectedByName,
         source: "manual",
         paymentProfileId: buildingPaymentProfile.publicProfile?.id,
         paymentProfileName: buildingPaymentProfile.publicProfile?.name,

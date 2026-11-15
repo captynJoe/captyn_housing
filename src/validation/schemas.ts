@@ -696,15 +696,11 @@ export const landlordDirectTenantCreateSchema = z.object({
     })
     .optional(),
   note: optionalTenantTextSchema(280)
-}).superRefine((value, context) => {
-  if (value.identityNumber && !value.identityType) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["identityType"],
-      message: "Select the ID type for the provided ID number."
-    });
-  }
-});
+}).transform((value) => ({
+  ...value,
+  // Preserve the landlord form's historical default for IDs submitted without a type.
+  identityType: value.identityType ?? (value.identityNumber ? "national_id" : undefined)
+}));
 
 export const residentPasswordRecoveryRequestSchema = z.object({
   buildingId: nonEmptyString,

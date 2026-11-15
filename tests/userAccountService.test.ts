@@ -181,7 +181,8 @@ test("direct tenant onboarding forces first login password change and approves t
   assert.equal(result.tenant.mustChangePassword, true);
   assert.equal(result.tenant.fullName, "Jane Wanjiku");
   assert.equal(result.application.status, "approved");
-  assert.equal(result.temporaryPassword.source, "identity_number");
+  assert.equal(result.portalAccess.status, "setup_pending");
+  assert.equal(result.portalAccess.claimMethod, "verified_phone");
   assert.equal(housingUserUpdateCalls.length, 1);
   assert.equal(housingUserUpdateCalls[0].data.requirePasswordChange, true);
   assert.equal(housingUserUpdateCalls[0].data.fullName, "Jane Wanjiku");

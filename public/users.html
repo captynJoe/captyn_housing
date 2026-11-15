@@ -208,6 +208,18 @@
             </label>
           </div>
 
+          <section class="resident-claim-access">
+            <h3>Already added by management?</h3>
+            <p class="item-details">Verify the phone number on your tenancy to connect your existing bills and payment history. You can receive the code by SMS on any phone.</p>
+            <div class="action-row">
+              <button id="resident-access-code-btn" type="button" class="ghost-btn">Send verification code</button>
+            </div>
+            <div id="resident-access-claim-fields" class="hidden">
+              <label>SMS verification code<input id="resident-access-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="6-digit code" /></label>
+              <label>Create a portal password<input id="resident-access-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" placeholder="At least 8 characters" /></label>
+              <button id="resident-access-claim-btn" type="button">Verify and open my house</button>
+            </div>
+          </section>
           <div class="action-row auth-request-actions">
             <button id="resident-signup-btn" type="button" class="ghost-btn">
               Request Access
@@ -902,6 +914,6 @@
       </article>
     </section>
 
-    <script type="module" src="/resident-app/assets/resident.js?v=2dee64d23d"></script>
+    <script type="module" src="/resident-app/assets/resident.js?v=918bbb2f78"></script>
   </body>
 </html>

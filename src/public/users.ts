@@ -76,6 +76,11 @@ const signupIdentityNumberEl = document.getElementById("signup-identity-number")
 const signupOccupationStatusEl = document.getElementById("signup-occupation-status");
 const signupOccupationLabelEl = document.getElementById("signup-occupation-label");
 const residentSignupBtnEl = document.getElementById("resident-signup-btn");
+const residentAccessCodeBtnEl = document.getElementById("resident-access-code-btn");
+const residentAccessClaimFieldsEl = document.getElementById("resident-access-claim-fields");
+const residentAccessCodeEl = document.getElementById("resident-access-code");
+const residentAccessPasswordEl = document.getElementById("resident-access-password");
+const residentAccessClaimBtnEl = document.getElementById("resident-access-claim-btn");
 const residentLoginBtnEl = document.getElementById("resident-login-btn");
 const residentForgotBtnEl = document.getElementById("resident-forgot-btn");
 const residentAuthFeedbackEl = document.getElementById("resident-auth-feedback");
@@ -333,6 +338,11 @@ const REQUIRED_DOM_BINDINGS = Object.freeze([
   ["signup-occupation-status", signupOccupationStatusEl],
   ["signup-occupation-label", signupOccupationLabelEl],
   ["resident-signup-btn", residentSignupBtnEl],
+  ["resident-access-code-btn", residentAccessCodeBtnEl],
+  ["resident-access-claim-fields", residentAccessClaimFieldsEl],
+  ["resident-access-code", residentAccessCodeEl],
+  ["resident-access-password", residentAccessPasswordEl],
+  ["resident-access-claim-btn", residentAccessClaimBtnEl],
   ["resident-login-btn", residentLoginBtnEl],
   ["resident-forgot-btn", residentForgotBtnEl],
   ["resident-auth-feedback", residentAuthFeedbackEl],
@@ -4665,6 +4675,70 @@ async function loginResident(event) {
   }
 }
 
+async function requestResidentAccessCode() {
+  clearFeedback();
+  clearResidentAuthFeedback();
+  const payload = buildResidentAuthPayload();
+  if (!payload.buildingId || !payload.houseNumber || !payload.phoneNumber) {
+    showResidentAuthFeedback("Choose the building and enter the house number and phone recorded by management.", "error", { reveal: true });
+    return;
+  }
+  residentAccessCodeBtnEl.disabled = true;
+  try {
+    const response = await requestJson("/api/auth/resident/access-code/request", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ buildingId: payload.buildingId, houseNumber: payload.houseNumber, phoneNumber: payload.phoneNumber })
+    });
+    residentAccessClaimFieldsEl.classList.remove("hidden");
+    residentAccessCodeEl.focus();
+    showResidentAuthFeedback(response.message ?? "If your details match an active tenancy, a verification code has been sent.", "success", { reveal: true });
+  } catch (error) {
+    showResidentAuthFeedback(error instanceof Error ? error.message : "Unable to send a verification code.", "error", { reveal: true });
+  } finally {
+    residentAccessCodeBtnEl.disabled = false;
+  }
+}
+
+async function claimResidentAccess() {
+  clearFeedback();
+  clearResidentAuthFeedback();
+  const payload = buildResidentAuthPayload();
+  const code = String(residentAccessCodeEl.value ?? "").trim();
+  const password = String(residentAccessPasswordEl.value ?? "");
+  if (!payload.buildingId || !payload.houseNumber || !payload.phoneNumber || !/^\d{6}$/.test(code)) {
+    showResidentAuthFeedback("Enter the same building, house, phone and the 6-digit SMS code.", "error", { reveal: true });
+    return;
+  }
+  if (password.length < 8) {
+    showResidentAuthFeedback("Create a password with at least 8 characters.", "error", { reveal: true });
+    return;
+  }
+  residentAccessClaimBtnEl.disabled = true;
+  try {
+    const response = await requestJson("/api/auth/resident/access-code/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ buildingId: payload.buildingId, houseNumber: payload.houseNumber, phoneNumber: payload.phoneNumber, code, password })
+    });
+    const token = response.data?.token;
+    if (!token) throw new Error("Resident session token was not returned.");
+    saveResidentToken(token, { rememberDevice: getRememberDeviceSelection() });
+    authPasswordEl.value = "";
+    residentAccessCodeEl.value = "";
+    residentAccessPasswordEl.value = "";
+    residentAccessClaimFieldsEl.classList.add("hidden");
+    const loaded = await loadResidentSession();
+    if (!loaded) throw new Error("Could not restore resident session.");
+    showFeedback(response.message ?? "Phone verified. Your existing house records are linked.", "success");
+    await loadTenantData();
+  } catch (error) {
+    showResidentAuthFeedback(error instanceof Error ? error.message : "Unable to verify phone.", "error", { reveal: true });
+  } finally {
+    residentAccessClaimBtnEl.disabled = false;
+  }
+}
+
 async function signupResident() {
   clearFeedback();
   clearResidentAuthFeedback();
@@ -5834,6 +5908,14 @@ function startResidentPortal() {
 
   residentSignupBtnEl.addEventListener("click", () => {
     void signupResident();
+  });
+
+  residentAccessCodeBtnEl.addEventListener("click", () => {
+    void requestResidentAccessCode();
+  });
+
+  residentAccessClaimBtnEl.addEventListener("click", () => {
+    void claimResidentAccess();
   });
 
   residentForgotBtnEl.addEventListener("click", () => {

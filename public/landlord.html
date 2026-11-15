@@ -825,6 +825,12 @@
               <button id="refresh-rent-status" type="button">Refresh</button>
             </div>
           </div>
+          <div class="resident-overview-cards rent-month-summary-cards">
+            <article class="resident-overview-card"><span>Rent scheduled this month</span><strong id="rent-month-expected">-</strong><small id="rent-month-house-count">-</small></article>
+            <article class="resident-overview-card"><span>Rent collected this month</span><strong id="rent-month-collected">-</strong></article>
+            <article class="resident-overview-card"><span>Rent still due this month</span><strong id="rent-month-unpaid">-</strong></article>
+            <article class="resident-overview-card"><span>Collection rate</span><strong id="rent-month-rate">-</strong><small>Based on rent scheduled this month</small></article>
+          </div>
           <div id="rent-payment-details" class="landlord-inline-block">
             <h3>Record a payment</h3>
             <form id="rent-payment-form" class="package-card">
@@ -929,6 +935,10 @@
               <label>Month<input id="building-performance-month" type="month" /></label>
             </div>
             <p class="status-text">Collections include rent, utilities, and deposits. Deposits are shown separately from rent income. Agent salaries and commissions belong in Costs with the agent's name as the payee. A transfer of collected funds from an agent to the owner is not new income or an expense. Older records without collection or payee details appear as Unknown.</p>
+          </div>
+          <div class="package-card performance-comparison-card">
+            <strong>Collections vs previous month</strong>
+            <span id="performance-month-comparison">Select a month to compare collections.</span>
           </div>
           <div class="resident-overview-cards performance-cards">
             <article class="resident-overview-card"><span>Total received</span><strong id="performance-total-received">-</strong><small id="performance-payment-count">-</small></article>
@@ -2176,8 +2186,8 @@
               />
             </label>
             <label>
-              ID Type
-              <select id="direct-tenant-id-type" required>
+              ID Type (optional)
+              <select id="direct-tenant-id-type">
                 <option value="national_id">National ID</option>
                 <option value="passport">Passport</option>
                 <option value="alien_id">Alien ID</option>
@@ -2187,14 +2197,13 @@
           </div>
 
           <label>
-            ID Number
+            ID Number (optional)
             <input
               id="direct-tenant-id-number"
               type="text"
               maxlength="80"
-              placeholder="Temporary password"
+              placeholder="Add later if unavailable"
               autocomplete="off"
-              required
             />
           </label>
 
@@ -2209,7 +2218,7 @@
           </label>
 
           <p id="direct-tenant-status" class="status-text">
-            Temporary password: ID number. Password change required at first sign-in.
+            Add the tenant and start billing now. They can set up portal access later by verifying this phone number.
           </p>
           <button id="direct-tenant-submit-btn" type="submit">Add Tenant</button>
         </form>
@@ -2218,6 +2227,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=3952c93f05"></script>
+    <script type="module" src="/landlord.js?v=660c0303c7"></script>
   </body>
 </html>

@@ -603,6 +603,17 @@ export const residentPasswordSetupSchema = z
     }
   });
 
+export const residentAccessCodeRequestSchema = z.object({
+  buildingId: nonEmptyString.max(120),
+  houseNumber: nonEmptyString.max(24),
+  phoneNumber: kenyaPhoneSchema
+});
+
+export const residentAccessCodeVerifySchema = residentAccessCodeRequestSchema.extend({
+  code: z.string().trim().regex(/^\d{6}$/),
+  password: z.string().min(8).max(128)
+});
+
 export const residentPhoneLoginSchema = z.object({
   buildingId: z.preprocess(emptyStringToUndefined, nonEmptyString.optional()),
   houseNumber: z.preprocess(
@@ -655,8 +666,11 @@ export const landlordDirectTenantCreateSchema = z.object({
   houseNumber: nonEmptyString.max(24),
   fullName: nonEmptyString.max(120),
   phoneNumber: kenyaPhoneSchema,
-  identityType: tenantIdentityTypeSchema.default("national_id"),
-  identityNumber: nonEmptyString.min(4).max(80),
+  identityType: optionalTenantIdentityTypeSchema,
+  identityNumber: z.preprocess(
+    emptyStringToUndefined,
+    z.string().trim().min(4).max(80).optional()
+  ),
   identityDocumentUrls: optionalTenantIdentityDocumentUrlsSchema,
   occupationStatus: optionalTenantOccupationStatusSchema,
   occupationLabel: optionalTenantTextSchema(120),
@@ -682,6 +696,14 @@ export const landlordDirectTenantCreateSchema = z.object({
     })
     .optional(),
   note: optionalTenantTextSchema(280)
+}).superRefine((value, context) => {
+  if (value.identityNumber && !value.identityType) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["identityType"],
+      message: "Select the ID type for the provided ID number."
+    });
+  }
 });
 
 export const residentPasswordRecoveryRequestSchema = z.object({

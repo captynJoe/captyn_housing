@@ -926,6 +926,139 @@ export class UserAccountService {
     };
   }
 
+  async createResidentAccessChallenge(input: {
+    buildingId: string;
+    houseNumber: string;
+    phoneNumber: string;
+  }) {
+    const phoneNumber = normalizeKenyaPhone(input.phoneNumber);
+    const houseNumber = normalizeHouseNumber(input.houseNumber);
+    const tenancy = await this.findActiveTenancyByHouseAndPhone({
+      buildingId: input.buildingId,
+      houseNumber,
+      phoneNumber
+    });
+    if (!tenancy || tenancy.user.role !== "tenant" || tenancy.user.status !== "active") {
+      return null;
+    }
+
+    const now = new Date();
+    await this.prisma.residentAccessChallenge.deleteMany({
+      where: { expiresAt: { lt: new Date(now.getTime() - 24 * 60 * 60_000) } }
+    });
+    const recentChallengeCount = await this.prisma.residentAccessChallenge.count({
+      where: {
+        userId: tenancy.user.id,
+        createdAt: { gte: new Date(now.getTime() - 15 * 60_000) }
+      }
+    });
+    if (recentChallengeCount >= 3) {
+      throw new Error("RESIDENT_ACCESS_CODE_RATE_LIMITED");
+    }
+
+    const code = String(randomBytes(4).readUInt32BE(0) % 1_000_000).padStart(6, "0");
+    const expiresAt = new Date(now.getTime() + 10 * 60_000);
+    const challenge = await this.prisma.$transaction(async (tx) => {
+      await tx.residentAccessChallenge.updateMany({
+        where: { userId: tenancy.user.id, consumedAt: null },
+        data: { consumedAt: now }
+      });
+      return tx.residentAccessChallenge.create({
+        data: {
+          userId: tenancy.user.id,
+          tenancyId: tenancy.id,
+          buildingId: input.buildingId,
+          houseNumber,
+          codeHash: createHash("sha256").update(code).digest("hex"),
+          expiresAt
+        },
+        select: { id: true }
+      });
+    });
+
+    return {
+      id: challenge.id,
+      code,
+      phoneNumber: tenancy.user.phone,
+      fullName: tenancy.user.fullName,
+      expiresAt: expiresAt.toISOString()
+    };
+  }
+
+  async invalidateResidentAccessChallenge(challengeId: string) {
+    await this.prisma.residentAccessChallenge.updateMany({
+      where: { id: challengeId, consumedAt: null },
+      data: { consumedAt: new Date() }
+    });
+  }
+
+  async completeResidentAccessClaim(input: {
+    buildingId: string;
+    houseNumber: string;
+    phoneNumber: string;
+    code: string;
+    password: string;
+  }) {
+    await this.purgeExpiredSessions();
+    const phoneNumber = normalizeKenyaPhone(input.phoneNumber);
+    const houseNumber = normalizeHouseNumber(input.houseNumber);
+    const suppliedHash = createHash("sha256").update(input.code.trim()).digest();
+    const now = new Date();
+    const result = await this.prisma.$transaction(async (tx) => {
+      const challenge = await tx.residentAccessChallenge.findFirst({
+        where: {
+          buildingId: input.buildingId,
+          houseNumber,
+          consumedAt: null,
+          expiresAt: { gt: now },
+          attempts: { lt: 5 },
+          user: { phone: phoneNumber, role: "tenant", status: "active" },
+          tenancy: { active: true }
+        },
+        include: { user: true }
+      });
+      if (!challenge) return { error: "RESIDENT_ACCESS_CODE_INVALID" as const };
+
+      const storedHash = Buffer.from(challenge.codeHash, "hex");
+      if (storedHash.length !== suppliedHash.length || !timingSafeEqual(storedHash, suppliedHash)) {
+        await tx.residentAccessChallenge.update({
+          where: { id: challenge.id },
+          data: { attempts: { increment: 1 } }
+        });
+        return { error: "RESIDENT_ACCESS_CODE_INVALID" as const };
+      }
+
+      const consumed = await tx.residentAccessChallenge.updateMany({
+        where: {
+          id: challenge.id,
+          consumedAt: null,
+          expiresAt: { gt: now },
+          attempts: { lt: 5 }
+        },
+        data: { consumedAt: now }
+      });
+      if (consumed.count !== 1) return { error: "RESIDENT_ACCESS_CODE_INVALID" as const };
+
+      await tx.userSession.updateMany({
+        where: { userId: challenge.userId, revokedAt: null },
+        data: { revokedAt: now }
+      });
+      const user = await tx.housingUser.update({
+        where: { id: challenge.userId },
+        data: {
+          passwordHash: hashPassword(input.password),
+          requirePasswordChange: false
+        }
+      });
+      return { user, tenancyId: challenge.tenancyId };
+    });
+
+    if ("error" in result) throw new Error(result.error);
+    this.loginRateByPhone.delete(phoneNumber);
+    this.loginRateByEmail.delete(normalizeEmail(result.user.email));
+    return this.issueSessionForUser(result.user, { residentTenancyId: result.tenancyId });
+  }
+
   async hasActiveResidentTenancy(input: {
     buildingId: string;
     houseNumber: string;
@@ -1799,6 +1932,14 @@ export class UserAccountService {
     const phoneNumber = normalizeKenyaPhone(input.phoneNumber);
     const passwordHash = hashPassword(input.password);
     const houseNumber = normalizeHouseNumber(input.houseNumber);
+    const existingTenancy = await this.findActiveTenancyByHouseAndPhone({
+      buildingId: input.buildingId,
+      houseNumber,
+      phoneNumber
+    });
+    if (existingTenancy) {
+      throw new Error("RESIDENT_ACCESS_VERIFICATION_REQUIRED");
+    }
 
     const { application } = await this.prisma.$transaction(async (tx) => {
       let user = await tx.housingUser.findUnique({
@@ -1925,17 +2066,14 @@ export class UserAccountService {
     const houseNumber = normalizeHouseNumber(input.houseNumber);
     const fullName = normalizeOptionalText(input.fullName) ?? `Resident ${houseNumber}`;
     const identityNumber = normalizeOptionalText(input.identityNumber);
-    const identityType = input.identityType ?? "national_id";
-
-    if (!identityNumber) {
-      throw new Error("IDENTITY_NUMBER_REQUIRED");
-    }
+    const identityType = input.identityType ?? null;
+    const setupPassword = randomBytes(32).toString("base64url");
 
     const provisionedUser = await this.provisionResidentForSetup({
       buildingId: input.buildingId,
       houseNumber,
       phoneNumber,
-      password: identityNumber,
+      password: setupPassword,
       fullName,
       requirePasswordChange: true
     });
@@ -2044,7 +2182,7 @@ export class UserAccountService {
       houseNumber,
       payload: {
         requestAcknowledgment: hasAgreementTerms,
-        identityType,
+        identityType: identityType ?? undefined,
         identityNumber,
         identityDocumentUrls: input.identityDocumentUrls ?? [],
         occupationStatus: input.occupationStatus,
@@ -2080,9 +2218,9 @@ export class UserAccountService {
         status: application.status,
         reviewedAt: application.reviewedAt?.toISOString()
       },
-      temporaryPassword: {
-        source: "identity_number",
-        label: "ID number entered"
+      portalAccess: {
+        status: "setup_pending",
+        claimMethod: "verified_phone"
       }
     };
   }

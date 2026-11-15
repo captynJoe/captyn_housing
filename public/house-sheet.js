@@ -321,7 +321,7 @@ export async function prepareHouseSheetImport(api, buildingId, rows, tenantMode)
         occupiedHouseNumbers: registryRows
             .filter((row) => row.hasActiveResident)
             .map((row) => String(row.houseNumber ?? ""))
-    }, { requireIdentityNumber: tenantMode === "direct" });
+    }, { requireIdentityNumber: false });
     plan.meters = changedMeters(plan.meters, registryRows);
     const existingRent = plan.rent.filter((item) => registryRows.some((row) => normalizeSheetHouse(row.houseNumber) === item.houseNumber));
     const newRent = plan.rent.filter((item) => !existingRent.includes(item));

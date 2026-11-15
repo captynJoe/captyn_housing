@@ -105,6 +105,8 @@ import {
   deleteResidentPushSubscriptionSchema,
   createRentPaymentSchema,
   residentPasswordSetupSchema,
+  residentAccessCodeRequestSchema,
+  residentAccessCodeVerifySchema,
   residentPhoneLoginSchema,
   residentChangePasswordSchema,
   residentAdminPasswordResetSchema,
@@ -642,6 +644,7 @@ interface LandlordUtilityRegistryRow {
   electricityMeterNumber?: string;
   waterMeterUpdatedAt?: string;
   electricityMeterUpdatedAt?: string;
+  portalAccessStatus?: "setup_pending" | "login_ready";
 }
 
 interface UtilityBulkSubmissionAuditRow {
@@ -5060,6 +5063,7 @@ async function bootstrap() {
         residentName: string;
         residentPhone: string;
         residentUserId: string;
+        portalAccessStatus: "setup_pending" | "login_ready";
       }
     >();
     const agreementByHouse = new Map<
@@ -5107,7 +5111,8 @@ async function bootstrap() {
             user: {
               select: {
                 fullName: true,
-                phone: true
+                phone: true,
+                requirePasswordChange: true
               }
             },
             unit: {
@@ -5181,7 +5186,8 @@ async function bootstrap() {
         residentByHouse.set(houseNumber, {
           residentName: tenancy.user.fullName,
           residentPhone: tenancy.user.phone,
-          residentUserId: tenancy.userId
+          residentUserId: tenancy.userId,
+          portalAccessStatus: tenancy.user.requirePasswordChange ? "setup_pending" : "login_ready"
         });
       }
 
@@ -5459,6 +5465,7 @@ async function bootstrap() {
         residentName: resident?.residentName,
         residentPhone: resident?.residentPhone,
         residentUserId: resident?.residentUserId,
+        portalAccessStatus: resident?.portalAccessStatus,
         verificationStatus,
         identityType: agreement?.identityType,
         identityNumber: agreement?.identityNumber,
@@ -6060,12 +6067,12 @@ async function bootstrap() {
         .split(/\s+/)[0]
         ?.slice(0, 24) || "there";
     const houseNumber = normalizeHouseNumber(String(input.houseNumber ?? "room"));
-    const fullMessage = `Resident Account: Hi ${firstName}, your house ${houseNumber} account is ready. Sign in at ${input.residentUrl}. Temporary password: your ID number.`;
+    const fullMessage = `Resident Account: Hi ${firstName}, billing is set up for house ${houseNumber}. Open ${input.residentUrl} and verify this phone to access your records.`;
     if (fullMessage.length <= 160) {
       return fullMessage;
     }
 
-    return `Resident Account: Hi ${firstName}, your resident account is ready. Sign in at ${input.residentUrl}. Temporary password: your ID number.`;
+    return `Resident Account: Hi ${firstName}, billing is ready. Open ${input.residentUrl} and verify this phone for your records.`;
   };
 
   const ACTION_METER_READING_DUE = "meter_reading.due";
@@ -9636,6 +9643,9 @@ async function bootstrap() {
             "This house is already tied to a different phone number. Contact management to update tenant details."
         });
       }
+      if (message === "RESIDENT_ACCESS_VERIFICATION_REQUIRED") {
+        return res.status(409).json({ error: "This phone is already assigned to the house. Use Set up portal access to verify it and link your records." });
+      }
       if (message === "TENANCY_ALREADY_ACTIVE") {
         return res.status(409).json({
           error: "This tenant is already approved for that house. Use sign in instead."
@@ -9649,6 +9659,77 @@ async function bootstrap() {
           error:
             "This phone belongs to a non-tenant account (landlord/admin). Use a tenant phone, or revoke landlord/admin access first."
         });
+      }
+      return next(error);
+    }
+  });
+
+  app.post("/api/auth/resident/access-code/request", async (req, res, next) => {
+    let challengeId: string | null = null;
+    try {
+      if (!userAccountService || !repositoryContext.prisma) {
+        return res.status(503).json({ error: "Resident access setup requires database-backed accounts." });
+      }
+      const parsed = residentAccessCodeRequestSchema.parse(req.body ?? {});
+      const challenge = await userAccountService.createResidentAccessChallenge(parsed);
+      if (challenge) {
+        challengeId = challenge.id;
+        if (!smsNotificationService.isEnabled()) {
+          await userAccountService.invalidateResidentAccessChallenge(challenge.id);
+        } else {
+          try {
+            await smsNotificationService.send({
+              to: challenge.phoneNumber,
+              message: `CAPTYN Housing verification code: ${challenge.code}. It expires in 10 minutes. Do not share this code.`,
+              tag: `resident-access-${Date.now()}`
+            });
+          } catch (error) {
+            await userAccountService.invalidateResidentAccessChallenge(challenge.id);
+            console.error("Resident access verification SMS failed", error);
+          }
+        }
+      }
+      return res.status(202).json({
+        data: {},
+        message: "If the details match an active tenancy, a verification code has been sent. If none arrives, wait a few minutes or contact management."
+      });
+    } catch (error) {
+      if (challengeId && userAccountService) {
+        await userAccountService.invalidateResidentAccessChallenge(challengeId).catch(() => undefined);
+      }
+      if (error instanceof Error && error.message === "RESIDENT_ACCESS_CODE_RATE_LIMITED") {
+        return res.status(202).json({
+          data: {},
+          message: "If the details match an active tenancy, a verification code has been sent. If none arrives, wait a few minutes or contact management."
+        });
+      }
+      return next(error);
+    }
+  });
+
+  app.post("/api/auth/resident/access-code/verify", async (req, res, next) => {
+    try {
+      if (!userAccountService || !repositoryContext.prisma) {
+        return res.status(503).json({ error: "Resident access setup requires database-backed accounts." });
+      }
+      if (await hasAnyActiveAuthSession(req)) {
+        return res.status(409).json({ error: "Already signed in. Sign out before claiming resident access." });
+      }
+      const parsed = residentAccessCodeVerifySchema.parse(req.body ?? {});
+      const session = await userAccountService.completeResidentAccessClaim(parsed);
+      const maxAgeMs = Math.max(0, new Date(session.expiresAt).getTime() - Date.now());
+      res.cookie(userSessionCookieName, session.token, buildSessionCookieOptions(req, maxAgeMs));
+      return res.json({ data: {
+        token: session.token,
+        role: "resident",
+        tenancyId: session.residentTenancyId,
+        phoneMask: maskPhone(session.phone),
+        expiresAt: session.expiresAt,
+        mustChangePassword: false
+      }, message: "Phone verified. Your existing house records are now linked to this portal." });
+    } catch (error) {
+      if (error instanceof Error && error.message === "RESIDENT_ACCESS_CODE_INVALID") {
+        return res.status(400).json({ error: "That code is invalid, expired, or has too many attempts. Request a new code." });
       }
       return next(error);
     }
@@ -18118,13 +18199,13 @@ async function bootstrap() {
             houseNumber: data.houseNumber,
             tenancyId: data.tenancyId,
             action: "resident.direct_onboarded",
-            summary: `${data.tenant.fullName} added as resident. Billing starts ${billingStartDate}. Password change required on first sign-in.`,
+            summary: `${data.tenant.fullName} added as resident. Billing starts ${billingStartDate}. Portal access can be claimed later by verifying their phone.`,
             actor,
             metadata: {
               residentUserId: data.tenant.userId,
               residentPhone: data.tenant.phone,
               applicationId: data.application.id,
-              temporaryPasswordSource: data.temporaryPassword.source,
+              portalAccess: data.portalAccess,
               billingStartDate,
               billingStartMonth,
               releasedBillingHoldIds: releasedBillingHolds.map((item) => item.id),
@@ -18259,11 +18340,6 @@ async function bootstrap() {
             return res.status(409).json({
               error:
                 "This phone belongs to a landlord, staff, or admin account. Use a tenant phone number."
-            });
-          }
-          if (message === "IDENTITY_NUMBER_REQUIRED") {
-            return res.status(400).json({
-              error: "ID number is required for the temporary password."
             });
           }
           return next(error);

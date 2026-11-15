@@ -1,6 +1,6 @@
 import { initResponsiveTables } from "./mobile-table.js?v=3e39d752dc";
 import { notifyError, notifyStatus } from "./notifications.js?v=62acc56b74";
-import { applyHouseSheetImport, buildXlsx, describeHouseSheetPlan, houseSheetRowsFromRegistry, houseSheetTable, parseHouseSheet, prepareHouseSheetImport, readSpreadsheet } from "./house-sheet.js?v=e453a69103";
+import { applyHouseSheetImport, buildXlsx, describeHouseSheetPlan, houseSheetRowsFromRegistry, houseSheetTable, parseHouseSheet, prepareHouseSheetImport, readSpreadsheet } from "./house-sheet.js?v=3b029b9a8a";
 import { createMeterReadingsView } from "./meter-readings.js?v=a15419bd54";
 import { createBalancesView } from "./balances-view.js?v=59a3d1aef4";
 import { createUploadedImageGallery, renderSelectedImagePreviews, uploadImageFiles, validateImageFiles } from "./media-upload.js?v=549f6d7675";
@@ -268,6 +268,11 @@ const landlordTicketsBodyEl = document.getElementById("landlord-tickets-body");
 const refreshLandlordTicketsBtnEl = document.getElementById("refresh-landlord-tickets");
 const rentStatusBodyEl = document.getElementById("rent-status-body");
 const refreshRentStatusBtnEl = document.getElementById("refresh-rent-status");
+const rentMonthExpectedEl = document.getElementById("rent-month-expected");
+const rentMonthHouseCountEl = document.getElementById("rent-month-house-count");
+const rentMonthCollectedEl = document.getElementById("rent-month-collected");
+const rentMonthUnpaidEl = document.getElementById("rent-month-unpaid");
+const rentMonthRateEl = document.getElementById("rent-month-rate");
 const residentPaymentReportsListEl = document.getElementById("resident-payment-reports-list");
 const residentPaymentReportsEmptyEl = document.getElementById("resident-payment-reports-empty");
 const refreshResidentPaymentReportsBtnEl = document.getElementById("refresh-resident-payment-reports");
@@ -282,6 +287,7 @@ const exportCollectionsReportBtnEl = document.getElementById("export-collections
 const performanceBuildingEl = document.getElementById("building-performance-building");
 const performanceMonthEl = document.getElementById("building-performance-month");
 const performanceSummaryEl = document.getElementById("building-performance-summary");
+const performanceMonthComparisonEl = document.getElementById("performance-month-comparison");
 const performanceTotalEl = document.getElementById("performance-total-received");
 const performanceRentEl = document.getElementById("performance-rent-received");
 const performanceUtilitiesEl = document.getElementById("performance-utilities-received");
@@ -4886,6 +4892,7 @@ function renderRentSheetRows(rows) {
           <div class="rent-house-resident">
             <strong>${escapeHtml(residentLabel)}</strong>
             ${residentPhone ? `<span>${escapeHtml(residentPhone)}</span>` : ""}
+            ${item.hasActiveResident ? `<span class="portal-access-status">Portal: ${item.portalAccessStatus === "setup_pending" ? "setup pending" : "login ready"}</span>` : ""}
           </div>
           <span class="rent-house-occupancy ${item.hasActiveResident ? "is-occupied" : "is-vacant"}">${item.hasActiveResident ? "Occupied" : "Vacant"}</span>
         </div>
@@ -6160,6 +6167,20 @@ function renderApplications(rows) {
 function renderRentStatus(rows) {
     rentStatusBodyEl.replaceChildren();
     const visibleRows = [...getRowsForFocusedBuilding(rows)].sort(compareStableRoomOrder);
+    const scheduledKsh = visibleRows.reduce((sum, item) => sum + Math.max(0, Number(item.currentMonthPaidKsh ?? item.paidAmountKsh ?? 0) +
+        Number(item.currentMonthOutstandingKsh ?? 0)), 0);
+    const collectedKsh = visibleRows.reduce((sum, item) => sum + Math.max(0, Number(item.currentMonthPaidKsh ?? item.paidAmountKsh ?? 0)), 0);
+    const unpaidKsh = visibleRows.reduce((sum, item) => sum + Math.max(0, Number(item.currentMonthOutstandingKsh ?? 0)), 0);
+    if (rentMonthExpectedEl instanceof HTMLElement)
+        rentMonthExpectedEl.textContent = formatCurrency(scheduledKsh);
+    if (rentMonthCollectedEl instanceof HTMLElement)
+        rentMonthCollectedEl.textContent = formatCurrency(collectedKsh);
+    if (rentMonthUnpaidEl instanceof HTMLElement)
+        rentMonthUnpaidEl.textContent = formatCurrency(unpaidKsh);
+    if (rentMonthRateEl instanceof HTMLElement)
+        rentMonthRateEl.textContent = scheduledKsh > 0 ? `${Math.round(collectedKsh / scheduledKsh * 100)}%` : "No rent scheduled";
+    if (rentMonthHouseCountEl instanceof HTMLElement)
+        rentMonthHouseCountEl.textContent = `${visibleRows.filter((item) => Number(item.currentMonthPaidKsh ?? item.paidAmountKsh ?? 0) + Number(item.currentMonthOutstandingKsh ?? 0) > 0).length} houses billed`;
     if (visibleRows.length === 0) {
         const row = document.createElement("tr");
         row.innerHTML = '<td colspan="14">No rent status data for the current building.</td>';
@@ -6476,6 +6497,7 @@ function renderRoomLedger(rows) {
       <td>
         <strong>${escapeHtml(residentName)}</strong>
         ${residentPhone ? `<br /><small>${escapeHtml(residentPhone)}</small>` : ""}
+        ${hasResident ? `<br /><small>${resident.portalAccessStatus === "setup_pending" ? "Portal setup pending" : "Portal login ready"}</small>` : ""}
       </td>
       <td>
         <span class="room-ledger-status ${occupancyClass}">${escapeHtml(occupancy)}</span>
@@ -7861,12 +7883,25 @@ function syncPerformanceBuildingOptions() {
         performanceBuildingEl.value = previous;
     }
 }
-function renderBuildingPerformance(data) {
+function renderBuildingPerformance(data, previousData) {
     if (!data)
         return;
     const setText = (element, value) => { if (element instanceof HTMLElement)
         element.textContent = value; };
     setText(performanceSummaryEl, `${getBuildingDisplayNameById(data.buildingId, data.buildingId)} · ${data.month}`);
+    if (performanceMonthComparisonEl instanceof HTMLElement) {
+        const current = Number(data.totalReceivedKsh ?? 0);
+        const previous = Number(previousData?.totalReceivedKsh ?? 0);
+        const delta = current - previous;
+        const percentage = previous > 0 ? Math.round((delta / previous) * 100) : null;
+        const direction = delta > 0 ? "up" : delta < 0 ? "down" : "unchanged";
+        const priorLabel = previousData?.month ?? "previous month";
+        performanceMonthComparisonEl.textContent = previous > 0
+            ? `${formatCurrency(current)} received vs ${formatCurrency(previous)} in ${priorLabel} · ${formatCurrency(Math.abs(delta))} ${direction}${percentage == null ? "" : ` (${Math.abs(percentage)}%)`}`
+            : current > 0
+                ? `${formatCurrency(current)} received this month · no collections recorded in ${priorLabel}`
+                : `No collections this month or in ${priorLabel}.`;
+    }
     setText(performanceTotalEl, formatCurrency(data.totalReceivedKsh));
     setText(performanceRentEl, formatCurrency(data.rentReceivedKsh));
     setText(performanceUtilitiesEl, formatCurrency(data.utilitiesReceivedKsh));
@@ -7937,8 +7972,18 @@ async function loadBuildingPerformance() {
     if (!buildingId)
         throw new Error("No building is available for performance reporting.");
     const params = new URLSearchParams({ buildingId, month: performanceMonthEl.value });
-    const response = await requestJson(`/api/landlord/building-performance?${params.toString()}`);
-    renderBuildingPerformance(response.data);
+    const selectedMonth = performanceMonthEl.value;
+    const [year, month] = selectedMonth.split("-").map(Number);
+    const previousDate = new Date(Date.UTC(year, month - 2, 1));
+    const previousMonth = `${previousDate.getUTCFullYear()}-${String(previousDate.getUTCMonth() + 1).padStart(2, "0")}`;
+    const previousParams = new URLSearchParams({ buildingId, month: previousMonth });
+    const [responseResult, previousResult] = await Promise.allSettled([
+        requestJson(`/api/landlord/building-performance?${params.toString()}`),
+        requestJson(`/api/landlord/building-performance?${previousParams.toString()}`)
+    ]);
+    if (responseResult.status === "rejected")
+        throw responseResult.reason;
+    renderBuildingPerformance(responseResult.value.data, previousResult.status === "fulfilled" ? previousResult.value.data : null);
 }
 function syncCollectionsReportBuildingOptions() {
     if (!(collectionsReportBuildingEl instanceof HTMLSelectElement)) {
@@ -9271,11 +9316,11 @@ directTenantFormEl?.addEventListener("submit", (event) => {
     const identityType = String(directTenantIdTypeEl?.value || "national_id").trim();
     const identityNumber = String(directTenantIdNumberEl?.value || "").trim();
     const note = String(directTenantNoteEl?.value || "").trim() || undefined;
-    if (!buildingId || !houseNumber || !fullName || !phoneNumber || !identityNumber) {
-        showError("Tenant onboarding requires building, house, name, phone, and ID number.");
+    if (!buildingId || !houseNumber || !fullName || !phoneNumber) {
+        showError("Tenant setup requires building, house, name, and phone number.");
         return;
     }
-    const defaultBillingStartDate = "2026-07-16";
+    const defaultBillingStartDate = new Date().toISOString().slice(0, 10);
     const buildingLabel = getBuildingDisplayNameById(buildingId, "selected building");
     const billingStartInput = window.prompt(`Billing start date for ${buildingLabel} ${houseNumber} (YYYY-MM-DD). Billing stays paused until this date if it falls in a future month.`, defaultBillingStartDate);
     if (billingStartInput == null) {
@@ -9335,7 +9380,7 @@ directTenantFormEl?.addEventListener("submit", (event) => {
                 directTenantIdTypeEl.value = "national_id";
             }
             closeDirectTenantDrawer();
-            setStatus(`${residentName} added to ${buildingName} ${data.houseNumber || houseNumber}. They can sign in with their phone number and ID number as the temporary password.${billingPauseText}${smsText}`);
+            setStatus(`${residentName} added to ${buildingName} ${data.houseNumber || houseNumber}. Billing is configured.${billingPauseText} Portal access is not required to start billing; they can claim it later by verifying their phone.${smsText}`);
             await Promise.all([
                 loadBuildings(),
                 loadApplications(),
@@ -9346,7 +9391,7 @@ directTenantFormEl?.addEventListener("submit", (event) => {
             await loadResidents();
         }
         catch (error) {
-            setDirectTenantStatus("Temporary password: ID number. Password change required at first sign-in.");
+            setDirectTenantStatus("Add the tenant and start billing now. They can set up portal access later by verifying this phone number.");
             handleLandlordError(error, "Failed to add tenant.");
         }
         finally {

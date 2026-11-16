@@ -1,7 +1,7 @@
 import { initResponsiveTables } from "./mobile-table.js?v=3e39d752dc";
 import { notifyError, notifyStatus } from "./notifications.js?v=62acc56b74";
 import { applyHouseSheetImport, buildXlsx, describeHouseSheetPlan, houseSheetRowsFromRegistry, houseSheetTable, parseHouseSheet, prepareHouseSheetImport, readSpreadsheet } from "./house-sheet.js?v=3b029b9a8a";
-import { createMeterReadingsView } from "./meter-readings.js?v=a15419bd54";
+import { createMeterReadingsView } from "./meter-readings.js?v=4568140d42";
 import { createBalancesView } from "./balances-view.js?v=59a3d1aef4";
 import { createUploadedImageGallery, renderSelectedImagePreviews, uploadImageFiles, validateImageFiles } from "./media-upload.js?v=549f6d7675";
 import { applyDocumentBranding, getLandlordPortalTitle, getLandlordShellBrand } from "./portal-branding.js?v=9b283694b2";
@@ -474,6 +474,16 @@ const utilityPaymentHelpEl = document.getElementById("utility-payment-help");
 const utilityPaymentsBodyEl = document.getElementById("utility-payments-body");
 const refreshPaymentsBtnEl = document.getElementById("refresh-payments");
 const expenditureFormEl = document.getElementById("expenditure-form");
+const expenditureMonthEl = document.getElementById("expense-dashboard-month");
+const expenditureSummaryEl = document.getElementById("expense-dashboard-summary");
+const expenditureMonthTotalEl = document.getElementById("expense-dashboard-month-total");
+const expenditureMonthCountEl = document.getElementById("expense-dashboard-month-count");
+const expenditureLandlordTotalEl = document.getElementById("expense-dashboard-landlord-total");
+const expenditureRecoverableTotalEl = document.getElementById("expense-dashboard-recoverable-total");
+const expenditureCommonElectricityEl = document.getElementById("expense-dashboard-common-electricity-total");
+const expenditureCommonWaterEl = document.getElementById("expense-dashboard-common-water-total");
+const expenditureSharedServicesEl = document.getElementById("expense-dashboard-shared-services-total");
+const expenditureBreakdownBodyEl = document.getElementById("expense-dashboard-breakdown-body");
 const expenditureHouseNumberEl = document.getElementById("expenditure-house-number");
 const expenditureCategoryEl = document.getElementById("expenditure-category");
 const expenditureAmountEl = document.getElementById("expenditure-amount");
@@ -575,6 +585,8 @@ const state = {
     collectionsReportPayments: [],
     selectedPaymentCorrectionBuildingId: "all",
     expenditures: [],
+    expenditureSummary: null,
+    expenditureTotalEntries: 0,
     moveOutSettlements: [],
     moveOutSettlement: null
 };
@@ -1253,6 +1265,9 @@ function setActiveLandlordView(nextView, options = {}) {
         void balancesView.load().catch((error) => {
             handleLandlordError(error, "Unable to load balances.");
         });
+    }
+    if (targetView === "expenses" && (previousView !== "expenses" || options.forceLoad) && !options.skipLoad) {
+        void loadExpenditures().catch((error) => handleLandlordError(error, "Unable to load expenditure."));
     }
     if (targetView === "performance" && (previousView !== "performance" || options.forceLoad) && !options.skipLoad) {
         syncPerformanceBuildingOptions();
@@ -2874,22 +2889,20 @@ function canDisplayResidentBilling(resident) {
     return !isResidentPendingVerification(resident);
 }
 function formatExpenditureCategory(value) {
-    switch (value) {
-        case "maintenance":
-            return "Maintenance";
-        case "utilities":
-            return "Utilities";
-        case "cleaning":
-            return "Cleaning";
-        case "security":
-            return "Security";
-        case "supplies":
-            return "Supplies";
-        case "staff":
-            return "Staff";
-        default:
-            return "Other";
-    }
+    const labels = {
+        maintenance: "Maintenance",
+        utilities: "Utilities",
+        common_water: "Common water",
+        common_electricity: "Common electricity",
+        security_lighting: "Security lighting",
+        shared_services: "Shared services",
+        cleaning: "Cleaning",
+        security: "Security",
+        supplies: "Supplies",
+        staff: "Staff",
+        other: "Other"
+    };
+    return labels[String(value ?? "")] || "Other";
 }
 function getResidentOutstandingBalanceKsh(resident) {
     if (!canDisplayResidentBilling(resident)) {
@@ -5735,19 +5748,75 @@ function renderLandlordTickets(tickets) {
     });
     renderDailyDashboard();
 }
-function renderExpenditures(rows) {
-    if (!(expendituresBodyEl instanceof HTMLElement)) {
+function syncExpenditureChargeability() {
+    if (!(expenditureChargeableEl instanceof HTMLInputElement))
+        return;
+    const houseNumber = normalizeHouse(expenditureHouseNumberEl?.value || "");
+    const category = String(expenditureCategoryEl?.value || "");
+    const buildingWide = ["common_water", "common_electricity", "security_lighting", "shared_services"].includes(category);
+    expenditureChargeableEl.disabled = !houseNumber || buildingWide;
+    if (expenditureChargeableEl.disabled)
+        expenditureChargeableEl.checked = false;
+    const guidance = document.getElementById("expenditure-form-guidance");
+    if (guidance instanceof HTMLElement) {
+        guidance.textContent = buildingWide
+            ? "This shared building expense is recorded as a landlord cost and cannot be assigned to one resident."
+            : houseNumber
+                ? "Choose recoverable only when the tenancy terms allow this cost to be charged to this house."
+                : "Select a house before making an expense recoverable from a resident.";
+    }
+}
+function renderExpenditureDashboard(summary = state.expenditureSummary) {
+    const setText = (element, value) => {
+        if (element instanceof HTMLElement)
+            element.textContent = value;
+    };
+    const month = String(expenditureMonthEl?.value || summary?.month || "");
+    const totalEntries = Number(state.expenditureTotalEntries ?? 0);
+    setText(expenditureSummaryEl, `${getBuildingDisplayNameById(getSelectedUtilityBuildingId(), "Selected building")} · ${month || "Current month"} · ${totalEntries.toLocaleString()} recorded entries`);
+    setText(expenditureMonthTotalEl, formatCurrency(summary?.monthTotalKsh ?? 0));
+    setText(expenditureMonthCountEl, `${Number(summary?.monthEntryCount ?? 0).toLocaleString()} entries paid this month`);
+    setText(expenditureLandlordTotalEl, formatCurrency(summary?.landlordOnlyTotalKsh ?? 0));
+    setText(expenditureRecoverableTotalEl, formatCurrency(summary?.recoverableTotalKsh ?? 0));
+    setText(expenditureCommonElectricityEl, formatCurrency(summary?.commonElectricityTotalKsh ?? 0));
+    setText(expenditureCommonWaterEl, formatCurrency(summary?.commonWaterTotalKsh ?? 0));
+    setText(expenditureSharedServicesEl, formatCurrency(summary?.sharedServicesTotalKsh ?? 0));
+    if (!(expenditureBreakdownBodyEl instanceof HTMLElement))
+        return;
+    expenditureBreakdownBodyEl.replaceChildren();
+    const categories = Array.isArray(summary?.categories) ? summary.categories : [];
+    if (!categories.length) {
+        const row = document.createElement("tr");
+        row.innerHTML = '<td colspan="5">No expenditure recorded for this period.</td>';
+        expenditureBreakdownBodyEl.append(row);
         return;
     }
-    expendituresBodyEl.replaceChildren();
-    if (!Array.isArray(rows) || rows.length === 0) {
+    categories.forEach((item) => {
         const row = document.createElement("tr");
-        row.innerHTML = '<td colspan="12">No expenditure recorded for this building yet.</td>';
+        row.innerHTML = `<td>${escapeHtml(formatExpenditureCategory(item.category))}</td><td>${escapeHtml(formatCurrency(item.monthTotalKsh))}</td><td>${escapeHtml(formatCurrency(item.allTimeTotalKsh))}</td><td>${Number(item.entryCount ?? 0).toLocaleString()}</td><td>${escapeHtml(formatCurrency(item.recoverableKsh ?? 0))}</td>`;
+        expenditureBreakdownBodyEl.append(row);
+    });
+}
+function renderExpenditures(rows) {
+    renderExpenditureDashboard();
+    if (!(expendituresBodyEl instanceof HTMLElement))
+        return;
+    expendituresBodyEl.replaceChildren();
+    const query = String(document.getElementById("expenditure-search")?.value ?? "").trim().toLowerCase();
+    const filteredRows = (Array.isArray(rows) ? rows : []).filter((item) => {
+        if (!query)
+            return true;
+        return [item.houseNumber, item.category, item.title, item.payeeName, item.note, item.createdByName]
+            .some((value) => String(value ?? "").toLowerCase().includes(query));
+    });
+    if (filteredRows.length === 0) {
+        const row = document.createElement("tr");
+        row.innerHTML = `<td colspan="12">${query ? "No recent entries match this search." : "No expenditure recorded for this building yet."}</td>`;
         expendituresBodyEl.append(row);
         return;
     }
     const canDelete = !isCaretakerRole();
-    rows.forEach((item) => {
+    filteredRows.forEach((item) => {
         const row = document.createElement("tr");
         const buildingLabel = getBuildingDisplayNameById(item.buildingId, "-");
         const actorLabel = item.createdByName
@@ -5761,16 +5830,11 @@ function renderExpenditures(rows) {
       <td>${escapeHtml(formatExpenditureCategory(item.category))}</td>
       <td>${escapeHtml(item.title)}</td>
       <td>${escapeHtml(formatCurrency(item.amountKsh))}</td>
-      <td>${escapeHtml(item.payeeName || "Unknown")}</td>
+      <td>${escapeHtml(item.payeeName || "Not recorded")}</td>
       <td>${escapeHtml(item.chargeableToResident ? "Yes" : "No")}</td>
       <td>${escapeHtml(actorLabel)}</td>
       <td>${escapeHtml(item.note ?? "-")}</td>
-      <td>
-        ${canDelete
-            ? `<button type="button" class="btn-danger" data-action="delete-expenditure" data-expenditure-id="${escapeHtml(item.id)}" data-title="${escapeHtml(item.title)}">Delete</button>`
-            : "-"}
-      </td>
-    `;
+      <td>${canDelete ? `<button type="button" class="btn-danger" data-action="delete-expenditure" data-expenditure-id="${escapeHtml(item.id)}" data-title="${escapeHtml(item.title)}">Delete</button>` : "-"}</td>`;
         expendituresBodyEl.append(row);
     });
 }
@@ -9172,8 +9236,17 @@ async function loadPayments() {
 }
 async function loadExpenditures() {
     const buildingId = getSelectedUtilityBuildingId();
-    const payload = await requestJson(withBuildingQuery("/api/landlord/expenditures", buildingId));
+    if (expenditureMonthEl instanceof HTMLInputElement && !expenditureMonthEl.value) {
+        expenditureMonthEl.value = new Date().toISOString().slice(0, 7);
+    }
+    if (expenditurePaidAtEl instanceof HTMLInputElement && !expenditurePaidAtEl.value) {
+        expenditurePaidAtEl.value = toDateTimeLocalInputValue(new Date());
+    }
+    const month = String(expenditureMonthEl?.value || new Date().toISOString().slice(0, 7));
+    const payload = await requestJson(withBuildingQuery("/api/landlord/expenditures", buildingId, `month=${encodeURIComponent(month)}`));
     state.expenditures = payload.data ?? [];
+    state.expenditureSummary = payload.summary ?? null;
+    state.expenditureTotalEntries = Number(payload.totalEntries ?? state.expenditures.length);
     renderExpenditures(state.expenditures);
 }
 async function loadMoveOutSettlements() {
@@ -11829,6 +11902,15 @@ expendituresBodyEl?.addEventListener("click", (event) => {
     }
     handleDeleteExpenditureClick(target, String(target.dataset.expenditureId || "").trim(), String(target.dataset.title || "").trim());
 });
+expenditureMonthEl?.addEventListener("change", () => {
+    void loadExpenditures().catch((error) => handleLandlordError(error, "Unable to load expenditure for that month."));
+});
+document.getElementById("expenditure-search")?.addEventListener("input", () => {
+    renderExpenditures(state.expenditures);
+});
+expenditureHouseNumberEl?.addEventListener("input", syncExpenditureChargeability);
+expenditureCategoryEl?.addEventListener("change", syncExpenditureChargeability);
+syncExpenditureChargeability();
 expenditureFormEl?.addEventListener("submit", (event) => {
     event.preventDefault();
     clearError();
@@ -11851,6 +11933,15 @@ expenditureFormEl?.addEventListener("submit", (event) => {
     }
     if (!Number.isFinite(amountKsh) || amountKsh <= 0) {
         showError("Enter a valid expenditure amount.");
+        return;
+    }
+    const buildingWideExpense = ["common_water", "common_electricity", "security_lighting", "shared_services"].includes(category);
+    if (chargeableToResident && buildingWideExpense) {
+        showError("Shared building expenses cannot be assigned to one resident.");
+        return;
+    }
+    if (chargeableToResident && !houseNumber) {
+        showError("Select a house before making this expense recoverable from a resident.");
         return;
     }
     if (expenditureSubmitBtnEl instanceof HTMLButtonElement) {

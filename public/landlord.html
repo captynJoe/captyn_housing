@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=044c9c08af" />
-    <link rel="stylesheet" href="/landlord.css?v=e3a3e4541f" />
+    <link rel="stylesheet" href="/landlord.css?v=30a4ae69ff" />
     <script src="/captyn-theme.js?v=6944e37fb6"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=d9fd4fe626" />
     <link rel="stylesheet" href="/landlord-shell.css?v=ef1318231c" />
@@ -107,7 +107,7 @@
             </button>
             <button type="button" class="lh-nav-btn" data-landlord-view="meters" data-landlord-section-target="utilities-registry-section">Meters</button>
             <button type="button" class="lh-nav-btn" data-landlord-view="messages" data-landlord-section-target="message-center-section">Messages</button>
-            <button type="button" class="lh-nav-btn" data-landlord-view="expenses" data-landlord-section-target="utilities-expenditures-section">Costs</button>
+            <button type="button" class="lh-nav-btn" data-landlord-view="expenses" data-landlord-section-target="utilities-expenditures-section">Expenditure</button>
             <button type="button" class="lh-nav-btn" data-landlord-view="buildings" data-landlord-section-target="buildings-section">Buildings</button>
             <button type="button" class="lh-nav-btn" data-landlord-view="settings" data-landlord-section-target="settings-section">Setup</button>
           </nav>
@@ -1567,7 +1567,7 @@
         >
           <div class="panel-head">
             <div>
-              <h2>Landlord Expense Dashboard</h2>
+              <h2>Expenditure</h2>
               <p id="expense-dashboard-summary" class="status-text"></p>
             </div>
             <button id="refresh-expenditures" type="button">Refresh</button>
@@ -1575,31 +1575,31 @@
 
           <div class="action-row expense-dashboard-toolbar">
             <label>
-              Summary Month
+              Paid during
               <input id="expense-dashboard-month" type="month" />
             </label>
           </div>
 
           <div class="resident-overview-cards expense-dashboard-cards" id="expense-dashboard-cards">
             <article class="resident-overview-card">
-              <span>This Month Spend</span>
+              <span>Spent this month</span>
               <strong id="expense-dashboard-month-total">-</strong>
               <small id="expense-dashboard-month-count">-</small>
             </article>
             <article class="resident-overview-card">
-              <span>Landlord Only</span>
+              <span>Not recoverable</span>
               <strong id="expense-dashboard-landlord-total">-</strong>
             </article>
             <article class="resident-overview-card">
-              <span>Recoverable Charges</span>
+              <span>Recoverable from residents</span>
               <strong id="expense-dashboard-recoverable-total">-</strong>
             </article>
             <article class="resident-overview-card">
-              <span>Common Electricity</span>
+              <span>Common electricity</span>
               <strong id="expense-dashboard-common-electricity-total">-</strong>
             </article>
             <article class="resident-overview-card">
-              <span>Common Water</span>
+              <span>Common water</span>
               <strong id="expense-dashboard-common-water-total">-</strong>
             </article>
             <article class="resident-overview-card">
@@ -1613,17 +1613,18 @@
               <thead>
                 <tr>
                   <th>Category</th>
-                  <th>Month Total</th>
+                  <th>Selected Month</th>
                   <th>All-Time Total</th>
-                  <th>Entries</th>
-                  <th>Coverage</th>
+                  <th>All-Time Entries</th>
+                  <th>Recoverable (all-time)</th>
                 </tr>
               </thead>
               <tbody id="expense-dashboard-breakdown-body"></tbody>
             </table>
           </div>
 
-          <form id="expenditure-form" class="package-card">
+          <form id="expenditure-form" class="package-card expenditure-entry-form">
+            <div class="section-head"><div><h3>Record an expense</h3><p class="status-text">Use the date the money was paid. Performance uses this date when reporting monthly costs.</p></div></div>
             <div class="inline-fields compact-fields">
               <label>
                 House No. (optional)
@@ -1649,9 +1650,17 @@
                 Amount (KSh)
                 <input id="expenditure-amount" type="number" min="1" max="2000000" step="0.01" required />
               </label>
+              <label>
+                Paid on
+                <input id="expenditure-paid-at" type="datetime-local" required />
+              </label>
+              <label>
+                Paid to
+                <input id="expenditure-payee" type="text" maxlength="120" placeholder="Supplier, agent, or staff member" />
+              </label>
             </div>
             <label>
-              Title
+              Expense title
               <input id="expenditure-title" type="text" maxlength="120" placeholder="Plumber callout" required />
             </label>
             <label>
@@ -1661,16 +1670,18 @@
             <p id="expenditure-form-guidance" class="status-text expense-form-guidance"></p>
             <label class="checkbox-row">
               <input id="expenditure-chargeable" type="checkbox" />
-              Charge this house's resident
+              Recover this expense from the selected house's resident
             </label>
-            <button id="expenditure-submit-btn" type="submit">Record Expenditure</button>
+            <button id="expenditure-submit-btn" type="submit">Save expense</button>
           </form>
 
+          <div class="section-head expenditure-ledger-head"><div><h3>Recent entries</h3><p class="status-text">The summaries above include all entries; this ledger shows the latest 500.</p></div><label>Search entries<input id="expenditure-search" type="search" placeholder="Category, house, payee, title…" /></label></div>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Created</th>
+                  <th>Recorded</th>
+                  <th>Paid on</th>
                   <th>Building</th>
                   <th>House</th>
                   <th>Category</th>
@@ -2266,6 +2277,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=990f0bb380"></script>
+    <script type="module" src="/landlord.js?v=8cd2e17751"></script>
   </body>
 </html>

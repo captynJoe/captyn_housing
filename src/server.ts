@@ -12712,7 +12712,7 @@ async function bootstrap() {
       }
 
       const visibleIds = await listVisibleBuildingIdsForLandlordContext(context);
-      const data = [...buildingExpenditures.values()]
+      const allData = [...buildingExpenditures.values()]
         .filter((item) => {
           if (buildingId && item.buildingId !== buildingId) {
             return false;
@@ -12722,10 +12722,37 @@ async function bootstrap() {
           }
           return visibleIds.has(item.buildingId);
         })
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-        .slice(0, 500);
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      const summaryMonth = typeof req.query.month === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(req.query.month)
+        ? req.query.month
+        : new Date().toISOString().slice(0, 7);
+      const categories = new Map<string, { category: string; monthTotalKsh: number; allTimeTotalKsh: number; entryCount: number; recoverableKsh: number }>();
+      for (const item of allData) {
+        const category = item.category || "other";
+        const current = categories.get(category) ?? { category, monthTotalKsh: 0, allTimeTotalKsh: 0, entryCount: 0, recoverableKsh: 0 };
+        const amount = Number(item.amountKsh ?? 0);
+        current.allTimeTotalKsh += amount;
+        current.entryCount += 1;
+        if (String(item.paidAt || item.createdAt).slice(0, 7) === summaryMonth) {
+          current.monthTotalKsh += amount;
+        }
+        if (item.chargeableToResident) current.recoverableKsh += amount;
+        categories.set(category, current);
+      }
+      const monthItems = allData.filter((item) => String(item.paidAt || item.createdAt).slice(0, 7) === summaryMonth);
+      const summary = {
+        month: summaryMonth,
+        monthTotalKsh: monthItems.reduce((sum, item) => sum + Number(item.amountKsh ?? 0), 0),
+        monthEntryCount: monthItems.length,
+        landlordOnlyTotalKsh: monthItems.filter((item) => !item.chargeableToResident).reduce((sum, item) => sum + Number(item.amountKsh ?? 0), 0),
+        recoverableTotalKsh: monthItems.filter((item) => item.chargeableToResident).reduce((sum, item) => sum + Number(item.amountKsh ?? 0), 0),
+        commonElectricityTotalKsh: monthItems.filter((item) => item.category === "common_electricity").reduce((sum, item) => sum + Number(item.amountKsh ?? 0), 0),
+        commonWaterTotalKsh: monthItems.filter((item) => item.category === "common_water").reduce((sum, item) => sum + Number(item.amountKsh ?? 0), 0),
+        sharedServicesTotalKsh: monthItems.filter((item) => item.category === "shared_services").reduce((sum, item) => sum + Number(item.amountKsh ?? 0), 0),
+        categories: [...categories.values()].sort((a, b) => b.monthTotalKsh - a.monthTotalKsh || b.allTimeTotalKsh - a.allTimeTotalKsh)
+      };
 
-      return res.json({ data, role: context.role });
+      return res.json({ data: allData.slice(0, 500), summary, totalEntries: allData.length, role: context.role });
     } catch (error) {
       return next(error);
     }
@@ -12920,6 +12947,12 @@ async function bootstrap() {
 
       const category = parsed.category;
       const landlordOnlyBuildingExpense = isLandlordOnlyBuildingExpenseCategory(category);
+      if (parsed.chargeableToResident && landlordOnlyBuildingExpense) {
+        return res.status(400).json({ error: "Shared building expenses cannot be assigned to one resident." });
+      }
+      if (parsed.chargeableToResident && !parsed.houseNumber) {
+        return res.status(400).json({ error: "Select a house before making this expense recoverable from a resident." });
+      }
       const houseNumber = landlordOnlyBuildingExpense
         ? undefined
         : parsed.houseNumber
@@ -19317,6 +19350,10 @@ async function bootstrap() {
         readingHistory: utilityBillingService.listMeterReadingHistory(building.id),
         building: { id: building.id, name: building.name },
         billingMode: configuration?.utilityBillingMode ?? "metered",
+        utilityEnabled: {
+          water: paymentAccessService.isEnabled(building.id, "water"),
+          electricity: paymentAccessService.isEnabled(building.id, "electricity")
+        },
         buildingCharges: {
           water: configuration?.defaultWaterFixedChargeKsh ?? null,
           electricity: configuration?.defaultElectricityFixedChargeKsh ?? null,

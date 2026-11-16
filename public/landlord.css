@@ -1690,7 +1690,31 @@ body.landlord-simple-manager-role .landlord-side-panel .metrics-panel {
 }
 
 .expense-dashboard-cards {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-top: 10px;
+}
+
+.expenditure-entry-form {
+  display: grid;
+  gap: 12px;
+}
+
+.expenditure-entry-form > .section-head {
+  margin: 0;
+}
+
+.expenditure-entry-form h3,
+.expenditure-ledger-head h3 {
+  margin: 0;
+}
+
+.expenditure-ledger-head {
+  align-items: end;
+  gap: 16px;
+}
+
+.expenditure-ledger-head > label {
+  min-width: min(100%, 320px);
 }
 
 .expense-dashboard-cards .resident-overview-card small {
@@ -4219,7 +4243,7 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
 .performance-row > span { display: grid; gap: 3px; }
 .performance-row small { color: var(--muted, #70818a); }
 @media (max-width: 760px) {
-  .performance-cards, .performance-breakdowns { grid-template-columns: 1fr; }
+  .performance-cards, .performance-breakdowns, .expense-dashboard-cards { grid-template-columns: 1fr; }
 }
 
 /* Building performance: chart-led dashboard */

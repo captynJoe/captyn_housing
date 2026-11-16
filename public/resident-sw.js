@@ -8,7 +8,7 @@ const APP_ASSETS = [
     LANDLORD_SHELL_URL,
     "/users.css?v=7b8221af35",
     "/user.css?v=a915007ac6",
-    "/landlord.css?v=e3a3e4541f",
+    "/landlord.css?v=30a4ae69ff",
     "/captyn-theme.css?v=d9fd4fe626",
     "/captyn-theme.js?v=6944e37fb6",
     "/resident-app/assets/resident.css?v=9a725446e1",

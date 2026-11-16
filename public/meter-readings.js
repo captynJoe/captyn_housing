@@ -13,11 +13,11 @@ function parseFigure(value) {
     const parsed = Number(trimmed);
     return Number.isFinite(parsed) ? parsed : Number.NaN;
 }
-export function roomStatus(row, metered) {
-    if (!metered) {
+export function roomStatus(row, metered, utilities = METER_UTILITIES) {
+    if (!metered || utilities.length === 0) {
         return "ok";
     }
-    return METER_UTILITIES.map((utility) => row[utility].status).sort((left, right) => STATUS_ORDER[left] - STATUS_ORDER[right])[0];
+    return utilities.map((utility) => row[utility].status).sort((left, right) => STATUS_ORDER[left] - STATUS_ORDER[right])[0];
 }
 export function sortRooms(rows) {
     return [...rows].sort((left, right) => left.houseNumber.localeCompare(right.houseNumber, undefined, { numeric: true }));
@@ -30,13 +30,15 @@ export function readWithinDays(info, days = READING_WINDOW_DAYS, now = new Date(
     const readAt = new Date(info.lastReadAt).getTime();
     return Number.isFinite(readAt) && now.getTime() - readAt <= days * 24 * 60 * 60 * 1000;
 }
-export function roomNeedsReading(row, now = new Date()) {
+export function roomNeedsReading(row, now = new Date(), utilities = METER_UTILITIES) {
     return (row.hasActiveResident &&
-        METER_UTILITIES.some((utility) => !readWithinDays(row[utility], READING_WINDOW_DAYS, now)));
+        utilities.some((utility) => !readWithinDays(row[utility], READING_WINDOW_DAYS, now)));
 }
-export function filterRooms(rows, filter, now = new Date()) {
+export function filterRooms(rows, filter, now = new Date(), utilities = METER_UTILITIES) {
     const ordered = sortRooms(rows);
-    return filter === "unread" ? ordered.filter((row) => roomNeedsReading(row, now)) : ordered;
+    return filter === "unread"
+        ? ordered.filter((row) => roomNeedsReading(row, now, utilities))
+        : ordered;
 }
 export function isBaselineOnly(row) {
     return !row.hasActiveResident || Boolean(row.billingHold);
@@ -91,7 +93,7 @@ export function previewDraft(info, draft, rate, includedUnits, baseline = false)
     }
     return { hasReading: true, units, amountKsh: Math.round(units * rate) };
 }
-export function buildRoomSavePayload(row, draft, rates, includedUnits) {
+export function buildRoomSavePayload(row, draft, rates, includedUnits, utilities = METER_UTILITIES) {
     const errors = [];
     const entries = [];
     const room = { houseNumber: row.houseNumber };
@@ -115,7 +117,7 @@ export function buildRoomSavePayload(row, draft, rates, includedUnits) {
             room.flatAmountKsh = amount;
         }
     }
-    for (const utility of METER_UTILITIES) {
+    for (const utility of utilities) {
         const meterDraft = draft?.[utility];
         if (!meterDraft) {
             continue;
@@ -199,6 +201,7 @@ export function createMeterReadingsView(deps) {
     let filter = "all";
     let buildingId = "";
     let billingMode = "metered";
+    let enabledUtilities = [...METER_UTILITIES];
     let buildingCharges = undefined;
     let rows = [];
     let rates = { water: null, electricity: null };
@@ -210,7 +213,7 @@ export function createMeterReadingsView(deps) {
     const resumingRooms = new Set();
     const savedThisVisit = new Set();
     const isMetered = () => billingMode === "metered";
-    const readsMeters = () => billingMode !== "disabled";
+    const readsMeters = () => billingMode !== "disabled" && enabledUtilities.length > 0;
     const hasFlatAmount = () => billingMode === "combined_charge";
     const allowanceFor = (utility) => isMetered() ? undefined : includedUnits[utility];
     const allowances = () => (isMetered() ? undefined : includedUnits);
@@ -238,7 +241,7 @@ export function createMeterReadingsView(deps) {
             return;
         }
         const draft = drafts.get(houseNumber);
-        for (const utility of METER_UTILITIES) {
+        for (const utility of enabledUtilities) {
             const previewEl = card.querySelector(`[data-preview="${utility}"]`);
             if (!previewEl) {
                 continue;
@@ -278,7 +281,7 @@ export function createMeterReadingsView(deps) {
                     draftReading < row[utility].lastReading);
             }
         }
-        const payload = buildRoomSavePayload(row, draft, rates, allowances());
+        const payload = buildRoomSavePayload(row, draft, rates, allowances(), enabledUtilities);
         const serverError = serverErrors.get(houseNumber);
         const errorEl = card.querySelector(".mr-card-error");
         if (errorEl) {
@@ -299,9 +302,12 @@ export function createMeterReadingsView(deps) {
             return;
         }
         const chips = [];
-        if (readsMeters()) {
+        if (!enabledUtilities.length) {
+            chips.push(`<span class="mr-chip">No utility payments are enabled for this building</span>`);
+        }
+        else if (readsMeters()) {
             const occupied = rows.filter((row) => row.hasActiveResident).length;
-            const unread = rows.filter((row) => roomNeedsReading(row)).length;
+            const unread = rows.filter((row) => roomNeedsReading(row, new Date(), enabledUtilities)).length;
             chips.push(unread > 0
                 ? `<span class="mr-chip is-due">${unread} of ${occupied} not read in ${READING_WINDOW_DAYS} days</span>`
                 : `<span class="mr-chip is-ok">All ${occupied} read in the last ${READING_WINDOW_DAYS} days</span>`);
@@ -311,12 +317,12 @@ export function createMeterReadingsView(deps) {
             button.classList.toggle("active", active);
             button.setAttribute("aria-pressed", String(active));
             if (button.dataset.meterFilter === "unread") {
-                const unread = readsMeters() ? rows.filter((row) => roomNeedsReading(row)).length : 0;
+                const unread = readsMeters() ? rows.filter((row) => roomNeedsReading(row, new Date(), enabledUtilities)).length : 0;
                 button.textContent = `Not read (${unread})`;
             }
         });
         if (isMetered()) {
-            for (const utility of METER_UTILITIES) {
+            for (const utility of enabledUtilities) {
                 const rate = rates[utility];
                 chips.push(rate != null
                     ? `<span class="mr-chip is-rate">${UTILITY_LABEL[utility]} ${escapeHtml(deps.formatCurrency(rate))} / ${utility === "water" ? "m³" : "kWh"}</span>`
@@ -329,13 +335,13 @@ export function createMeterReadingsView(deps) {
                 chips.push(`<span class="mr-chip is-rate">Base utility charge: ${combined != null ? escapeHtml(deps.formatCurrency(combined)) : "not set"} / room</span>`);
             }
             else {
-                const parts = METER_UTILITIES.map((utility) => {
+                const parts = enabledUtilities.map((utility) => {
                     const amount = buildingCharges?.[utility];
                     return `${UTILITY_LABEL[utility]} ${amount != null ? escapeHtml(deps.formatCurrency(amount)) : "not set"}`;
                 });
                 chips.push(`<span class="mr-chip is-rate">${parts.join(" · ")} / room</span>`);
             }
-            for (const utility of METER_UTILITIES) {
+            for (const utility of enabledUtilities) {
                 const included = includedUnits[utility];
                 const rate = rates[utility];
                 chips.push(included == null
@@ -571,7 +577,7 @@ Enter the corrected value:`, String(event.currentReading));
         }
         const metered = readsMeters();
         const visible = metered
-            ? sortRooms(rows).filter((row) => filter === "all" || roomNeedsReading(row) || savedThisVisit.has(row.houseNumber))
+            ? sortRooms(rows).filter((row) => filter === "all" || roomNeedsReading(row, new Date(), enabledUtilities) || savedThisVisit.has(row.houseNumber))
             : sortRooms(rows);
         if (visible.length === 0) {
             listEl.innerHTML = `<p class="mr-empty">Every occupied house has been read in the last ${READING_WINDOW_DAYS} days.</p>`;
@@ -579,7 +585,7 @@ Enter the corrected value:`, String(event.currentReading));
         }
         listEl.innerHTML = visible
             .map((row) => {
-            const status = roomStatus(row, metered);
+            const status = roomStatus(row, metered, enabledUtilities);
             const draft = drafts.get(row.houseNumber);
             const membersValue = draft?.members ?? String(row.householdMembers ?? 0);
             const defaultAmount = buildingCharges?.combined;
@@ -610,7 +616,7 @@ Enter the corrected value:`, String(event.currentReading));
           </header>
           ${renderHoldBanner(row)}
           ${flatField}
-          ${metered ? METER_UTILITIES.map((utility) => renderUtilityBlock(row, utility)).join("") : ""}
+          ${metered ? enabledUtilities.map((utility) => renderUtilityBlock(row, utility)).join("") : ""}
           <p class="mr-card-error" role="alert"></p>
           <button type="button" class="mr-save" data-action="save-room">Save</button>
         </article>`;
@@ -618,7 +624,7 @@ Enter the corrected value:`, String(event.currentReading));
             .join("");
         rows.forEach((row) => {
             renderCardState(row.houseNumber);
-            for (const utility of METER_UTILITIES) {
+            for (const utility of enabledUtilities) {
                 const historyList = cardFor(row.houseNumber)?.querySelector(".mr-history-list");
                 const latest = row[utility].history?.[0];
                 if (!historyList || !latest || historyList.querySelector("[data-action='correct-meter-reading']")) {
@@ -658,6 +664,7 @@ Enter the corrected value:`, String(event.currentReading));
         }
         const payload = await deps.requestJson(`/api/landlord/buildings/${encodeURIComponent(buildingId)}/meter-readings`, { cache: "no-store" });
         rows = Array.isArray(payload.data) ? payload.data : [];
+        enabledUtilities = METER_UTILITIES.filter((utility) => payload.utilityEnabled?.[utility] !== false);
         rates = payload.rates ?? { water: null, electricity: null };
         includedUnits = payload.includedUnits ?? { water: null, electricity: null };
         billingMode = String(payload.billingMode ?? "metered");
@@ -669,7 +676,7 @@ Enter the corrected value:`, String(event.currentReading));
         if (!row || savingRooms.has(houseNumber)) {
             return;
         }
-        const payload = buildRoomSavePayload(row, drafts.get(houseNumber), rates, allowances());
+        const payload = buildRoomSavePayload(row, drafts.get(houseNumber), rates, allowances(), enabledUtilities);
         if (!payload.hasChanges || payload.errors.length > 0) {
             return;
         }
@@ -686,7 +693,7 @@ Enter the corrected value:`, String(event.currentReading));
             const failedUtilities = new Set(failures.map((item) => item.utilityType));
             const remaining = {};
             const current = drafts.get(houseNumber);
-            for (const utility of METER_UTILITIES) {
+            for (const utility of enabledUtilities) {
                 if (failedUtilities.has(utility) && current?.[utility]) {
                     remaining[utility] = current[utility];
                 }

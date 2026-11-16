@@ -108,11 +108,15 @@ function parseFigure(value: string | undefined): number | undefined {
 }
 
 // Worst status across the meters that are actually in use for this room.
-export function roomStatus(row: MeterReadingRow, metered: boolean): MeterDueStatus {
-  if (!metered) {
+export function roomStatus(
+  row: MeterReadingRow,
+  metered: boolean,
+  utilities: MeterUtility[] = METER_UTILITIES
+): MeterDueStatus {
+  if (!metered || utilities.length === 0) {
     return "ok";
   }
-  return METER_UTILITIES.map((utility) => row[utility].status).sort(
+  return utilities.map((utility) => row[utility].status).sort(
     (left, right) => STATUS_ORDER[left] - STATUS_ORDER[right]
   )[0];
 }
@@ -141,10 +145,14 @@ export function readWithinDays(
 
 // An occupied room still needs a reading if any of its meters has not been read in
 // the last 30 days. Vacant rooms can't take readings, so they never count.
-export function roomNeedsReading(row: MeterReadingRow, now: Date = new Date()): boolean {
+export function roomNeedsReading(
+  row: MeterReadingRow,
+  now: Date = new Date(),
+  utilities: MeterUtility[] = METER_UTILITIES
+): boolean {
   return (
     row.hasActiveResident &&
-    METER_UTILITIES.some((utility) => !readWithinDays(row[utility], READING_WINDOW_DAYS, now))
+    utilities.some((utility) => !readWithinDays(row[utility], READING_WINDOW_DAYS, now))
   );
 }
 
@@ -153,10 +161,13 @@ export type MeterRoomFilter = "unread" | "all";
 export function filterRooms(
   rows: MeterReadingRow[],
   filter: MeterRoomFilter,
-  now: Date = new Date()
+  now: Date = new Date(),
+  utilities: MeterUtility[] = METER_UTILITIES
 ): MeterReadingRow[] {
   const ordered = sortRooms(rows);
-  return filter === "unread" ? ordered.filter((row) => roomNeedsReading(row, now)) : ordered;
+  return filter === "unread"
+    ? ordered.filter((row) => roomNeedsReading(row, now, utilities))
+    : ordered;
 }
 
 // Vacant rooms and rooms with billing paused take readings too, but nobody is
@@ -234,7 +245,8 @@ export function buildRoomSavePayload(
   row: MeterReadingRow,
   draft: RoomDraft | undefined,
   rates: Record<MeterUtility, number | null>,
-  includedUnits?: Record<MeterUtility, number | null>
+  includedUnits?: Record<MeterUtility, number | null>,
+  utilities: MeterUtility[] = METER_UTILITIES
 ): RoomSavePayload {
   const errors: string[] = [];
   const entries: MeterSaveEntry[] = [];
@@ -260,7 +272,7 @@ export function buildRoomSavePayload(
     }
   }
 
-  for (const utility of METER_UTILITIES) {
+  for (const utility of utilities) {
     const meterDraft = draft?.[utility];
     if (!meterDraft) {
       continue;
@@ -348,6 +360,7 @@ function escapeHtml(value: unknown): string {
 interface MeterReadingsResponse {
   data?: MeterReadingRow[];
   billingMode?: string;
+  utilityEnabled?: Partial<Record<MeterUtility, boolean>>;
   buildingCharges?: { water: number | null; electricity: number | null; combined: number | null };
   rates?: Record<MeterUtility, number | null>;
   includedUnits?: Record<MeterUtility, number | null>;
@@ -380,6 +393,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
   let filter: MeterRoomFilter = "all";
   let buildingId = "";
   let billingMode = "metered";
+  let enabledUtilities: MeterUtility[] = [...METER_UTILITIES];
   let buildingCharges: MeterReadingsResponse["buildingCharges"] = undefined;
   let rows: MeterReadingRow[] = [];
   let rates: Record<MeterUtility, number | null> = { water: null, electricity: null };
@@ -393,7 +407,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
   const savedThisVisit = new Set<string>();
 
   const isMetered = () => billingMode === "metered";
-  const readsMeters = () => billingMode !== "disabled";
+  const readsMeters = () => billingMode !== "disabled" && enabledUtilities.length > 0;
   const hasFlatAmount = () => billingMode === "combined_charge";
   // undefined on metered buildings (no allowance); the Setup values otherwise.
   const allowanceFor = (utility: MeterUtility) =>
@@ -425,7 +439,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
     }
 
     const draft = drafts.get(houseNumber);
-    for (const utility of METER_UTILITIES) {
+    for (const utility of enabledUtilities) {
       const previewEl = card.querySelector<HTMLElement>(`[data-preview="${utility}"]`);
       if (!previewEl) {
         continue;
@@ -476,7 +490,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
       }
     }
 
-    const payload = buildRoomSavePayload(row, draft, rates, allowances());
+    const payload = buildRoomSavePayload(row, draft, rates, allowances(), enabledUtilities);
     const serverError = serverErrors.get(houseNumber);
     const errorEl = card.querySelector<HTMLElement>(".mr-card-error");
     if (errorEl) {
@@ -499,9 +513,11 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
       return;
     }
     const chips: string[] = [];
-    if (readsMeters()) {
+    if (!enabledUtilities.length) {
+      chips.push(`<span class="mr-chip">No utility payments are enabled for this building</span>`);
+    } else if (readsMeters()) {
       const occupied = rows.filter((row) => row.hasActiveResident).length;
-      const unread = rows.filter((row) => roomNeedsReading(row)).length;
+      const unread = rows.filter((row) => roomNeedsReading(row, new Date(), enabledUtilities)).length;
       chips.push(
         unread > 0
           ? `<span class="mr-chip is-due">${unread} of ${occupied} not read in ${READING_WINDOW_DAYS} days</span>`
@@ -513,12 +529,12 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
       button.classList.toggle("active", active);
       button.setAttribute("aria-pressed", String(active));
       if (button.dataset.meterFilter === "unread") {
-        const unread = readsMeters() ? rows.filter((row) => roomNeedsReading(row)).length : 0;
+        const unread = readsMeters() ? rows.filter((row) => roomNeedsReading(row, new Date(), enabledUtilities)).length : 0;
         button.textContent = `Not read (${unread})`;
       }
     });
     if (isMetered()) {
-      for (const utility of METER_UTILITIES) {
+      for (const utility of enabledUtilities) {
         const rate = rates[utility];
         chips.push(
           rate != null
@@ -537,7 +553,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
           } / room</span>`
         );
       } else {
-        const parts = METER_UTILITIES.map((utility) => {
+        const parts = enabledUtilities.map((utility) => {
           const amount = buildingCharges?.[utility];
           return `${UTILITY_LABEL[utility]} ${
             amount != null ? escapeHtml(deps.formatCurrency(amount)) : "not set"
@@ -545,7 +561,7 @@ export function createMeterReadingsView(deps: MeterReadingsViewDeps) {
         });
         chips.push(`<span class="mr-chip is-rate">${parts.join(" · ")} / room</span>`);
       }
-      for (const utility of METER_UTILITIES) {
+      for (const utility of enabledUtilities) {
         const included = includedUnits[utility];
         const rate = rates[utility];
         chips.push(
@@ -818,7 +834,7 @@ Enter the corrected value:`,
     const visible = metered
       ? sortRooms(rows).filter(
           (row) =>
-            filter === "all" || roomNeedsReading(row) || savedThisVisit.has(row.houseNumber)
+            filter === "all" || roomNeedsReading(row, new Date(), enabledUtilities) || savedThisVisit.has(row.houseNumber)
         )
       : sortRooms(rows);
     if (visible.length === 0) {
@@ -827,7 +843,7 @@ Enter the corrected value:`,
     }
     listEl.innerHTML = visible
       .map((row) => {
-        const status = roomStatus(row, metered);
+        const status = roomStatus(row, metered, enabledUtilities);
         const draft = drafts.get(row.houseNumber);
         const membersValue = draft?.members ?? String(row.householdMembers ?? 0);
         const defaultAmount = buildingCharges?.combined;
@@ -859,7 +875,7 @@ Enter the corrected value:`,
           </header>
           ${renderHoldBanner(row)}
           ${flatField}
-          ${metered ? METER_UTILITIES.map((utility) => renderUtilityBlock(row, utility)).join("") : ""}
+          ${metered ? enabledUtilities.map((utility) => renderUtilityBlock(row, utility)).join("") : ""}
           <p class="mr-card-error" role="alert"></p>
           <button type="button" class="mr-save" data-action="save-room">Save</button>
         </article>`;
@@ -868,7 +884,7 @@ Enter the corrected value:`,
 
     rows.forEach((row) => {
       renderCardState(row.houseNumber);
-      for (const utility of METER_UTILITIES) {
+      for (const utility of enabledUtilities) {
         const historyList = cardFor(row.houseNumber)?.querySelector<HTMLElement>(
           ".mr-history-list"
         );
@@ -916,6 +932,7 @@ Enter the corrected value:`,
       { cache: "no-store" }
     );
     rows = Array.isArray(payload.data) ? payload.data : [];
+    enabledUtilities = METER_UTILITIES.filter((utility) => payload.utilityEnabled?.[utility] !== false);
     rates = payload.rates ?? { water: null, electricity: null };
     includedUnits = payload.includedUnits ?? { water: null, electricity: null };
     billingMode = String(payload.billingMode ?? "metered");
@@ -928,7 +945,13 @@ Enter the corrected value:`,
     if (!row || savingRooms.has(houseNumber)) {
       return;
     }
-    const payload = buildRoomSavePayload(row, drafts.get(houseNumber), rates, allowances());
+    const payload = buildRoomSavePayload(
+      row,
+      drafts.get(houseNumber),
+      rates,
+      allowances(),
+      enabledUtilities
+    );
     if (!payload.hasChanges || payload.errors.length > 0) {
       return;
     }
@@ -950,7 +973,7 @@ Enter the corrected value:`,
       const failedUtilities = new Set(failures.map((item) => item.utilityType));
       const remaining: RoomDraft = {};
       const current = drafts.get(houseNumber);
-      for (const utility of METER_UTILITIES) {
+      for (const utility of enabledUtilities) {
         if (failedUtilities.has(utility) && current?.[utility]) {
           remaining[utility] = current[utility];
         } else {

@@ -13,7 +13,7 @@
 #
 # Usage: scripts/deploy-vps2.sh
 # Env overrides: VPS2_SSH_TARGET, VPS2_HOUSING_PATH, VPS2_HOUSING_CONTAINER,
-#                HOUSING_HEALTH_URL, NODE_BIN
+#                HOUSING_HEALTH_URL, NODE_BIN, NODE_RUNTIME_IMAGE, DOCKER_BIN
 
 set -euo pipefail
 
@@ -22,16 +22,39 @@ VPS2_HOUSING_PATH="${VPS2_HOUSING_PATH:-/home/joe/captyn-housing}"
 VPS2_HOUSING_CONTAINER="${VPS2_HOUSING_CONTAINER:-captyn_vps2-housing_api-1}"
 HOUSING_HEALTH_URL="${HOUSING_HEALTH_URL:-http://10.8.0.1:4100/health}"
 NODE_BIN="${NODE_BIN:-node}"
+NODE_RUNTIME_IMAGE="${NODE_RUNTIME_IMAGE:-node:22}"
+DOCKER_BIN="${DOCKER_BIN:-docker}"
 
 cd "$(dirname "$0")/.."
 
 step() { printf '\n==> %s\n' "$*"; }
 fail() { printf '\nDEPLOY ABORTED: %s\n' "$*" >&2; exit 1; }
 
+if command -v "$NODE_BIN" >/dev/null 2>&1; then
+  NODE_MODE="host"
+  echo "Using host Node: $NODE_BIN"
+elif command -v "$DOCKER_BIN" >/dev/null 2>&1; then
+  NODE_MODE="docker"
+  echo "Host Node was not found; using $NODE_RUNTIME_IMAGE through Docker."
+else
+  fail "Node.js is missing and Docker is unavailable. Install Node.js or Docker, then retry."
+fi
+
+run_node() {
+  if [ "$NODE_MODE" = "host" ]; then
+    "$NODE_BIN" "$@"
+  else
+    "$DOCKER_BIN" run --rm --network none \
+      --user "$(id -u):$(id -g)" \
+      -e HOME=/tmp \
+      -v "$PWD":/app -w /app "$NODE_RUNTIME_IMAGE" node "$@"
+  fi
+}
+
 step "Type checks and tests"
-"$NODE_BIN" node_modules/typescript/bin/tsc --noEmit -p tsconfig.json || fail "server type check failed"
-"$NODE_BIN" node_modules/typescript/bin/tsc --noEmit -p tsconfig.public.json || fail "public type check failed"
-"$NODE_BIN" --import tsx --test tests/*.test.ts > /tmp/captyn-housing-deploy-tests.log 2>&1 \
+run_node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json || fail "server type check failed"
+run_node node_modules/typescript/bin/tsc --noEmit -p tsconfig.public.json || fail "public type check failed"
+run_node --import tsx --test tests/*.test.ts > /tmp/captyn-housing-deploy-tests.log 2>&1 \
   || { tail -30 /tmp/captyn-housing-deploy-tests.log; fail "tests failed"; }
 grep -E "^# (pass|fail)" /tmp/captyn-housing-deploy-tests.log
 
@@ -40,7 +63,8 @@ step "Checking the committed resident bundle matches its source"
 # never rebuilt would ship stale. Build into a temp folder and compare, ignoring the
 # ?v= tags that stamp-public-assets adds afterwards.
 RESIDENT_TMP="$(mktemp -d)"
-docker run --rm --network none -v "$PWD":/app -v "$RESIDENT_TMP":/out -w /app node:22-alpine \
+"$DOCKER_BIN" run --rm --network none \
+  -v "$PWD":/app -v "$RESIDENT_TMP":/out -w /app "$NODE_RUNTIME_IMAGE" \
   sh -c 'node node_modules/vite/bin/vite.js build --config vite.resident.config.ts --outDir /out --emptyOutDir >/dev/null 2>&1; status=$?; rm -rf node_modules/.vite-temp; chown -R '"$(id -u):$(id -g)"' /out; exit $status' \
   || fail "resident bundle build failed"
 normalize() { sed -E 's/\?v=[A-Za-z0-9]+/?v=/g' "$1" | sha256sum | cut -d' ' -f1; }

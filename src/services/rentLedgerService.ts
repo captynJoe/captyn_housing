@@ -6,6 +6,7 @@ import type {
 
 type RentPaymentProvider = "mpesa" | "cash" | "bank" | "card" | "deposit_credit";
 type RentPaymentSource = "manual" | "mpesa" | "settlement";
+type CollectionDestination = "building_account" | "agent";
 
 interface RecordRentPaymentInput {
   buildingId: string;
@@ -24,6 +25,7 @@ interface RecordRentPaymentInput {
   paymentProfileName?: string;
   paymentAccountReference?: string;
   source?: RentPaymentSource;
+  collectionDestination?: CollectionDestination;
   collectedByName?: string;
 }
 
@@ -49,6 +51,7 @@ export interface RentPaymentEvent {
   paidAt: string;
   createdAt: string;
   source?: RentPaymentSource;
+  collectionDestination?: CollectionDestination;
   collectedByName?: string;
 }
 
@@ -791,6 +794,7 @@ export class RentLedgerService {
         paymentAccountReference:
           input.paymentAccountReference ?? existingEvent.paymentAccountReference,
         source: "manual",
+        collectionDestination: existingEvent.collectionDestination,
         collectedByName: existingEvent.collectedByName
       });
 
@@ -817,6 +821,7 @@ export class RentLedgerService {
         paymentProfileName: previousEvent.paymentProfileName,
         paymentAccountReference: previousEvent.paymentAccountReference,
         source: previousEvent.source,
+        collectionDestination: previousEvent.collectionDestination,
         collectedByName: previousEvent.collectedByName
       });
       throw error;
@@ -1072,6 +1077,7 @@ export class RentLedgerService {
       paidAt,
       createdAt: nowIso(),
       source: input.source,
+      collectionDestination: input.collectionDestination ?? (input.source === "mpesa" ? "building_account" : undefined),
       collectedByName: input.collectedByName?.trim() || undefined
     };
 

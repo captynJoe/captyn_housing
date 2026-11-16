@@ -15,7 +15,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="CAPTYN Housing" />
     <link rel="icon" href="/icons/housing-app.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/users.css?v=dd74e71ecd" />
+    <link rel="stylesheet" href="/users.css?v=7b8221af35" />
     <script src="/captyn-theme.js?v=6944e37fb6"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=d9fd4fe626" />
     <link rel="stylesheet" href="/resident-app/assets/resident.css?v=9a725446e1" />
@@ -110,7 +110,7 @@
               type="password"
               minlength="8"
               maxlength="128"
-              placeholder="Enter password"
+              placeholder="Your portal password"
               required
             />
           </label>
@@ -134,85 +134,26 @@
             Remember this device for faster sign-in next time
           </label>
 
-          <section class="section-head">
-            <h2>House details</h2>
+          <section class="resident-home-picker">
+            <h2>Choose your home</h2>
+            <p>Choose the building and house management assigned to you. They must match your tenant records.</p>
+            <div class="field-grid">
+              <label>
+                Building
+                <select id="auth-building-id"></select>
+              </label>
+              <label>
+                House number
+                <input id="auth-house-number" type="text" maxlength="24" placeholder="A-12" />
+              </label>
+            </div>
           </section>
-
-          <div class="field-grid">
-            <label>
-              Building
-              <select id="auth-building-id"></select>
-            </label>
-            <label>
-              House Number
-              <input
-                id="auth-house-number"
-                type="text"
-                maxlength="24"
-                placeholder="A-12"
-              />
-            </label>
-          </div>
-
-          <section class="section-head">
-            <h2>Access request details</h2>
-            <p>
-              Add ID details now if ready, or complete Profile &amp; ID within
-              48 hours after signing in.
-            </p>
-          </section>
-
-          <div class="field-grid">
-            <label>
-              ID Type
-              <select id="signup-identity-type">
-                <option value="">Select ID type</option>
-                <option value="national_id">National ID</option>
-                <option value="passport">Passport</option>
-                <option value="alien_id">Alien ID</option>
-                <option value="other">Other</option>
-              </select>
-            </label>
-            <label>
-              ID Number
-              <input
-                id="signup-identity-number"
-                type="text"
-                maxlength="80"
-                placeholder="Enter ID or passport number"
-              />
-            </label>
-          </div>
-
-          <div class="field-grid">
-            <label>
-              Occupation Status
-              <select id="signup-occupation-status">
-                <option value="">Select occupation status</option>
-                <option value="employed">Employed</option>
-                <option value="self_employed">Self-employed</option>
-                <option value="student">Student</option>
-                <option value="sponsored">Sponsored</option>
-                <option value="unemployed">Unemployed</option>
-                <option value="other">Other</option>
-              </select>
-            </label>
-            <label>
-              Occupation
-              <input
-                id="signup-occupation-label"
-                type="text"
-                maxlength="120"
-                placeholder="Teacher, electrician, student, trader"
-              />
-            </label>
-          </div>
 
           <section class="resident-claim-access">
             <h3>Already added by management?</h3>
-            <p class="item-details">Verify the phone number on your tenancy to connect your existing bills and payment history. You can receive the code by SMS on any phone.</p>
+            <p class="item-details">Verify the phone number above to link your existing tenancy, bills, and payment history. We send a one-time code to that number; no new tenancy is created.</p>
             <div class="action-row">
-              <button id="resident-access-code-btn" type="button" class="ghost-btn">Send verification code</button>
+              <button id="resident-access-code-btn" type="button" class="ghost-btn">Verify phone and claim access</button>
             </div>
             <div id="resident-access-claim-fields" class="hidden">
               <label>SMS verification code<input id="resident-access-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="6-digit code" /></label>
@@ -220,11 +161,53 @@
               <button id="resident-access-claim-btn" type="button">Verify and open my house</button>
             </div>
           </section>
-          <div class="action-row auth-request-actions">
-            <button id="resident-signup-btn" type="button" class="ghost-btn">
-              Request Access
-            </button>
-          </div>
+
+          <details class="resident-access-request">
+            <summary>Not added by management yet? Request access</summary>
+            <p class="item-details">This creates an access request for management to review. It does not start billing or create a tenancy.</p>
+            <section class="section-head">
+              <h2>Optional profile details</h2>
+              <p>Add ID details now if ready, or complete Profile &amp; ID after signing in.</p>
+            </section>
+            <div class="field-grid">
+              <label>
+                ID Type
+                <select id="signup-identity-type">
+                  <option value="">Select ID type</option>
+                  <option value="national_id">National ID</option>
+                  <option value="passport">Passport</option>
+                  <option value="alien_id">Alien ID</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label>
+                ID Number
+                <input id="signup-identity-number" type="text" maxlength="80" placeholder="Enter ID or passport number" />
+              </label>
+            </div>
+            <div class="field-grid">
+              <label>
+                Occupation Status
+                <select id="signup-occupation-status">
+                  <option value="">Select occupation status</option>
+                  <option value="employed">Employed</option>
+                  <option value="self_employed">Self-employed</option>
+                  <option value="student">Student</option>
+                  <option value="sponsored">Sponsored</option>
+                  <option value="unemployed">Unemployed</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label>
+                Occupation
+                <input id="signup-occupation-label" type="text" maxlength="120" placeholder="Teacher, electrician, student, trader" />
+              </label>
+            </div>
+            <p class="item-details">Use the password field above when sending the request. Management will review it before access is approved.</p>
+            <div class="action-row auth-request-actions">
+              <button id="resident-signup-btn" type="button" class="ghost-btn">Send access request</button>
+            </div>
+          </details>
         </form>
       </section>
 

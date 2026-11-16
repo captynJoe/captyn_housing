@@ -2145,3 +2145,41 @@ input[type="radio"] {
 .rent-payment-arrangement { margin-top: 1rem; padding: 0.9rem 1rem; border: 1px solid var(--border, #2c493d); border-radius: 0.8rem; background: color-mix(in srgb, var(--surface-2, #10251d) 78%, transparent); }
 .rent-payment-arrangement p { margin: 0.35rem 0 0; }
 .resident-arrangement-missed { border-color: #b7791f; }
+
+/* Resident access: distinguish an existing tenancy claim from a new application */
+.resident-home-picker,
+.resident-claim-access,
+.resident-access-request {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid rgba(16, 35, 49, .12);
+  border-radius: 14px;
+  background: rgba(7, 49, 36, .035);
+}
+.resident-home-picker h2,
+.resident-claim-access h3 {
+  margin: 0;
+}
+.resident-home-picker p,
+.resident-claim-access p,
+.resident-access-request > p {
+  margin: 0;
+}
+.resident-claim-access {
+  border-color: rgba(0, 140, 98, .28);
+  background: rgba(0, 140, 98, .06);
+}
+.resident-claim-access #resident-access-claim-fields {
+  display: grid;
+  gap: 10px;
+}
+.resident-access-request summary {
+  cursor: pointer;
+  color: var(--accent, #008c62);
+  font-weight: 700;
+}
+.resident-access-request[open] summary {
+  margin-bottom: 4px;
+}

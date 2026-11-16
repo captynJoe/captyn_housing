@@ -16875,19 +16875,19 @@ async function bootstrap() {
       const payments = [
         ...rentPayments.map((item) => ({
           id: item.id, houseNumber: item.houseNumber, type: "Rent", amountKsh: Number(item.rentAmountKsh ?? (item.amountKsh - Number(item.depositAmountKsh ?? 0))),
-          provider: item.provider, paidAt: item.paidAt, collectedByName: item.collectedByName || (item.source === "mpesa" ? "Online M-PESA" : "Unknown")
+          provider: item.provider, paidAt: item.paidAt, collectedByName: item.collectedByName || (item.source === "mpesa" ? "Online M-PESA" : "Unknown"), collectionDestination: item.collectionDestination
         })),
         ...utilityPayments.map((item) => ({
           id: item.id, houseNumber: item.houseNumber, type: item.utilityType === "water" ? "Water" : "Electricity", amountKsh: Number(item.amountKsh ?? 0),
-          provider: item.provider, paidAt: item.paidAt, collectedByName: item.collectedByName || (item.source === "mpesa" ? "Online M-PESA" : "Unknown")
+          provider: item.provider, paidAt: item.paidAt, collectedByName: item.collectedByName || (item.source === "mpesa" ? "Online M-PESA" : "Unknown"), collectionDestination: item.collectionDestination
         })),
         ...rentPayments.filter((item) => Number(item.depositAmountKsh ?? 0) > 0).map((item) => ({
           id: `${item.id}:deposit`, houseNumber: item.houseNumber, type: "Rent deposit", amountKsh: Number(item.depositAmountKsh ?? 0),
-          provider: item.provider, paidAt: item.paidAt, collectedByName: item.collectedByName || (item.source === "mpesa" ? "Online M-PESA" : "Unknown")
+          provider: item.provider, paidAt: item.paidAt, collectedByName: item.collectedByName || (item.source === "mpesa" ? "Online M-PESA" : "Unknown"), collectionDestination: item.collectionDestination
         })),
         ...approvedDeposits.map((item) => ({
           id: item.id, houseNumber: item.houseNumber, type: item.paymentType === "rent_deposit" ? "Rent deposit" : "Utility deposit", amountKsh: Number(item.amountKsh ?? 0),
-          provider: item.provider, paidAt: item.paidAt, collectedByName: item.receivedByName || "Unknown"
+          provider: item.provider, paidAt: item.paidAt, collectedByName: item.receivedByName || "Unknown", collectionDestination: undefined
         }))
       ].filter((item) => item.amountKsh > 0).sort((a, b) => b.paidAt.localeCompare(a.paidAt));
       const expenses = [...buildingExpenditures.values()].filter((item) => item.buildingId === buildingId && inMonth(item.paidAt || item.createdAt));
@@ -16908,7 +16908,11 @@ async function bootstrap() {
       const expenseTotalKsh = expenses.reduce((sum, item) => sum + Number(item.amountKsh ?? 0), 0);
       const collectors = new Map<string, { name: string; amountKsh: number; count: number }>();
       for (const item of payments) {
-        const name = item.collectedByName || "Unknown";
+        const name = item.collectionDestination === "building_account"
+          ? "Building billing account"
+          : item.collectionDestination === "agent"
+            ? `Agent: ${item.collectedByName || "Name not recorded"}`
+            : "Not classified";
         const current = collectors.get(name) ?? { name, amountKsh: 0, count: 0 };
         current.amountKsh += item.amountKsh;
         current.count += 1;
@@ -17094,6 +17098,7 @@ async function bootstrap() {
         billingMonth: parsed.billingMonth,
         paidAt: parsed.paidAt,
         collectedByName: parsed.collectedByName,
+        collectionDestination: parsed.collectionDestination,
         source: "manual",
         paymentProfileId: buildingPaymentProfile.publicProfile?.id,
         paymentProfileName: buildingPaymentProfile.publicProfile?.name,
@@ -18349,6 +18354,38 @@ async function bootstrap() {
       }
     }
   );
+
+  app.get("/api/landlord/tenant-agreement-drafts", async (req, res, next) => {
+    try {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) return;
+      if (context.role === "caretaker") {
+        return res.status(403).json({ error: "House manager accounts cannot manage tenant move-in drafts." });
+      }
+      if (!userAccountService) {
+        return res.status(503).json({ error: "User account service unavailable. Database connection is required." });
+      }
+      const buildingId = typeof req.query.buildingId === "string" ? req.query.buildingId.trim() : "";
+      const houseNumber = typeof req.query.houseNumber === "string"
+        ? normalizeHouseNumber(req.query.houseNumber)
+        : "";
+      if (!buildingId || !houseNumber) {
+        return res.status(400).json({ error: "Choose a building and house to load the move-in draft." });
+      }
+      const building = await store.getBuilding(buildingId);
+      if (!building) return res.status(404).json({ error: "Building not found." });
+      if (!(await canManageBuildingFromLandlordContext(context, building.id))) {
+        return res.status(403).json({ error: "Building access denied." });
+      }
+      const data = await userAccountService.getTenantAgreementDraft({
+        buildingId: building.id,
+        houseNumber
+      });
+      return res.json({ data, role: context.role });
+    } catch (error) {
+      return next(error);
+    }
+  });
 
   app.post("/api/landlord/tenant-agreement-drafts", async (req, res, next) => {
     try {

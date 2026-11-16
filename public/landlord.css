@@ -4221,3 +4221,322 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
 @media (max-width: 760px) {
   .performance-cards, .performance-breakdowns { grid-template-columns: 1fr; }
 }
+
+/* Building performance: chart-led dashboard */
+.performance-controls {
+  display: grid;
+  gap: 10px;
+}
+.performance-controls .inline-fields {
+  align-items: end;
+}
+.performance-comparison-card {
+  display: grid;
+  gap: 5px;
+  min-height: 62px;
+  padding: 10px 14px;
+  border: 1px solid var(--border, #2c493d);
+  border-radius: 12px;
+  background: rgba(9, 32, 24, .55);
+}
+.performance-comparison-card strong {
+  font-size: .78rem;
+  color: var(--muted, #91aaa0);
+}
+.performance-comparison-card span {
+  color: var(--text, #f2f7f4);
+  font-size: .9rem;
+}
+.performance-explainer summary,
+.performance-records summary {
+  cursor: pointer;
+  color: var(--accent, #00a77b);
+  font-weight: 700;
+}
+.performance-explainer p {
+  margin-bottom: 0;
+}
+.performance-cards {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.performance-cards .resident-overview-card {
+  min-width: 0;
+}
+.performance-cards .resident-overview-card strong {
+  overflow-wrap: anywhere;
+}
+.performance-primary-card {
+  border-color: rgba(0, 190, 132, .65);
+  box-shadow: inset 0 0 0 1px rgba(0, 190, 132, .14);
+}
+.performance-change {
+  color: var(--muted, #91aaa0);
+}
+.performance-change.is-positive {
+  color: #35c98a;
+}
+.performance-change.is-negative {
+  color: #f38d7d;
+}
+.performance-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 14px 0;
+}
+.performance-chart-card {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+}
+.performance-chart-card header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.performance-chart-card header h3 {
+  margin: 0 0 4px;
+}
+.performance-chart-card header p {
+  margin: 0;
+}
+.performance-daily-card {
+  grid-column: 1 / -1;
+}
+.performance-chart {
+  width: 100%;
+  min-height: 190px;
+  color: var(--muted, #91aaa0);
+  font-size: .9rem;
+}
+.performance-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.performance-grid-line {
+  stroke: rgba(135, 164, 151, .2);
+  stroke-width: 1;
+}
+.performance-axis-label {
+  fill: var(--muted, #91aaa0);
+  font-size: 11px;
+}
+.performance-daily-bar {
+  fill: #3189e5;
+}
+.performance-daily-bar:hover {
+  fill: #62adff;
+}
+.performance-average-line {
+  fill: none;
+  stroke: #ff7043;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.performance-hour-bar {
+  fill: #3189e5;
+}
+.performance-hour-bar.is-busiest {
+  fill: #26bf83;
+}
+.performance-chart-legend {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  color: var(--muted, #91aaa0);
+  font-size: .75rem;
+}
+.performance-chart-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.performance-chart-legend .legend-bar {
+  background: #3189e5;
+}
+.performance-chart-legend .legend-line {
+  width: 18px;
+  height: 2px;
+  border-radius: 0;
+  background: #ff7043;
+}
+.performance-bar-list {
+  display: grid;
+  gap: 12px;
+  padding: 4px 0;
+}
+.performance-bar-row {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.performance-bar-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: .88rem;
+}
+.performance-bar-heading strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.performance-bar-heading span {
+  flex: 0 0 auto;
+  font-weight: 700;
+}
+.performance-bar-row small {
+  color: var(--muted, #91aaa0);
+  font-size: .74rem;
+}
+.performance-bar-track {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: rgba(126, 155, 143, .18);
+}
+.performance-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #3189e5;
+}
+.performance-bar-fill.is-type-bar {
+  background: #25bc83;
+}
+.performance-bar-fill.is-collector-bar {
+  background: #428de4;
+}
+.performance-bar-fill.is-cost-bar {
+  background: #ff9a55;
+}
+.performance-empty-chart {
+  align-content: center;
+  min-height: 130px;
+  color: var(--muted, #91aaa0);
+}
+.performance-records {
+  margin-top: 14px;
+}
+.performance-records .table-wrap {
+  margin-top: 12px;
+}
+@media (max-width: 900px) {
+  .performance-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .performance-cards,
+  .performance-charts-grid {
+    grid-template-columns: 1fr;
+  }
+  .performance-daily-card {
+    grid-column: auto;
+  }
+  .performance-chart-card header {
+    display: grid;
+  }
+  .performance-chart-legend {
+    order: 1;
+  }
+}
+
+/* Tenant lifecycle and guided move-in */
+.tenant-workspace-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 10px 0 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(0, 167, 123, .28);
+  border-radius: 14px;
+  background: rgba(0, 167, 123, .07);
+}
+.tenant-workspace-callout strong {
+  display: block;
+  margin-bottom: 3px;
+}
+.tenant-workspace-callout p {
+  margin: 0;
+  color: var(--muted, #70818a);
+  font-size: .88rem;
+}
+.tenant-workspace-callout button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.tenant-workspace-callout button span {
+  color: var(--accent, #00a77b);
+}
+.direct-tenant-wizard {
+  gap: 16px;
+}
+.direct-tenant-intro {
+  margin: 0;
+  color: var(--muted, #70818a);
+  line-height: 1.5;
+}
+.direct-tenant-step {
+  display: grid;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid var(--border, #2c493d);
+  border-radius: 14px;
+}
+.direct-tenant-step h3 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+}
+.direct-tenant-step h3 span {
+  display: inline-grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--accent, #00a77b);
+  font-size: .78rem;
+}
+.direct-tenant-step p {
+  margin: 0;
+  line-height: 1.45;
+}
+.direct-tenant-activation {
+  background: rgba(0, 167, 123, .06);
+}
+.direct-tenant-activation button {
+  width: 100%;
+}
+@media (max-width: 640px) {
+  .tenant-workspace-callout {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .tenant-workspace-callout button {
+    width: 100%;
+  }
+}
+.direct-tenant-final-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+  gap: 10px;
+}
+.direct-tenant-final-actions button {
+  width: 100%;
+}
+@media (max-width: 520px) {
+  .direct-tenant-final-actions {
+    grid-template-columns: 1fr;
+  }
+}

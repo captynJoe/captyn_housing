@@ -12,6 +12,8 @@ export const incidentStatusSchema = z.enum([
 const nonEmptyString = z.string().trim().min(1);
 const optionalStringList = z.array(nonEmptyString).default([]);
 const mediaAssetUrlSchema = z.string().trim().url().max(4_096);
+export const collectionDestinationSchema = z.enum(["building_account", "agent"]);
+
 const emptyStringToUndefined = (value: unknown) => {
   if (typeof value !== "string") {
     return value;
@@ -496,8 +498,13 @@ export const recordUtilityPaymentSchema = z.object({
   provider: utilityPaymentProviderSchema.default("mpesa"),
   providerReference: z.string().trim().max(120).optional(),
   paidAt: z.string().datetime().optional(),
+  collectionDestination: collectionDestinationSchema.optional(),
   collectedByName: z.string().trim().max(120).optional(),
   note: z.string().trim().max(280).optional()
+}).superRefine((value, context) => {
+  if (value.collectionDestination === "agent" && !value.collectedByName?.trim()) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["collectedByName"], message: "Enter the agent who received this payment." });
+  }
 });
 
 export const residentPaymentReportSchema = z
@@ -1418,8 +1425,13 @@ export const recordAdminRentPaymentSchema = z.object({
   providerReference: nonEmptyString.max(120).optional(),
   billingMonth: billingMonthSchema.optional(),
   paidAt: z.string().datetime().optional(),
+  collectionDestination: collectionDestinationSchema.optional(),
   collectedByName: z.string().trim().max(120).optional(),
   phoneNumber: kenyaPhoneSchema.optional()
+}).superRefine((value, context) => {
+  if (value.collectionDestination === "agent" && !value.collectedByName?.trim()) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["collectedByName"], message: "Enter the agent who received this payment." });
+  }
 });
 
 export const updateRentPaymentAllocationSchema = z.object({

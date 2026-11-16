@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=044c9c08af" />
-    <link rel="stylesheet" href="/landlord.css?v=bf2c50b078" />
+    <link rel="stylesheet" href="/landlord.css?v=e3a3e4541f" />
     <script src="/captyn-theme.js?v=6944e37fb6"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=d9fd4fe626" />
     <link rel="stylesheet" href="/landlord-shell.css?v=ef1318231c" />
@@ -96,13 +96,13 @@
         <aside class="lh-sidebar" aria-label="Management workspace">
           <nav class="lh-nav" aria-label="Landlord sections">
             <button type="button" class="lh-nav-btn" data-landlord-view="overview" data-landlord-section-target="overview-collections-panel">Dashboard</button>
-            <button type="button" class="lh-nav-btn" data-landlord-view="tenants" data-landlord-section-target="residents-section">Houses</button>
+            <button type="button" class="lh-nav-btn" data-landlord-view="tenants" data-landlord-section-target="residents-section">Tenants &amp; Units</button>
             <button type="button" class="lh-nav-btn" data-landlord-view="rent" data-landlord-section-target="overview-rent-status-section">Rent</button>
             <button type="button" class="lh-nav-btn" data-landlord-view="performance" data-landlord-section-target="building-performance-section">Performance</button>
             <button type="button" class="lh-nav-btn" data-landlord-view="reports" data-landlord-section-target="collections-report-section">Collections</button>
             <button type="button" class="lh-nav-btn" data-landlord-view="balances" data-landlord-section-target="balances-section">Balances</button>
             <button type="button" class="lh-nav-btn" data-landlord-view="applications" data-landlord-section-target="applications-section">
-              <span class="landlord-nav-label">Requests</span>
+              <span class="landlord-nav-label">Access requests</span>
               <span id="applications-nav-badge" class="lh-count-badge hidden" aria-live="polite"></span>
             </button>
             <button type="button" class="lh-nav-btn" data-landlord-view="meters" data-landlord-section-target="utilities-registry-section">Meters</button>
@@ -775,7 +775,7 @@
           id="applications-section"
         >
           <div class="panel-head">
-            <h2>Tenant Applications</h2>
+            <div><h2>Resident access requests</h2><p class="status-text">Review applications from residents who are not yet attached to an active tenancy.</p></div>
             <div class="action-row">
               <label>
                 Status
@@ -868,6 +868,15 @@
                 </label>
               </div>
               <div class="inline-fields compact-fields">
+                <label>Paid to
+                  <select id="rent-payment-destination" required>
+                    <option value="building_account">Building billing account</option>
+                    <option value="agent">Agent</option>
+                  </select>
+                </label>
+                <label>Collected by<input id="rent-payment-collected-by" type="text" maxlength="120" placeholder="Agent name, if applicable" /></label>
+              </div>
+              <div class="inline-fields compact-fields">
                 <label>
                   Deposit part (KSh)
                   <input id="rent-payment-deposit-amount" type="number" min="0" step="1" value="0" />
@@ -929,29 +938,32 @@
             </div>
             <button id="refresh-building-performance" type="button">Refresh</button>
           </div>
-          <div class="package-card">
+          <div class="package-card performance-controls">
             <div class="inline-fields compact-fields">
               <label>Building<select id="building-performance-building"></select></label>
               <label>Month<input id="building-performance-month" type="month" /></label>
+              <div class="performance-comparison-card"><strong>Compared with last month</strong><span id="performance-month-comparison">Select a month to compare collections.</span></div>
             </div>
-            <p class="status-text">Collections include rent, utilities, and deposits. Deposits are shown separately from rent income. Agent salaries and commissions belong in Costs with the agent's name as the payee. A transfer of collected funds from an agent to the owner is not new income or an expense. Older records without collection or payee details appear as Unknown.</p>
-          </div>
-          <div class="package-card performance-comparison-card">
-            <strong>Collections vs previous month</strong>
-            <span id="performance-month-comparison">Select a month to compare collections.</span>
+            <details class="performance-explainer"><summary>How to read these figures</summary><p class="status-text">Collections include rent, utilities, and deposits. Deposits are shown separately from rent income. Agent salaries and commissions belong in Costs with the agent's name as the payee. A transfer of collected funds from an agent to the owner is not new income or an expense. Older records without collection or payee details appear as Unknown.</p></details>
           </div>
           <div class="resident-overview-cards performance-cards">
-            <article class="resident-overview-card"><span>Total received</span><strong id="performance-total-received">-</strong><small id="performance-payment-count">-</small></article>
+            <article class="resident-overview-card performance-primary-card"><span>Total received</span><strong id="performance-total-received">-</strong><small id="performance-payment-count">-</small><small id="performance-total-change" class="performance-change"></small></article>
+            <article class="resident-overview-card"><span>Operating costs</span><strong id="performance-expenses">-</strong><small id="performance-expense-count">-</small></article>
+            <article class="resident-overview-card"><span>Cash after costs</span><strong id="performance-net">-</strong></article>
             <article class="resident-overview-card"><span>Rent received</span><strong id="performance-rent-received">-</strong></article>
             <article class="resident-overview-card"><span>Utilities received</span><strong id="performance-utilities-received">-</strong></article>
             <article class="resident-overview-card"><span>Deposits received</span><strong id="performance-deposits-received">-</strong></article>
-            <article class="resident-overview-card"><span>Operating costs</span><strong id="performance-expenses">-</strong><small id="performance-expense-count">-</small></article>
-            <article class="resident-overview-card"><span>Cash after costs</span><strong id="performance-net">-</strong></article>
+            <article class="resident-overview-card"><span>Average payment</span><strong id="performance-average-payment">-</strong></article>
             <article class="resident-overview-card"><span>Agent remittances to owner</span><strong id="performance-remitted">-</strong><small id="performance-remittance-count">-</small></article>
+            <article class="resident-overview-card"><span>Busiest collection hour</span><strong id="performance-busiest-hour">-</strong><small id="performance-busiest-hour-count"></small></article>
           </div>
-          <div class="performance-breakdowns">
-            <div class="package-card"><h3>Collections by recipient</h3><p class="status-text">Based on the person entered when the payment was recorded.</p><div id="performance-collectors" class="stack-list"></div></div>
-            <div class="package-card"><h3>Costs by category and payee</h3><div id="performance-expense-breakdown" class="stack-list"></div></div>
+          <div class="performance-charts-grid">
+            <article class="package-card performance-chart-card performance-daily-card"><header><div><h3>Daily collections</h3><p class="status-text">Amount received each day, with a 7-day average.</p></div><span class="performance-chart-legend"><i class="legend-bar"></i> Daily <i class="legend-line"></i> 7-day average</span></header><div id="performance-daily-chart" class="performance-chart" role="img" aria-label="Daily collections chart"></div></article>
+            <article class="package-card performance-chart-card"><header><div><h3>When payments arrive</h3><p class="status-text">Payment count by hour of day.</p></div></header><div id="performance-hourly-chart" class="performance-chart performance-hourly-chart" role="img" aria-label="Payments by hour chart"></div></article>
+            <article class="package-card performance-chart-card"><header><div><h3>Collections by type</h3><p class="status-text">See how much came from rent, utilities, and deposits.</p></div></header><div id="performance-type-chart" class="performance-bar-list"></div></article>
+            <article class="package-card performance-chart-card"><header><div><h3>Collections by recipient</h3><p class="status-text">Shows funds paid to the building billing account or collected by each named agent.</p></div></header><div id="performance-collectors" class="performance-bar-list"></div></article>
+            <article class="package-card performance-chart-card"><header><div><h3>Costs by category</h3><p class="status-text">Operating costs recorded during this month.</p></div></header><div id="performance-cost-chart" class="performance-bar-list"></div></article>
+            <article class="package-card performance-chart-card"><header><div><h3>Cost details</h3><p class="status-text">Category and payee for each recorded cost.</p></div></header><div id="performance-expense-breakdown" class="stack-list"></div></article>
           </div>
           <div class="performance-breakdowns">
             <form id="agent-remittance-form" class="package-card">
@@ -970,9 +982,12 @@
             </form>
             <div class="package-card"><h3>Agent remittance history</h3><div id="performance-remittances" class="stack-list"></div></div>
           </div>
-          <div class="table-wrap">
-            <table><thead><tr><th>Date</th><th>House</th><th>Type</th><th>Amount</th><th>Method</th><th>Collected by</th></tr></thead><tbody id="performance-payments-body"></tbody></table>
-          </div>
+          <details class="package-card performance-records">
+            <summary>Payment records for this month</summary>
+            <div class="table-wrap">
+              <table><thead><tr><th>Date</th><th>House</th><th>Type</th><th>Amount</th><th>Method</th><th>Paid to</th><th>Collected by</th></tr></thead><tbody id="performance-payments-body"></tbody></table>
+            </div>
+          </details>
         </section>
 
         <section
@@ -1169,7 +1184,7 @@
           id="residents-section"
         >
           <div class="panel-head">
-            <h2>House Ledger</h2>
+            <div><h2>Tenants &amp; Units</h2><p class="status-text">Manage active tenancies, vacant units, billing, and resident portal access.</p></div>
             <div class="action-row">
               <label>
                 Building
@@ -1198,7 +1213,7 @@
                   placeholder="Name, phone, house, status"
                 />
               </label>
-              <button id="open-direct-tenant-drawer-btn" type="button">Add Tenant</button>
+              <button id="open-direct-tenant-drawer-btn" type="button">Start a move-in</button>
               <details class="lh-more-menu">
                 <summary>More</summary>
                 <div class="lh-more-menu-list">
@@ -1216,6 +1231,13 @@
               />
               <button id="refresh-residents" type="button" class="hidden">Refresh</button>
             </div>
+          </div>
+          <div class="tenant-workspace-callout">
+            <div>
+              <strong>Resident access requests</strong>
+              <p>Review residents who requested to join a unit. A management-created tenancy is already active; its tenant can claim portal access by verifying their phone.</p>
+            </div>
+            <button type="button" data-open-access-requests>Review requests<span id="tenant-workspace-request-count"></span></button>
           </div>
           <div id="residents-overview" class="resident-overview-cards"></div>
           <p id="residents-search-summary" class="status-text"></p>
@@ -1391,9 +1413,15 @@
                 Paid At (optional)
                 <input id="utility-payment-paid-at" type="datetime-local" />
               </label>
+              <label>Paid to
+                <select id="utility-payment-destination" required>
+                  <option value="building_account">Building billing account</option>
+                  <option value="agent">Agent</option>
+                </select>
+              </label>
               <label>
                 Collected by (optional)
-                <input id="utility-payment-collected-by" type="text" maxlength="120" placeholder="Agent or staff name" />
+                <input id="utility-payment-collected-by" type="text" maxlength="120" placeholder="Agent name, if applicable" />
               </label>
             </div>
             <div class="inline-fields compact-fields">
@@ -1851,7 +1879,8 @@
           </div>
 
           <div class="inline-fields compact-fields">
-            <label>Collected by (optional)<input name="collectedByName" type="text" maxlength="120" placeholder="Agent or staff name" /></label>
+            <label>Paid to<select name="collectionDestination" required><option value="building_account">Building billing account</option><option value="agent">Agent</option></select></label>
+            <label>Collected by (optional)<input name="collectedByName" type="text" maxlength="120" placeholder="Agent name, if applicable" /></label>
             <label>Receipt / Note (optional)
             <input
               id="overview-utility-payment-reference"
@@ -2138,95 +2167,105 @@
         aria-label="Add tenant"
       >
         <header class="landlord-drawer-head">
-          <h2>Add Tenant</h2>
+          <h2>Start a move-in</h2>
           <button id="close-direct-tenant-drawer-btn" type="button" class="ghost-btn">
             Close
           </button>
         </header>
-        <form id="direct-tenant-form" class="package-card landlord-drawer-form">
-          <label>
-            Building
-            <select id="direct-tenant-building" required></select>
-          </label>
+        <form id="direct-tenant-form" class="package-card landlord-drawer-form direct-tenant-wizard">
+          <p class="direct-tenant-intro">Create the tenancy now. The tenant does not need to be present; they can claim portal access later with an SMS code sent to this phone.</p>
 
-          <div class="inline-fields compact-fields">
+          <section class="direct-tenant-step">
+            <h3><span>1</span> Unit and resident</h3>
             <label>
-              House No.
-              <input
-                id="direct-tenant-house"
-                type="text"
-                maxlength="24"
-                placeholder="A10"
-                required
-              />
+              Building
+              <select id="direct-tenant-building" required></select>
             </label>
+            <div class="inline-fields compact-fields">
+              <label>
+                House No.
+                <input id="direct-tenant-house" type="text" maxlength="24" placeholder="A10" required />
+              </label>
+              <label>
+                Tenant name
+                <input id="direct-tenant-name" type="text" maxlength="120" placeholder="Jane Wanjiku" autocomplete="name" required />
+              </label>
+            </div>
+            <div class="inline-fields compact-fields">
+              <label>
+                Phone number
+                <input id="direct-tenant-phone" type="tel" maxlength="20" placeholder="0712345678" autocomplete="tel" required />
+              </label>
+              <label>
+                ID type (optional)
+                <select id="direct-tenant-id-type">
+                  <option value="national_id">National ID</option>
+                  <option value="passport">Passport</option>
+                  <option value="alien_id">Alien ID</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+            </div>
             <label>
-              Tenant Name
-              <input
-                id="direct-tenant-name"
-                type="text"
-                maxlength="120"
-                placeholder="Jane Wanjiku"
-                autocomplete="name"
-                required
-              />
+              ID number (optional)
+              <input id="direct-tenant-id-number" type="text" maxlength="80" placeholder="Can be added later" autocomplete="off" />
             </label>
-          </div>
+          </section>
 
-          <div class="inline-fields compact-fields">
+          <section class="direct-tenant-step">
+            <h3><span>2</span> Lease and billing</h3>
+            <div class="inline-fields compact-fields">
+              <label>
+                Monthly rent (KSh)
+                <input id="direct-tenant-monthly-rent" type="number" min="0" max="10000000" step="1" placeholder="Use building or house setup" />
+              </label>
+              <label>
+                Deposit required (KSh)
+                <input id="direct-tenant-deposit" type="number" min="0" max="10000000" step="1" placeholder="Optional" />
+              </label>
+            </div>
+            <div class="inline-fields compact-fields">
+              <label>
+                Lease starts
+                <input id="direct-tenant-lease-start" type="date" />
+              </label>
+              <label>
+                Lease ends (optional)
+                <input id="direct-tenant-lease-end" type="date" />
+              </label>
+            </div>
+            <div class="inline-fields compact-fields">
+              <label>
+                Billing starts
+                <input id="direct-tenant-billing-start" type="date" required />
+              </label>
+              <label>
+                Rent due day (optional)
+                <input id="direct-tenant-due-day" type="number" min="1" max="31" step="1" placeholder="Building default" />
+              </label>
+            </div>
             <label>
-              Phone Number
-              <input
-                id="direct-tenant-phone"
-                type="tel"
-                maxlength="20"
-                placeholder="0712345678"
-                autocomplete="tel"
-                required
-              />
+              Agreement note (optional)
+              <textarea id="direct-tenant-note" rows="3" maxlength="1200" placeholder="Special terms the tenant should review"></textarea>
             </label>
-            <label>
-              ID Type (optional)
-              <select id="direct-tenant-id-type">
-                <option value="national_id">National ID</option>
-                <option value="passport">Passport</option>
-                <option value="alien_id">Alien ID</option>
-                <option value="other">Other</option>
-              </select>
-            </label>
-          </div>
+            <p class="status-text">Use the billing start date agreed with the tenant. A future start date keeps scheduled billing paused until then.</p>
+          </section>
 
-          <label>
-            ID Number (optional)
-            <input
-              id="direct-tenant-id-number"
-              type="text"
-              maxlength="80"
-              placeholder="Add later if unavailable"
-              autocomplete="off"
-            />
-          </label>
-
-          <label>
-            Note
-            <input
-              id="direct-tenant-note"
-              type="text"
-              maxlength="280"
-              placeholder="Optional onboarding note"
-            />
-          </label>
-
-          <p id="direct-tenant-status" class="status-text">
-            Add the tenant and start billing now. They can set up portal access later by verifying this phone number.
-          </p>
-          <button id="direct-tenant-submit-btn" type="submit">Add Tenant</button>
+          <section class="direct-tenant-step direct-tenant-activation">
+            <h3><span>3</span> Activate tenancy</h3>
+            <p>Activation reserves the unit for this tenant and links the lease and billing records. Portal access can be claimed later; it does not create a second tenancy.</p>
+            <p id="direct-tenant-status" class="status-text">Review the unit, tenant phone, and billing start date before activating.</p>
+            <div class="direct-tenant-final-actions">
+              <button id="direct-tenant-save-draft-btn" type="button" class="ghost-btn">Save as move-in draft</button>
+              <button id="direct-tenant-submit-btn" type="submit">Activate tenancy &amp; start billing</button>
+            </div>
+          </section>
         </form>
       </aside>
 
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=660c0303c7"></script>
+    <script type="module" src="/landlord.js?v=990f0bb380"></script>
   </body>
 </html>

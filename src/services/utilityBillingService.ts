@@ -11,9 +11,11 @@ export const UTILITY_LEGACY_BUILDING_ID = "__LEGACY__";
 const UTILITY_BALANCE_VISIBILITY_WINDOW_DAYS = 7;
 type UtilityPaymentProvider = "mpesa" | "cash" | "bank" | "card" | "deposit_credit";
 type UtilityPaymentSource = "manual" | "resident" | "mpesa" | "settlement";
+type CollectionDestination = "building_account" | "agent";
 type InternalRecordUtilityPaymentInput = Omit<RecordUtilityPaymentInput, "provider"> & {
   provider: UtilityPaymentProvider;
   source?: UtilityPaymentSource;
+  collectionDestination?: CollectionDestination;
   collectedByName?: string;
 };
 
@@ -38,6 +40,7 @@ export interface UtilityPaymentEvent {
   note?: string;
   createdAt: string;
   source?: UtilityPaymentSource;
+  collectionDestination?: CollectionDestination;
   collectedByName?: string;
 }
 
@@ -2010,6 +2013,7 @@ export class UtilityBillingService {
         note: input.note?.trim() || undefined,
         createdAt,
         source: input.source,
+        collectionDestination: input.collectionDestination ?? (input.source === "mpesa" ? "building_account" : undefined),
         collectedByName: input.collectedByName?.trim() || undefined
       };
 
@@ -2662,6 +2666,7 @@ export class UtilityBillingService {
       note: input.note?.trim() || undefined,
       createdAt: nowIso(),
       source: input.source,
+      collectionDestination: input.collectionDestination ?? (input.source === "mpesa" ? "building_account" : undefined),
       collectedByName: input.collectedByName?.trim() || undefined
     };
   }

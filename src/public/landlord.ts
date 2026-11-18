@@ -397,6 +397,7 @@ const performanceBuildingEl = document.getElementById("building-performance-buil
 const performanceMonthEl = document.getElementById("building-performance-month");
 const performanceSummaryEl = document.getElementById("building-performance-summary");
 const performanceMonthComparisonEl = document.getElementById("performance-month-comparison");
+const exportBuildingPerformanceBtnEl = document.getElementById("export-building-performance");
 const performanceDailyChartEl = document.getElementById("performance-daily-chart");
 const performanceHourlyChartEl = document.getElementById("performance-hourly-chart");
 const performanceTypeChartEl = document.getElementById("performance-type-chart");
@@ -10431,9 +10432,12 @@ async function loadCollectionsReport() {
   renderCollectionsReport();
 }
 
+function escapeCsv(value) {
+  return `"${String(value ?? "").replace(/"/g, '""')}"`;
+}
+
 function exportCollectionsReportCsv() {
   const rows = getCollectionsReportRows();
-  const escapeCsv = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
   const lines = [
     ["Building", "House", "Resident", "Amount KSh", "Paid on", "Method", "Reference"],
     ...rows.map((item) => [
@@ -10453,6 +10457,85 @@ function exportCollectionsReportCsv() {
   link.download = `collections-report-${collectionsReportFromEl?.value || "all"}-to-${collectionsReportToEl?.value || "all"}.csv`;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function exportBuildingPerformanceCsv(data) {
+  const buildingName = getBuildingDisplayNameById(data.buildingId, data.buildingId || "-");
+  const lines = [];
+  const appendSection = (title, headers, rows) => {
+    if (lines.length) lines.push("");
+    lines.push(escapeCsv(title));
+    lines.push(headers.map(escapeCsv).join(","));
+    rows.forEach((row) => lines.push(row.map(escapeCsv).join(",")));
+  };
+  const payments = Array.isArray(data.payments) ? data.payments : [];
+  const expenses = Array.isArray(data.expenses) ? data.expenses : [];
+  const remittances = Array.isArray(data.remittances) ? data.remittances : [];
+  const disbursements = Array.isArray(data.agentDisbursements) ? data.agentDisbursements : [];
+  const settlements = Array.isArray(data.agentAdvanceSettlements) ? data.agentAdvanceSettlements : [];
+  const reconciliation = Array.isArray(data.agentReconciliation) ? data.agentReconciliation : [];
+
+  appendSection("Report", ["Building", "Month"], [[buildingName, data.month]]);
+  appendSection("Summary", ["Metric", "Value"], [
+    ["Total received (KSh)", data.totalReceivedKsh],
+    ["Rent received (KSh)", data.rentReceivedKsh],
+    ["Utilities received (KSh)", data.utilitiesReceivedKsh],
+    ["Deposits received (KSh)", data.depositsReceivedKsh],
+    ["Operating costs (KSh)", data.expenseTotalKsh],
+    ["Cash after costs (KSh)", data.netAfterCostsKsh],
+    ["Agent remittances to owner (KSh)", data.remittedToOwnerKsh],
+    ["Money sent to agents (KSh)", data.agentDisbursementTotalKsh],
+    ["Outstanding agent advances (KSh)", data.agentAdvanceOutstandingKsh],
+    ["Payment entries", data.paymentCount],
+    ["Cost entries", data.expenseCount],
+    ["Remittance transfers", remittances.length],
+    ["Agent payments", data.agentDisbursementCount]
+  ]);
+  appendSection("Payments", ["Paid at", "House", "Type", "Amount KSh", "Method", "Paid to", "Collected by"], payments.map((item) => [
+    item.paidAt, item.houseNumber, item.type, item.amountKsh, item.provider,
+    item.collectionDestination === "building_account" ? "Building account" : item.collectionDestination === "agent" ? "Agent" : "Unspecified",
+    item.collectedByName || "Unknown"
+  ]));
+  appendSection("Cost breakdown", ["Category", "Payee", "Amount KSh", "Entries"], expenses.map((item) => [
+    item.category, item.payeeName, item.amountKsh, item.count
+  ]));
+  appendSection("Agent reconciliation", ["Agent", "Collected KSh", "Commission KSh", "Remitted KSh", "Unreconciled KSh"], reconciliation.map((item) => [
+    item.agentName, item.collectedKsh, item.commissionKsh, item.remittedKsh, item.unreconciledKsh
+  ]));
+  appendSection("Agent remittances to owner", ["Agent", "Amount KSh", "Paid at", "Reference", "Note"], remittances.map((item) => [
+    item.agentName, item.amountKsh, item.paidAt, item.reference, item.note
+  ]));
+  appendSection("Money sent to agents", ["Agent", "Kind", "Category", "Description", "Amount KSh", "Paid at", "Outstanding KSh", "Reference", "Note"], disbursements.map((item) => [
+    item.agentName, item.kind, item.category, item.title, item.amountKsh, item.paidAt,
+    item.outstandingKsh, item.reference, item.note
+  ]));
+  appendSection("Agent advance settlements", ["Agent", "Kind", "Category", "Description", "Payee", "Amount KSh", "Paid at", "Reference", "Note"], settlements.map((item) => [
+    item.agentName, item.kind, item.category, item.title, item.payeeName,
+    item.amountKsh, item.paidAt, item.reference, item.note
+  ]));
+
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const safeBuildingName = buildingName.replace(/[^\w -]+/g, "").trim().replace(/\s+/g, "-") || "building";
+  link.href = url;
+  link.download = `performance-${safeBuildingName}-${data.month || "report"}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadBuildingPerformanceCsv() {
+  const buildingId = String(performanceBuildingEl instanceof HTMLSelectElement ? performanceBuildingEl.value : "").trim();
+  const month = String(performanceMonthEl instanceof HTMLInputElement ? performanceMonthEl.value : "").trim();
+  if (!buildingId || !month) {
+    throw new Error("Choose a building and month before exporting performance.");
+  }
+  const params = new URLSearchParams({ buildingId, month });
+  const payload = await requestJson(`/api/landlord/building-performance?${params.toString()}`);
+  if (!payload?.data) {
+    throw new Error("Performance data was not available for export.");
+  }
+  exportBuildingPerformanceCsv(payload.data);
 }
 
 async function loadPaymentCorrections() {
@@ -14748,6 +14831,14 @@ agentRemittanceFormEl?.addEventListener("submit", (event) => {
 performanceBuildingEl?.addEventListener("change", () => { void loadBuildingPerformance().catch((error) => handleLandlordError(error, "Unable to load building performance.")); });
 performanceMonthEl?.addEventListener("change", () => { void loadBuildingPerformance().catch((error) => handleLandlordError(error, "Unable to load building performance.")); });
 refreshPerformanceBtnEl?.addEventListener("click", () => { void loadBuildingPerformance().catch((error) => handleLandlordError(error, "Unable to refresh building performance.")); });
+exportBuildingPerformanceBtnEl?.addEventListener("click", () => {
+  if (!(exportBuildingPerformanceBtnEl instanceof HTMLButtonElement)) return;
+  exportBuildingPerformanceBtnEl.disabled = true;
+  void downloadBuildingPerformanceCsv()
+    .then(() => setStatus("Performance CSV exported."))
+    .catch((error) => handleLandlordError(error, "Unable to export performance."))
+    .finally(() => { exportBuildingPerformanceBtnEl.disabled = false; });
+});
 collectionsReportFromEl?.addEventListener("change", renderCollectionsReport);
 collectionsReportToEl?.addEventListener("change", renderCollectionsReport);
 exportCollectionsReportBtnEl?.addEventListener("click", exportCollectionsReportCsv);

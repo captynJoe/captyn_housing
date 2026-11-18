@@ -1303,10 +1303,71 @@ export const landlordAssignCaretakerSchema = z.object({
   note: z.string().trim().max(280).optional()
 });
 
+const landlordExpenditureCategorySchema = z.enum([
+  "maintenance",
+  "utilities",
+  "common_water",
+  "common_electricity",
+  "security_lighting",
+  "shared_services",
+  "cleaning",
+  "security",
+  "supplies",
+  "staff",
+  "agent_commission",
+  "other"
+]);
+
+export const landlordAgentDisbursementSchema = z.object({
+  buildingId: nonEmptyString,
+  agentName: nonEmptyString.max(120),
+  kind: z.enum(["expense", "advance"]),
+  amountKsh: z.number().positive().max(10_000_000),
+  submissionId: z.string().uuid().optional(),
+  category: landlordExpenditureCategorySchema.optional(),
+  title: z.string().trim().min(3).max(120).optional(),
+  paidAt: z.string().datetime().optional(),
+  reference: z.string().trim().max(120).optional(),
+  note: z.string().trim().max(500).optional()
+}).superRefine((value, context) => {
+  if (value.kind === "expense" && !value.category) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["category"], message: "Choose an expense category." });
+  }
+  if (value.kind === "expense" && !value.title) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["title"], message: "Enter what the payment was for." });
+  }
+  if (value.kind === "expense" && value.amountKsh > 2_000_000) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["amountKsh"], message: "Agent expenses cannot exceed KSh 2,000,000 per entry." });
+  }
+});
+
+export const landlordAgentAdvanceSettlementSchema = z.object({
+  kind: z.enum(["spent", "returned"]),
+  amountKsh: z.number().positive().max(10_000_000),
+  submissionId: z.string().uuid().optional(),
+  category: landlordExpenditureCategorySchema.optional(),
+  title: z.string().trim().min(3).max(120).optional(),
+  payeeName: z.string().trim().max(120).optional(),
+  paidAt: z.string().datetime().optional(),
+  reference: z.string().trim().max(120).optional(),
+  note: z.string().trim().max(500).optional()
+}).superRefine((value, context) => {
+  if (value.kind === "spent" && !value.category) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["category"], message: "Choose an expense category." });
+  }
+  if (value.kind === "spent" && !value.title) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["title"], message: "Enter what the agent spent the advance on." });
+  }
+  if (value.kind === "spent" && value.amountKsh > 2_000_000) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["amountKsh"], message: "Agent expenses cannot exceed KSh 2,000,000 per entry." });
+  }
+});
+
 export const landlordAgentRemittanceSchema = z.object({
   buildingId: nonEmptyString,
   agentName: nonEmptyString.max(120),
   amountKsh: z.number().positive().max(10_000_000),
+  submissionId: z.string().uuid().optional(),
   paidAt: z.string().datetime().optional(),
   reference: z.string().trim().max(120).optional(),
   note: z.string().trim().max(500).optional()
@@ -1315,19 +1376,7 @@ export const landlordAgentRemittanceSchema = z.object({
 export const landlordExpenditureCreateSchema = z.object({
   buildingId: nonEmptyString,
   houseNumber: nonEmptyString.max(24).optional(),
-  category: z.enum([
-    "maintenance",
-    "utilities",
-    "common_water",
-    "common_electricity",
-    "security_lighting",
-    "shared_services",
-    "cleaning",
-    "security",
-    "supplies",
-    "staff",
-    "other"
-  ]),
+  category: landlordExpenditureCategorySchema,
   title: z.string().trim().min(3).max(120),
   amountKsh: z.number().positive().max(2_000_000),
   paidAt: z.string().datetime().optional(),

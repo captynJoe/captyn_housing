@@ -35,6 +35,7 @@ import {
   type RentLatePenaltyPolicy,
   type RentLedgerPersistedState
 } from "./services/rentLedgerService.js";
+import { getAgentAdvanceOutstandingKsh } from "./services/agentAdvanceAccounting.js";
 import {
   UtilityBillingService,
   type CombinedUtilityChargeBuildingAmount,
@@ -160,6 +161,8 @@ import {
   landlordPaymentInstructionsUpdateSchema,
   landlordExpenditureCreateSchema,
   landlordAgentRemittanceSchema,
+  landlordAgentDisbursementSchema,
+  landlordAgentAdvanceSettlementSchema,
   landlordUtilityBulkSubmissionAuditCreateSchema,
   landlordUtilityBulkSubmissionAuditFinalizeSchema,
   createRoomBillingHoldSchema,
@@ -478,6 +481,7 @@ interface BuildingExpenditureRecord {
     | "security"
     | "supplies"
     | "staff"
+    | "agent_commission"
     | "other";
   title: string;
   amountKsh: number;
@@ -491,8 +495,45 @@ interface BuildingExpenditureRecord {
   payeeName?: string;
 }
 
+interface AgentDisbursementRecord {
+  id: string;
+  submissionId?: string;
+  buildingId: string;
+  agentName: string;
+  kind: "expense" | "advance";
+  amountKsh: number;
+  paidAt: string;
+  category?: BuildingExpenditureRecord["category"];
+  title?: string;
+  reference?: string;
+  note?: string;
+  createdAt: string;
+  createdByUserId?: string;
+  createdByName?: string;
+}
+
+interface AgentAdvanceSettlementRecord {
+  id: string;
+  submissionId?: string;
+  advanceId: string;
+  buildingId: string;
+  agentName: string;
+  kind: "spent" | "returned";
+  amountKsh: number;
+  paidAt: string;
+  category?: BuildingExpenditureRecord["category"];
+  title?: string;
+  payeeName?: string;
+  reference?: string;
+  note?: string;
+  createdAt: string;
+  createdByUserId?: string;
+  createdByName?: string;
+}
+
 interface AgentRemittanceRecord {
   id: string;
+  submissionId?: string;
   buildingId: string;
   agentName: string;
   amountKsh: number;
@@ -507,13 +548,16 @@ interface AgentRemittanceRecord {
 interface BuildingExpenditurePersistedState {
   records: BuildingExpenditureRecord[];
   agentRemittances?: AgentRemittanceRecord[];
+  agentDisbursements?: AgentDisbursementRecord[];
+  agentAdvanceSettlements?: AgentAdvanceSettlementRecord[];
 }
 
 const LANDLORD_ONLY_BUILDING_EXPENSE_CATEGORIES = new Set<BuildingExpenditureRecord["category"]>([
   "common_water",
   "common_electricity",
   "security_lighting",
-  "shared_services"
+  "shared_services",
+  "agent_commission"
 ]);
 
 const isLandlordOnlyBuildingExpenseCategory = (
@@ -1413,6 +1457,8 @@ async function bootstrap() {
   >();
   const buildingExpenditures = new Map<string, BuildingExpenditureRecord>();
   const agentRemittances = new Map<string, AgentRemittanceRecord>();
+  const agentDisbursements = new Map<string, AgentDisbursementRecord>();
+  const agentAdvanceSettlements = new Map<string, AgentAdvanceSettlementRecord>();
   const residentPasswordRecoveryRequests = new Map<
     string,
     ResidentPasswordRecoveryRequestRecord
@@ -1608,13 +1654,19 @@ async function bootstrap() {
 
   let persistRuntimeQueuesState = () => {};
   let persistCaretakerAccessState = () => {};
-  let persistBuildingExpenditureState = () => {};
+  let persistBuildingExpenditureState: () => Promise<void> = async () => {};
 
   const exportBuildingExpenditureState = (): BuildingExpenditurePersistedState => ({
     records: [...buildingExpenditures.values()]
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map((item) => ({ ...item })),
     agentRemittances: [...agentRemittances.values()]
+      .sort((a, b) => b.paidAt.localeCompare(a.paidAt))
+      .map((item) => ({ ...item })),
+    agentDisbursements: [...agentDisbursements.values()]
+      .sort((a, b) => b.paidAt.localeCompare(a.paidAt))
+      .map((item) => ({ ...item })),
+    agentAdvanceSettlements: [...agentAdvanceSettlements.values()]
       .sort((a, b) => b.paidAt.localeCompare(a.paidAt))
       .map((item) => ({ ...item }))
   });
@@ -1624,6 +1676,8 @@ async function bootstrap() {
   ) => {
     buildingExpenditures.clear();
     agentRemittances.clear();
+    agentDisbursements.clear();
+    agentAdvanceSettlements.clear();
     if (!state) return;
 
     (Array.isArray(state.records) ? state.records : []).forEach((item) => {
@@ -1643,6 +1697,16 @@ async function bootstrap() {
     (Array.isArray(state.agentRemittances) ? state.agentRemittances : []).forEach((item) => {
       if (!item?.id || !item?.buildingId || !item?.agentName || !item?.paidAt || !(Number(item.amountKsh) > 0)) return;
       agentRemittances.set(item.id, { ...item, buildingId: normalizeBuildingId(item.buildingId) });
+    });
+    (Array.isArray(state.agentDisbursements) ? state.agentDisbursements : []).forEach((item) => {
+      if (!item?.id || !item?.buildingId || !item?.agentName || !item?.paidAt || !(Number(item.amountKsh) > 0)) return;
+      if (item.kind !== "expense" && item.kind !== "advance") return;
+      agentDisbursements.set(item.id, { ...item, buildingId: normalizeBuildingId(item.buildingId) });
+    });
+    (Array.isArray(state.agentAdvanceSettlements) ? state.agentAdvanceSettlements : []).forEach((item) => {
+      if (!item?.id || !item?.advanceId || !item?.buildingId || !item?.agentName || !item?.paidAt || !(Number(item.amountKsh) > 0)) return;
+      if (item.kind !== "spent" && item.kind !== "returned") return;
+      agentAdvanceSettlements.set(item.id, { ...item, buildingId: normalizeBuildingId(item.buildingId) });
     });
   };
 
@@ -4146,7 +4210,7 @@ async function bootstrap() {
         );
       };
       persistBuildingExpenditureState = () => {
-        void queuePersist(
+        return queuePersist(
           BUILDING_EXPENDITURE_STATE_KEY,
           exportBuildingExpenditureState()
         );
@@ -12673,17 +12737,233 @@ async function bootstrap() {
       const building = await store.getBuilding(parsed.buildingId);
       if (!building) return res.status(404).json({ error: "Building not found." });
       if (!(await canManageBuildingFromLandlordContext(context, building.id))) return res.status(403).json({ error: "Building access denied" });
+      if (parsed.submissionId) {
+        const existing = [...agentRemittances.values()].find((item) => item.submissionId === parsed.submissionId);
+        if (existing) {
+          const matchesRequest = existing.buildingId === building.id &&
+            existing.createdByUserId === context.userId &&
+            existing.agentName === parsed.agentName &&
+            existing.amountKsh === parsed.amountKsh &&
+            existing.reference === (parsed.reference || undefined) &&
+            existing.note === (parsed.note || undefined) &&
+            (!parsed.paidAt || existing.paidAt === parsed.paidAt);
+          if (!matchesRequest) {
+            return res.status(409).json({ error: "This remittance submission ID was already used for different details." });
+          }
+          return res.status(200).json({ data: existing, duplicate: true, role: context.role });
+        }
+      }
       const createdAt = new Date().toISOString();
       const data: AgentRemittanceRecord = {
-        id: randomUUID(), buildingId: building.id, agentName: parsed.agentName,
+        id: randomUUID(), submissionId: parsed.submissionId, buildingId: building.id, agentName: parsed.agentName,
         amountKsh: parsed.amountKsh, paidAt: parsed.paidAt ?? createdAt,
         reference: parsed.reference || undefined, note: parsed.note || undefined,
         createdAt, createdByUserId: context.userId,
         createdByName: context.userSession?.fullName || undefined
       };
       agentRemittances.set(data.id, data);
+      try {
+        await persistBuildingExpenditureState();
+      } catch (error) {
+        agentRemittances.delete(data.id);
+        throw error;
+      }
+      return res.status(201).json({ data, role: context.role });
+    } catch (error) { return next(error); }
+  });
+
+  app.delete("/api/landlord/agent-remittances/:remittanceId", async (req, res, next) => {
+    try {
+    const context = await resolveLandlordAccessContext(req, res);
+    if (!context) return;
+    if (context.role === "caretaker") return res.status(403).json({ error: "House managers cannot delete agent remittances." });
+    const remittanceId = String(req.params.remittanceId || "").trim();
+    const existing = agentRemittances.get(remittanceId);
+    if (!existing) return res.status(404).json({ error: "Agent remittance not found." });
+    const building = await store.getBuilding(existing.buildingId);
+    if (!building) return res.status(404).json({ error: "Building not found." });
+    if (!(await canManageBuildingFromLandlordContext(context, building.id))) return res.status(403).json({ error: "Building access denied." });
+
+    agentRemittances.delete(remittanceId);
+    try {
+      await persistBuildingExpenditureState();
+    } catch (error) {
+      agentRemittances.set(remittanceId, existing);
+      throw error;
+    }
+    return res.json({ data: existing, role: context.role });
+    } catch (error) { return next(error); }
+  });
+
+  app.post("/api/landlord/agent-disbursements", async (req, res, next) => {
+    try {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) return;
+      if (context.role === "caretaker") return res.status(403).json({ error: "House managers cannot record agent disbursements." });
+      const parsed = landlordAgentDisbursementSchema.parse(req.body ?? {});
+      const building = await store.getBuilding(parsed.buildingId);
+      if (!building) return res.status(404).json({ error: "Building not found." });
+      if (!(await canManageBuildingFromLandlordContext(context, building.id))) return res.status(403).json({ error: "Building access denied." });
+
+      if (parsed.submissionId) {
+        const existing = [...agentDisbursements.values()].find((item) => item.submissionId === parsed.submissionId);
+        if (existing) {
+          const matchesRequest = existing.buildingId === building.id &&
+            existing.createdByUserId === context.userId &&
+            existing.agentName === parsed.agentName &&
+            existing.kind === parsed.kind &&
+            existing.amountKsh === parsed.amountKsh &&
+            existing.category === parsed.category &&
+            existing.title === parsed.title &&
+            existing.reference === (parsed.reference || undefined) &&
+            existing.note === (parsed.note || undefined) &&
+            (!parsed.paidAt || existing.paidAt === parsed.paidAt);
+          if (!matchesRequest) {
+            return res.status(409).json({ error: "This disbursement submission ID was already used for different details." });
+          }
+          return res.status(200).json({ data: existing, duplicate: true, role: context.role });
+        }
+      }
+
+      const createdAt = new Date().toISOString();
+      const id = randomUUID();
+      const paidAt = parsed.paidAt ?? createdAt;
+      const data: AgentDisbursementRecord = {
+        id,
+        submissionId: parsed.submissionId,
+        buildingId: building.id,
+        agentName: parsed.agentName,
+        kind: parsed.kind,
+        amountKsh: parsed.amountKsh,
+        paidAt,
+        category: parsed.category,
+        title: parsed.title,
+        reference: parsed.reference || undefined,
+        note: parsed.note || undefined,
+        createdAt,
+        createdByUserId: context.userId,
+        createdByName: context.userSession?.fullName || undefined
+      };
+      if (parsed.kind === "expense") {
+        if (!parsed.category || !parsed.title) {
+          return res.status(400).json({ error: "Choose an expense category and enter what the payment was for." });
+        }
+        const expense: BuildingExpenditureRecord = {
+          id,
+          buildingId: building.id,
+          category: parsed.category,
+          title: parsed.title,
+          amountKsh: parsed.amountKsh,
+          chargeableToResident: false,
+          note: parsed.note,
+          createdAt,
+          paidAt,
+          payeeName: parsed.agentName,
+          createdByRole: context.role === "root_admin" ? "root_admin" : context.role === "admin" ? "admin" : "landlord",
+          createdByUserId: context.userId,
+          createdByName: context.userSession?.fullName || undefined
+        };
+        buildingExpenditures.set(id, expense);
+      }
+
+      agentDisbursements.set(id, data);
       persistBuildingExpenditureState();
       return res.status(201).json({ data, role: context.role });
+    } catch (error) { return next(error); }
+  });
+
+  app.post("/api/landlord/agent-advances/:advanceId/settlements", async (req, res, next) => {
+    try {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) return;
+      if (context.role === "caretaker") return res.status(403).json({ error: "House managers cannot settle agent advances." });
+      const advanceId = String(req.params.advanceId || "").trim();
+      const advance = agentDisbursements.get(advanceId);
+      if (!advance || advance.kind !== "advance") return res.status(404).json({ error: "Agent advance not found." });
+      const building = await store.getBuilding(advance.buildingId);
+      if (!building) return res.status(404).json({ error: "Building not found." });
+      if (!(await canManageBuildingFromLandlordContext(context, building.id))) return res.status(403).json({ error: "Building access denied." });
+      const parsed = landlordAgentAdvanceSettlementSchema.parse(req.body ?? {});
+
+      if (parsed.submissionId) {
+        const existing = [...agentAdvanceSettlements.values()].find((item) => item.submissionId === parsed.submissionId);
+        if (existing) {
+          const matchesRequest = existing.advanceId === advance.id &&
+            existing.createdByUserId === context.userId &&
+            existing.kind === parsed.kind &&
+            existing.amountKsh === parsed.amountKsh &&
+            existing.category === parsed.category &&
+            existing.title === parsed.title &&
+            existing.payeeName === (parsed.payeeName || undefined) &&
+            existing.reference === (parsed.reference || undefined) &&
+            existing.note === (parsed.note || undefined) &&
+            (!parsed.paidAt || existing.paidAt === parsed.paidAt);
+          if (!matchesRequest) {
+            return res.status(409).json({ error: "This settlement submission ID was already used for different details." });
+          }
+          return res.status(200).json({ data: existing, duplicate: true, role: context.role });
+        }
+      }
+
+      const settledKsh = [...agentAdvanceSettlements.values()]
+        .filter((item) => item.advanceId === advance.id)
+        .reduce((sum, item) => sum + item.amountKsh, 0);
+      const outstandingKsh = getAgentAdvanceOutstandingKsh(advance.amountKsh, settledKsh);
+      if (parsed.amountKsh > outstandingKsh) {
+        return res.status(409).json({
+          error: `Settlement amount exceeds the outstanding advance of KSh ${outstandingKsh}.`,
+          outstandingKsh
+        });
+      }
+
+      const createdAt = new Date().toISOString();
+      const id = randomUUID();
+      const paidAt = parsed.paidAt ?? createdAt;
+      const data: AgentAdvanceSettlementRecord = {
+        id,
+        submissionId: parsed.submissionId,
+        advanceId: advance.id,
+        buildingId: building.id,
+        agentName: advance.agentName,
+        kind: parsed.kind,
+        amountKsh: parsed.amountKsh,
+        paidAt,
+        category: parsed.category,
+        title: parsed.title,
+        payeeName: parsed.payeeName || undefined,
+        reference: parsed.reference || undefined,
+        note: parsed.note || undefined,
+        createdAt,
+        createdByUserId: context.userId,
+        createdByName: context.userSession?.fullName || undefined
+      };
+
+      if (parsed.kind === "spent") {
+        if (!parsed.category || !parsed.title) {
+          return res.status(400).json({ error: "Choose an expense category and enter what the agent spent the advance on." });
+        }
+        const note = [`Paid from advance to ${advance.agentName}`, parsed.note].filter(Boolean).join(" · ");
+        const expense: BuildingExpenditureRecord = {
+          id,
+          buildingId: building.id,
+          category: parsed.category,
+          title: parsed.title,
+          amountKsh: parsed.amountKsh,
+          chargeableToResident: false,
+          note,
+          createdAt,
+          paidAt,
+          payeeName: parsed.payeeName?.trim() || advance.agentName,
+          createdByRole: context.role === "root_admin" ? "root_admin" : context.role === "admin" ? "admin" : "landlord",
+          createdByUserId: context.userId,
+          createdByName: context.userSession?.fullName || undefined
+        };
+        buildingExpenditures.set(id, expense);
+      }
+
+      agentAdvanceSettlements.set(id, data);
+      persistBuildingExpenditureState();
+      return res.status(201).json({ data, outstandingKsh: outstandingKsh - parsed.amountKsh, role: context.role });
     } catch (error) { return next(error); }
   });
 
@@ -13033,6 +13313,11 @@ async function bootstrap() {
       }
 
       buildingExpenditures.delete(expenditureId);
+      agentDisbursements.delete(expenditureId);
+      const linkedAdvanceSettlement = agentAdvanceSettlements.get(expenditureId);
+      if (linkedAdvanceSettlement?.kind === "spent") {
+        agentAdvanceSettlements.delete(expenditureId);
+      }
       persistBuildingExpenditureState();
 
       return res.json({ data: existing, role: context.role });
@@ -16925,6 +17210,66 @@ async function bootstrap() {
       ].filter((item) => item.amountKsh > 0).sort((a, b) => b.paidAt.localeCompare(a.paidAt));
       const expenses = [...buildingExpenditures.values()].filter((item) => item.buildingId === buildingId && inMonth(item.paidAt || item.createdAt));
       const monthlyRemittances = [...agentRemittances.values()].filter((item) => item.buildingId === buildingId && inMonth(item.paidAt));
+      const buildingAgentDisbursements = [...agentDisbursements.values()].filter((item) => item.buildingId === buildingId);
+      const buildingAgentAdvanceSettlements = [...agentAdvanceSettlements.values()].filter((item) => item.buildingId === buildingId);
+      const settlementsByAdvanceId = new Map<string, number>();
+      buildingAgentAdvanceSettlements.forEach((item) => {
+        settlementsByAdvanceId.set(
+          item.advanceId,
+          (settlementsByAdvanceId.get(item.advanceId) ?? 0) + item.amountKsh
+        );
+      });
+      const openAgentAdvances = buildingAgentDisbursements
+        .filter((item) => item.kind === "advance")
+        .map((item) => ({
+          ...item,
+          outstandingKsh: getAgentAdvanceOutstandingKsh(item.amountKsh, settlementsByAdvanceId.get(item.id) ?? 0)
+        }))
+        .filter((item) => item.outstandingKsh > 0)
+        .sort((a, b) => a.paidAt.localeCompare(b.paidAt));
+      const monthlyAgentDisbursements = buildingAgentDisbursements
+        .filter((item) => inMonth(item.paidAt))
+        .map((item) => ({
+          ...item,
+          outstandingKsh: item.kind === "advance"
+            ? getAgentAdvanceOutstandingKsh(item.amountKsh, settlementsByAdvanceId.get(item.id) ?? 0)
+            : 0
+        }))
+        .sort((a, b) => b.paidAt.localeCompare(a.paidAt));
+      const monthlyAgentAdvanceSettlements = buildingAgentAdvanceSettlements
+        .filter((item) => inMonth(item.paidAt))
+        .sort((a, b) => b.paidAt.localeCompare(a.paidAt));
+      const agentReconciliation = new Map<string, {
+        agentName: string;
+        collectedKsh: number;
+        commissionKsh: number;
+        remittedKsh: number;
+      }>();
+      const getAgentReconciliation = (name: string) => {
+        const agentName = name.trim() || "Unknown";
+        const key = agentName.toLowerCase();
+        const current = agentReconciliation.get(key) ?? {
+          agentName,
+          collectedKsh: 0,
+          commissionKsh: 0,
+          remittedKsh: 0
+        };
+        agentReconciliation.set(key, current);
+        return current;
+      };
+      for (const item of payments) {
+        if (item.collectionDestination === "agent") {
+          getAgentReconciliation(item.collectedByName || "Unknown").collectedKsh += item.amountKsh;
+        }
+      }
+      for (const item of expenses) {
+        if (item.category === "agent_commission") {
+          getAgentReconciliation(item.payeeName || "Unknown").commissionKsh += Number(item.amountKsh ?? 0);
+        }
+      }
+      for (const item of monthlyRemittances) {
+        getAgentReconciliation(item.agentName).remittedKsh += Number(item.amountKsh ?? 0);
+      }
       const expenseBreakdown = new Map<string, { category: string; payeeName: string; amountKsh: number; count: number }>();
       for (const item of expenses) {
         const payeeName = item.payeeName?.trim() || "Unknown";
@@ -16956,6 +17301,18 @@ async function bootstrap() {
         expenseTotalKsh, netAfterCostsKsh: totalReceivedKsh - expenseTotalKsh,
         remittedToOwnerKsh: monthlyRemittances.reduce((sum, item) => sum + item.amountKsh, 0),
         remittances: monthlyRemittances.sort((a, b) => b.paidAt.localeCompare(a.paidAt)),
+        agentDisbursementTotalKsh: monthlyAgentDisbursements.reduce((sum, item) => sum + item.amountKsh, 0),
+        agentDisbursementCount: monthlyAgentDisbursements.length,
+        agentAdvanceOutstandingKsh: openAgentAdvances.reduce((sum, item) => sum + item.outstandingKsh, 0),
+        agentDisbursements: monthlyAgentDisbursements,
+        agentAdvanceSettlements: monthlyAgentAdvanceSettlements,
+        openAgentAdvances,
+        agentReconciliation: [...agentReconciliation.values()]
+          .map((item) => ({
+            ...item,
+            unreconciledKsh: item.collectedKsh - item.commissionKsh - item.remittedKsh
+          }))
+          .sort((a, b) => a.agentName.localeCompare(b.agentName)),
         paymentCount: payments.length, expenseCount: expenses.length,
         collectors: [...collectors.values()].sort((a, b) => b.amountKsh - a.amountKsh),
         expenses: [...expenseBreakdown.values()].sort((a, b) => b.amountKsh - a.amountKsh),

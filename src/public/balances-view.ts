@@ -24,6 +24,17 @@ export interface BalanceRow {
 }
 
 export type BalanceFilter = "all" | "unchecked" | "owing";
+export type BalanceType = "both" | "rent" | "utilities";
+
+export function getBalanceAmount(row: BalanceRow, type: BalanceType = "both"): number {
+  if (type === "rent") {
+    return Math.max(0, Number(row.rent?.balanceKsh) || 0);
+  }
+  if (type === "utilities") {
+    return Math.max(0, Number(row.utilities.total) || 0);
+  }
+  return Math.max(0, Number(row.totalKsh) || 0);
+}
 
 export function isCheckedToday(row: BalanceRow, now: Date = new Date()): boolean {
   if (!row.checkedAt) {
@@ -33,7 +44,12 @@ export function isCheckedToday(row: BalanceRow, now: Date = new Date()): boolean
   return checked.toDateString() === now.toDateString();
 }
 
-export function filterRows(rows: BalanceRow[], filter: BalanceFilter, now = new Date()) {
+export function filterRows(
+  rows: BalanceRow[],
+  filter: BalanceFilter,
+  now = new Date(),
+  type: BalanceType = "both"
+) {
   const sorted = [...rows].sort((a, b) =>
     a.houseNumber.localeCompare(b.houseNumber, undefined, { numeric: true })
   );
@@ -41,7 +57,7 @@ export function filterRows(rows: BalanceRow[], filter: BalanceFilter, now = new 
     return sorted.filter((row) => row.hasActiveResident && !isCheckedToday(row, now));
   }
   if (filter === "owing") {
-    return sorted.filter((row) => row.totalKsh > 0);
+    return sorted.filter((row) => getBalanceAmount(row, type) > 0);
   }
   return sorted;
 }
@@ -119,10 +135,12 @@ export function createBalancesView(deps: BalancesViewDeps) {
   const listEl = deps.root.querySelector<HTMLElement>("[data-balances-list]");
   const summaryEl = deps.root.querySelector<HTMLElement>("#balances-summary");
   const filterButtons = [...deps.root.querySelectorAll<HTMLButtonElement>("[data-balance-filter]")];
+  const balanceTypeButtons = [...deps.root.querySelectorAll<HTMLButtonElement>("[data-balance-type]")];
 
   let buildingId = "";
   let rows: BalanceRow[] = [];
   let filter: BalanceFilter = "all";
+  let balanceType: BalanceType = "both";
   let openPanel: OpenPanel = null;
   let adjustmentsAvailable = true;
   const busy = new Set<string>();
@@ -136,13 +154,19 @@ export function createBalancesView(deps: BalancesViewDeps) {
     }
     const occupied = rows.filter((row) => row.hasActiveResident);
     const checked = occupied.filter((row) => isCheckedToday(row)).length;
-    const owing = rows.reduce((sum, row) => sum + row.totalKsh, 0);
+    const owing = rows.reduce((sum, row) => sum + getBalanceAmount(row, balanceType), 0);
+    const owingLabel = balanceType === "rent" ? "rent owed" : balanceType === "utilities" ? "utilities owed" : "owed in total";
     summaryEl.innerHTML = [
       `<span class="mr-chip ${checked === occupied.length && occupied.length > 0 ? "is-ok" : ""}">${checked} of ${occupied.length} checked today</span>`,
-      `<span class="mr-chip is-rate">${escapeHtml(money(owing))} owed in total</span>`
+      `<span class="mr-chip is-rate">${escapeHtml(money(owing))} ${owingLabel}</span>`
     ].join("");
     filterButtons.forEach((button) => {
       const active = button.dataset.balanceFilter === filter;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+    balanceTypeButtons.forEach((button) => {
+      const active = button.dataset.balanceType === balanceType;
       button.classList.toggle("active", active);
       button.setAttribute("aria-pressed", String(active));
     });
@@ -150,6 +174,12 @@ export function createBalancesView(deps: BalancesViewDeps) {
 
   function renderPayPanel(row: BalanceRow) {
     const hasUtilities = row.utilities.total > 0;
+    const targets: Array<"rent" | "utility"> = balanceType === "rent"
+      ? ["rent"]
+      : balanceType === "utilities"
+        ? ["utility"]
+        : ["rent", "utility"];
+    const selectedTarget = balanceType === "utilities" || (hasUtilities && !row.rent) ? "utility" : "rent";
     return `<form class="bal-panel" data-panel="pay">
       <div class="bal-fields">
         <label>Amount (KSh)
@@ -157,8 +187,7 @@ export function createBalancesView(deps: BalancesViewDeps) {
         </label>
         <label>For
           <select name="target" class="bal-input">
-            <option value="rent"${hasUtilities && !row.rent ? "" : " selected"}>Rent</option>
-            <option value="utility"${hasUtilities && !row.rent ? " selected" : ""}>Utilities</option>
+            ${targets.map((target) => `<option value="${target}"${target === selectedTarget ? " selected" : ""}>${target === "rent" ? "Rent" : "Utilities"}</option>`).join("")}
           </select>
         </label>
         <label>Method
@@ -183,19 +212,27 @@ export function createBalancesView(deps: BalancesViewDeps) {
     if (!adjustmentsAvailable) {
       return `<p class="bal-note">Adjustments need the database connection, which is unavailable right now.</p>`;
     }
+    const showRent = balanceType !== "utilities";
+    const showUtilities = balanceType !== "rent";
     return `<form class="bal-panel" data-panel="adjust">
       <p class="bal-note">The tenant will see this as "Manually adjusted" with your reason.</p>
       <div class="bal-fields">
         ${
-          row.rent
+          showRent && row.rent
             ? `<label>Rent owed (KSh)
                 <input name="rent" class="bal-input" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="${escapeHtml(row.rent.balanceKsh)}" />
               </label>`
+            : showRent
+              ? `<p class="bal-note">Rent is not set up for this house.</p>`
+              : ""
+        }
+        ${
+          showUtilities
+            ? `<label>Utilities owed (KSh)
+                <input name="utility" class="bal-input" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="${escapeHtml(row.utilities.total)}" />
+              </label>`
             : ""
         }
-        <label>Utilities owed (KSh)
-          <input name="utility" class="bal-input" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="${escapeHtml(row.utilities.total)}" />
-        </label>
         <label class="bal-wide">Reason
           <input name="reason" class="bal-input" type="text" maxlength="200" autocomplete="off" placeholder="e.g. Paid KSh 2,000 cash in Sept, confirmed with tenant" required />
         </label>
@@ -209,6 +246,14 @@ export function createBalancesView(deps: BalancesViewDeps) {
 
   function renderCard(row: BalanceRow) {
     const checked = isCheckedToday(row);
+    const selectedBalanceKsh = getBalanceAmount(row, balanceType);
+    const figures = balanceType === "both"
+      ? `<div><dt>Rent</dt><dd>${row.rent ? escapeHtml(money(row.rent.balanceKsh)) : "Not set up"}</dd></div>
+        <div><dt>Utilities</dt><dd>${escapeHtml(money(row.utilities.total))}</dd></div>
+        <div class="bal-total"><dt>Total</dt><dd>${escapeHtml(money(selectedBalanceKsh))}</dd></div>`
+      : balanceType === "rent"
+        ? `<div class="bal-total"><dt>Rent balance</dt><dd>${row.rent ? escapeHtml(money(row.rent.balanceKsh)) : "Not set up"}</dd></div>`
+        : `<div class="bal-total"><dt>Utilities balance</dt><dd>${escapeHtml(money(row.utilities.total))}</dd></div>`;
     const panel =
       openPanel && openPanel.houseNumber === row.houseNumber
         ? openPanel.panel === "pay"
@@ -223,7 +268,7 @@ export function createBalancesView(deps: BalancesViewDeps) {
         )}${row.lastAdjustment.reason ? ` · ${escapeHtml(row.lastAdjustment.reason)}` : ""}</p>`
       : "";
     const isBusy = busy.has(row.houseNumber);
-    return `<article class="bal-card${checked ? " is-checked" : ""}${row.totalKsh > 0 ? " is-owing" : ""}" data-house="${escapeHtml(row.houseNumber)}">
+    return `<article class="bal-card${checked ? " is-checked" : ""}${selectedBalanceKsh > 0 ? " is-owing" : ""}" data-house="${escapeHtml(row.houseNumber)}">
       <header class="bal-card-head">
         <div class="mr-room">
           <strong>${escapeHtml(row.houseNumber)}</strong>
@@ -233,10 +278,8 @@ export function createBalancesView(deps: BalancesViewDeps) {
         </div>
         <span class="bal-check ${checked ? "is-done" : ""}">${checked ? "Checked today" : row.checkedAt ? `Checked ${escapeHtml(shortDate(row.checkedAt))}` : "Not checked"}</span>
       </header>
-      <dl class="bal-figures">
-        <div><dt>Rent</dt><dd>${row.rent ? escapeHtml(money(row.rent.balanceKsh)) : "Not set up"}</dd></div>
-        <div><dt>Utilities</dt><dd>${escapeHtml(money(row.utilities.total))}</dd></div>
-        <div class="bal-total"><dt>Total</dt><dd>${escapeHtml(money(row.totalKsh))}</dd></div>
+      <dl class="bal-figures${balanceType === "both" ? "" : " is-single"}">
+        ${figures}
       </dl>
       ${adjustment}
       ${panel}
@@ -268,14 +311,18 @@ export function createBalancesView(deps: BalancesViewDeps) {
     const onlyHouse = deps.onlyHouse?.() ?? "";
     const visible = onlyHouse
       ? rows.filter((row) => row.houseNumber.toUpperCase() === onlyHouse.toUpperCase())
-      : filterRows(rows, filter);
+      : filterRows(rows, filter, new Date(), balanceType);
     listEl.innerHTML = visible.length
       ? visible.map(renderCard).join("")
       : `<p class="mr-empty">${
           filter === "unchecked"
             ? "Every occupied house has been checked today."
             : filter === "owing"
-              ? "No house owes anything."
+              ? balanceType === "rent"
+                ? "No house has a rent balance."
+                : balanceType === "utilities"
+                  ? "No house has a utility balance."
+                  : "No house owes anything."
               : "No houses in this building yet."
         }</p>`;
     const focusInput = listEl.querySelector<HTMLInputElement>(".bal-panel input");
@@ -460,6 +507,15 @@ export function createBalancesView(deps: BalancesViewDeps) {
     button.addEventListener("click", () => {
       const next = button.dataset.balanceFilter;
       filter = next === "all" || next === "owing" ? next : "unchecked";
+      openPanel = null;
+      render();
+    });
+  });
+
+  balanceTypeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const next = button.dataset.balanceType;
+      balanceType = next === "rent" || next === "utilities" ? next : "both";
       openPanel = null;
       render();
     });

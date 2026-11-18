@@ -5,7 +5,11 @@ import {
   adminAccessCredentialUpdateSchema,
   createRoomBillingHoldSchema,
   depositRefundRecordSchema,
+  landlordAgentAdvanceSettlementSchema,
+  landlordAgentDisbursementSchema,
+  landlordAgentRemittanceSchema,
   landlordDirectTenantCreateSchema,
+  landlordExpenditureCreateSchema,
   landlordRentSetupSheetSchema,
   landlordRemoveBuildingUserSchema,
   residentDebtCollectionSchema,
@@ -32,6 +36,95 @@ test("resident phone login does not require building or house selection", () => 
   assert.equal(parsed.buildingId, undefined);
   assert.equal(parsed.houseNumber, undefined);
   assert.equal(parsed.phoneNumber, "0700000001");
+});
+
+test("agent remittances accept a submission ID for duplicate-safe retries", () => {
+  const parsed = landlordAgentRemittanceSchema.parse({
+    buildingId: "BLDG-A",
+    agentName: "Jane Wanjiku",
+    amountKsh: 15000,
+    submissionId: "d98fdc54-5409-4bb3-b05c-431c8fbb5a91"
+  });
+
+  assert.equal(parsed.submissionId, "d98fdc54-5409-4bb3-b05c-431c8fbb5a91");
+  assert.throws(() => landlordAgentRemittanceSchema.parse({
+    buildingId: "BLDG-A",
+    agentName: "Jane Wanjiku",
+    amountKsh: 15000,
+    submissionId: "invalid"
+  }));
+});
+
+test("agent commissions can be recorded as non-resident expenditure", () => {
+  const parsed = landlordExpenditureCreateSchema.parse({
+    buildingId: "BLDG-A",
+    category: "agent_commission",
+    title: "November rent collection commission",
+    amountKsh: 1500,
+    payeeName: "Jane Wanjiku"
+  });
+
+  assert.equal(parsed.category, "agent_commission");
+  assert.equal(parsed.chargeableToResident, false);
+});
+
+test("agent payments distinguish immediate expenses from advances", () => {
+  assert.equal(landlordAgentDisbursementSchema.parse({
+    buildingId: "BLDG-A",
+    agentName: "Jane Wanjiku",
+    kind: "advance",
+    amountKsh: 10000
+  }).kind, "advance");
+
+  assert.equal(landlordAgentDisbursementSchema.parse({
+    buildingId: "BLDG-A",
+    agentName: "Jane Wanjiku",
+    kind: "expense",
+    amountKsh: 1500,
+    category: "agent_commission",
+    title: "November collection commission"
+  }).kind, "expense");
+
+  assert.throws(() => landlordAgentDisbursementSchema.parse({
+    buildingId: "BLDG-A",
+    agentName: "Jane Wanjiku",
+    kind: "expense",
+    amountKsh: 1500
+  }));
+  assert.throws(() => landlordAgentDisbursementSchema.parse({
+    buildingId: "BLDG-A",
+    agentName: "Jane Wanjiku",
+    kind: "expense",
+    amountKsh: 2_000_001,
+    category: "agent_commission",
+    title: "Collection commission"
+  }), /Agent expenses cannot exceed/);
+});
+
+test("agent advances can be spent or returned, and spending needs expense details", () => {
+  assert.equal(landlordAgentAdvanceSettlementSchema.parse({
+    kind: "returned",
+    amountKsh: 3000
+  }).kind, "returned");
+
+  assert.equal(landlordAgentAdvanceSettlementSchema.parse({
+    kind: "spent",
+    amountKsh: 7000,
+    category: "maintenance",
+    title: "Replace gate lock",
+    payeeName: "Hardware shop"
+  }).kind, "spent");
+
+  assert.throws(() => landlordAgentAdvanceSettlementSchema.parse({
+    kind: "spent",
+    amountKsh: 7000
+  }));
+  assert.throws(() => landlordAgentAdvanceSettlementSchema.parse({
+    kind: "spent",
+    amountKsh: 2_000_001,
+    category: "maintenance",
+    title: "Roof repairs"
+  }), /Agent expenses cannot exceed/);
 });
 
 test("landlord direct tenant onboarding defaults to national ID", () => {

@@ -415,12 +415,46 @@ const performanceNetEl = document.getElementById("performance-net");
 const performanceRemittedEl = document.getElementById("performance-remitted");
 const performanceRemittanceCountEl = document.getElementById("performance-remittance-count");
 const performanceRemittancesEl = document.getElementById("performance-remittances");
+const performanceAgentReconciliationBodyEl = document.getElementById("performance-agent-reconciliation-body");
+const performanceAgentDisbursementTotalEl = document.getElementById("performance-agent-disbursement-total");
+const performanceAgentDisbursementCountEl = document.getElementById("performance-agent-disbursement-count");
+const performanceAgentAdvanceOutstandingEl = document.getElementById("performance-agent-advance-outstanding");
+const performanceAgentDisbursementsEl = document.getElementById("performance-agent-disbursements");
+const performanceAgentAdvanceSettlementsEl = document.getElementById("performance-agent-advance-settlements");
+const agentAdvanceSelectEl = document.getElementById("agent-advance-select");
+const agentDisbursementFormEl = document.getElementById("agent-disbursement-form");
+const agentDisbursementNameEl = document.getElementById("agent-disbursement-name");
+const agentDisbursementAmountEl = document.getElementById("agent-disbursement-amount");
+const agentDisbursementKindEl = document.getElementById("agent-disbursement-kind");
+const agentDisbursementCategoryEl = document.getElementById("agent-disbursement-category");
+const agentDisbursementTitleEl = document.getElementById("agent-disbursement-title");
+const agentDisbursementDateEl = document.getElementById("agent-disbursement-date");
+const agentDisbursementReferenceEl = document.getElementById("agent-disbursement-reference");
+const agentDisbursementNoteEl = document.getElementById("agent-disbursement-note");
+const agentAdvanceSettlementFormEl = document.getElementById("agent-advance-settlement-form");
+const agentAdvanceSettlementKindEl = document.getElementById("agent-advance-settlement-kind");
+const agentAdvanceSettlementAmountEl = document.getElementById("agent-advance-settlement-amount");
+const agentAdvanceSettlementCategoryEl = document.getElementById("agent-advance-settlement-category");
+const agentAdvanceSettlementTitleEl = document.getElementById("agent-advance-settlement-title");
+const agentAdvanceSettlementPayeeEl = document.getElementById("agent-advance-settlement-payee");
+const agentAdvanceSettlementDateEl = document.getElementById("agent-advance-settlement-date");
+const agentAdvanceSettlementReferenceEl = document.getElementById("agent-advance-settlement-reference");
+const agentAdvanceSettlementNoteEl = document.getElementById("agent-advance-settlement-note");
+let agentDisbursementSubmitting = false;
+let agentDisbursementSubmissionId = "";
+let agentDisbursementLastPayload = "";
+let agentAdvanceSettlementSubmitting = false;
+let agentAdvanceSettlementSubmissionId = "";
+let agentAdvanceSettlementLastPayload = "";
 const agentRemittanceFormEl = document.getElementById("agent-remittance-form");
 const agentRemittanceNameEl = document.getElementById("agent-remittance-name");
 const agentRemittanceAmountEl = document.getElementById("agent-remittance-amount");
 const agentRemittanceDateEl = document.getElementById("agent-remittance-date");
 const agentRemittanceReferenceEl = document.getElementById("agent-remittance-reference");
 const agentRemittanceNoteEl = document.getElementById("agent-remittance-note");
+let agentRemittanceSubmitting = false;
+let agentRemittanceSubmissionId = "";
+let agentRemittanceLastPayload = "";
 const performancePaymentCountEl = document.getElementById("performance-payment-count");
 const performanceCollectorsEl = document.getElementById("performance-collectors");
 const performanceBreakdownEl = document.getElementById("performance-expense-breakdown");
@@ -3685,6 +3719,7 @@ function formatExpenditureCategory(value) {
     security: "Security",
     supplies: "Supplies",
     staff: "Staff",
+    agent_commission: "Agent commission",
     other: "Other"
   };
   return labels[String(value ?? "")] || "Other";
@@ -7543,6 +7578,43 @@ function handleDeleteExpenditureClick(target, expenditureId, title) {
   })();
 }
 
+function handleDeleteAgentRemittanceClick(target, remittanceId, agentName, amountKsh, paidAt) {
+  if (isCaretakerRole()) {
+    showError("House manager accounts cannot delete agent remittances.");
+    return;
+  }
+
+  if (!remittanceId) {
+    showError("Agent remittance details are missing. Refresh and try again.");
+    return;
+  }
+
+  const shouldProceed = window.confirm(
+    `Permanently remove the ${formatCurrency(amountKsh)} remittance from ${agentName || "this agent"} recorded on ${formatDateTime(paidAt)}? This removes the record from totals; it does not reverse the cash transfer.`
+  );
+  if (!shouldProceed) {
+    return;
+  }
+
+  target.disabled = true;
+  clearError();
+
+  void (async () => {
+    try {
+      await requestJson(
+        `/api/landlord/agent-remittances/${encodeURIComponent(remittanceId)}`,
+        { method: "DELETE" }
+      );
+      setStatus(`Removed the ${formatCurrency(amountKsh)} remittance from ${agentName || "the agent"}.`);
+      await loadBuildingPerformance();
+    } catch (error) {
+      handleLandlordError(error, "Failed to remove agent remittance.");
+    } finally {
+      target.disabled = false;
+    }
+  })();
+}
+
 function getMoveOutSettlementAction() {
   const selected = moveOutSettlementFormEl?.querySelector(
     'input[name="moveOutSettlementAction"]:checked'
@@ -10097,6 +10169,9 @@ function renderBuildingPerformance(data, previousData) {
   setText(performanceNetEl, formatCurrency(data.netAfterCostsKsh));
   setText(performanceRemittedEl, formatCurrency(data.remittedToOwnerKsh));
   setText(performanceRemittanceCountEl, String(Array.isArray(data.remittances) ? data.remittances.length : 0) + " transfers");
+  setText(performanceAgentDisbursementTotalEl, formatCurrency(data.agentDisbursementTotalKsh));
+  setText(performanceAgentDisbursementCountEl, String(data.agentDisbursementCount ?? 0) + " payments");
+  setText(performanceAgentAdvanceOutstandingEl, formatCurrency(data.agentAdvanceOutstandingKsh));
   setText(performancePaymentCountEl, String(data.paymentCount) + " payment entries");
   setText(performanceAveragePaymentEl, formatCurrency(payments.length ? total / payments.length : 0));
   if (performanceTotalChangeEl instanceof HTMLElement) {
@@ -10160,8 +10235,75 @@ function renderBuildingPerformance(data, previousData) {
     if (!transfers.length) performanceRemittancesEl.innerHTML = '<p class="status-text">No agent remittances recorded in this month.</p>';
     transfers.forEach((item) => {
       const row = document.createElement("div"); row.className = "performance-row";
-      row.innerHTML = `<span><strong>${escapeHtml(item.agentName)}</strong><small>${escapeHtml(formatDateTime(item.paidAt))}${item.reference ? ` · ${escapeHtml(item.reference)}` : ""}</small></span><strong>${escapeHtml(formatCurrency(item.amountKsh))}</strong>`;
+      const removeButton = isCaretakerRole()
+        ? ""
+        : `<button type="button" class="btn-danger" data-action="delete-agent-remittance" data-remittance-id="${escapeHtml(item.id)}" data-agent-name="${escapeHtml(item.agentName)}" data-amount-ksh="${escapeHtml(item.amountKsh)}" data-paid-at="${escapeHtml(item.paidAt)}">Remove</button>`;
+      row.innerHTML = `<span><strong>${escapeHtml(item.agentName)}</strong><small>${escapeHtml(formatDateTime(item.paidAt))}${item.reference ? ` · ${escapeHtml(item.reference)}` : ""}</small></span><strong>${escapeHtml(formatCurrency(item.amountKsh))}</strong>${removeButton}`;
       performanceRemittancesEl.append(row);
+    });
+  }
+  if (performanceAgentReconciliationBodyEl instanceof HTMLElement) {
+    performanceAgentReconciliationBodyEl.replaceChildren();
+    const rows = Array.isArray(data.agentReconciliation) ? data.agentReconciliation : [];
+    if (!rows.length) {
+      performanceAgentReconciliationBodyEl.innerHTML = '<tr><td colspan="5">No agent collections, commissions, or remittances recorded in this month.</td></tr>';
+    }
+    rows.forEach((item) => {
+      const row = document.createElement("tr");
+      row.innerHTML = `<td>${escapeHtml(item.agentName)}</td><td>${escapeHtml(formatCurrency(item.collectedKsh))}</td><td>${escapeHtml(formatCurrency(item.commissionKsh))}</td><td>${escapeHtml(formatCurrency(item.remittedKsh))}</td><td>${escapeHtml(formatCurrency(item.unreconciledKsh))}</td>`;
+      performanceAgentReconciliationBodyEl.append(row);
+    });
+  }
+  if (performanceAgentDisbursementsEl instanceof HTMLElement) {
+    performanceAgentDisbursementsEl.replaceChildren();
+    const disbursements = Array.isArray(data.agentDisbursements) ? data.agentDisbursements : [];
+    if (!disbursements.length) {
+      performanceAgentDisbursementsEl.innerHTML = '<p class="status-text">No agent payments recorded in this month.</p>';
+    }
+    disbursements.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "performance-row";
+      const type = item.kind === "advance" ? "Advance" : `Expense · ${String(item.category || "other").replaceAll("_", " ")}`;
+      const detail = item.kind === "advance"
+        ? `Outstanding ${formatCurrency(item.outstandingKsh)}`
+        : String(item.title || "Expense");
+      row.innerHTML = `<span><strong>${escapeHtml(item.agentName)} · ${escapeHtml(type)}</strong><small>${escapeHtml(formatDateTime(item.paidAt))} · ${escapeHtml(detail)}</small></span><strong>${escapeHtml(formatCurrency(item.amountKsh))}</strong>`;
+      performanceAgentDisbursementsEl.append(row);
+    });
+  }
+  if (agentAdvanceSelectEl instanceof HTMLSelectElement) {
+    const previousAdvanceId = agentAdvanceSelectEl.value;
+    const advances = Array.isArray(data.openAgentAdvances) ? data.openAgentAdvances : [];
+    agentAdvanceSelectEl.replaceChildren();
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = advances.length ? "Select an open advance" : "No open advances";
+    agentAdvanceSelectEl.append(placeholder);
+    advances.forEach((item) => {
+      const option = document.createElement("option");
+      option.value = item.id;
+      option.textContent = `${item.agentName} · ${formatDateTime(item.paidAt)} · ${formatCurrency(item.outstandingKsh)} remaining`;
+      agentAdvanceSelectEl.append(option);
+    });
+    agentAdvanceSelectEl.value = advances.some((item) => item.id === previousAdvanceId) ? previousAdvanceId : "";
+    agentAdvanceSelectEl.disabled = advances.length === 0;
+    const submitButton = agentAdvanceSettlementFormEl?.querySelector('button[type="submit"]');
+    if (submitButton instanceof HTMLButtonElement) submitButton.disabled = advances.length === 0;
+  }
+  if (performanceAgentAdvanceSettlementsEl instanceof HTMLElement) {
+    performanceAgentAdvanceSettlementsEl.replaceChildren();
+    const settlements = Array.isArray(data.agentAdvanceSettlements) ? data.agentAdvanceSettlements : [];
+    if (!settlements.length) {
+      performanceAgentAdvanceSettlementsEl.innerHTML = '<p class="status-text">No advance settlements recorded in this month.</p>';
+    }
+    settlements.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "performance-row";
+      const description = item.kind === "returned"
+        ? "Returned to owner"
+        : `Spent · ${String(item.category || "other").replaceAll("_", " ")} · ${item.title || "Expense"}`;
+      row.innerHTML = `<span><strong>${escapeHtml(item.agentName)} · ${escapeHtml(description)}</strong><small>${escapeHtml(formatDateTime(item.paidAt))}${item.payeeName ? ` · Paid to ${escapeHtml(item.payeeName)}` : ""}</small></span><strong>${escapeHtml(formatCurrency(item.amountKsh))}</strong>`;
+      performanceAgentAdvanceSettlementsEl.append(row);
     });
   }
   if (performancePaymentsBodyEl instanceof HTMLElement) {
@@ -14414,26 +14556,193 @@ collectionsReportBuildingEl?.addEventListener("change", () => {
     handleLandlordError(error, "Unable to load the collections report.");
   });
 });
+function syncAgentDisbursementFields() {
+  const isExpense = agentDisbursementKindEl instanceof HTMLSelectElement && agentDisbursementKindEl.value === "expense";
+  const fields = agentDisbursementFormEl?.querySelector<HTMLElement>("[data-agent-disbursement-expense-fields]");
+  if (fields) fields.hidden = !isExpense;
+  if (agentDisbursementCategoryEl instanceof HTMLSelectElement) agentDisbursementCategoryEl.required = isExpense;
+  if (agentDisbursementTitleEl instanceof HTMLInputElement) agentDisbursementTitleEl.required = isExpense;
+}
+
+function syncAgentAdvanceSettlementFields() {
+  const isSpent = agentAdvanceSettlementKindEl instanceof HTMLSelectElement && agentAdvanceSettlementKindEl.value === "spent";
+  const fields = agentAdvanceSettlementFormEl?.querySelector<HTMLElement>("[data-agent-advance-expense-fields]");
+  if (fields) fields.hidden = !isSpent;
+  if (agentAdvanceSettlementCategoryEl instanceof HTMLSelectElement) agentAdvanceSettlementCategoryEl.required = isSpent;
+  if (agentAdvanceSettlementTitleEl instanceof HTMLInputElement) agentAdvanceSettlementTitleEl.required = isSpent;
+}
+
+agentDisbursementKindEl?.addEventListener("change", syncAgentDisbursementFields);
+agentAdvanceSettlementKindEl?.addEventListener("change", syncAgentAdvanceSettlementFields);
+syncAgentDisbursementFields();
+syncAgentAdvanceSettlementFields();
+
+agentDisbursementFormEl?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (agentDisbursementSubmitting) return;
+  const buildingId = String(performanceBuildingEl instanceof HTMLSelectElement ? performanceBuildingEl.value : "").trim();
+  const agentName = String(agentDisbursementNameEl instanceof HTMLInputElement ? agentDisbursementNameEl.value : "").trim();
+  const amountKsh = Number(agentDisbursementAmountEl instanceof HTMLInputElement ? agentDisbursementAmountEl.value : NaN);
+  const kind = String(agentDisbursementKindEl instanceof HTMLSelectElement ? agentDisbursementKindEl.value : "");
+  const category = String(agentDisbursementCategoryEl instanceof HTMLSelectElement ? agentDisbursementCategoryEl.value : "");
+  const title = String(agentDisbursementTitleEl instanceof HTMLInputElement ? agentDisbursementTitleEl.value : "").trim();
+  if (!buildingId || !agentName || !Number.isFinite(amountKsh) || amountKsh <= 0) {
+    showError("Choose a building and agent, and enter a valid amount."); return;
+  }
+  if (kind === "expense" && (!category || title.length < 3)) {
+    showError("Choose an expense category and say what the money was for."); return;
+  }
+  const payload = {
+    buildingId,
+    agentName,
+    kind,
+    amountKsh,
+    category: kind === "expense" ? category : undefined,
+    title: kind === "expense" ? title : undefined,
+    paidAt: toIsoFromDateTimeLocal(agentDisbursementDateEl instanceof HTMLInputElement ? agentDisbursementDateEl.value : "") || undefined,
+    reference: String(agentDisbursementReferenceEl instanceof HTMLInputElement ? agentDisbursementReferenceEl.value : "").trim() || undefined,
+    note: String(agentDisbursementNoteEl instanceof HTMLInputElement ? agentDisbursementNoteEl.value : "").trim() || undefined
+  };
+  const serializedPayload = JSON.stringify(payload);
+  if (serializedPayload !== agentDisbursementLastPayload) {
+    agentDisbursementSubmissionId = crypto.randomUUID();
+    agentDisbursementLastPayload = serializedPayload;
+  }
+  const submitButton = agentDisbursementFormEl.querySelector('button[type="submit"]');
+  agentDisbursementSubmitting = true;
+  if (submitButton instanceof HTMLButtonElement) submitButton.disabled = true;
+  void (async () => {
+    let recorded = false;
+    try {
+      await requestJson("/api/landlord/agent-disbursements", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...payload, submissionId: agentDisbursementSubmissionId })
+      });
+      agentDisbursementFormEl.reset();
+      agentDisbursementSubmissionId = "";
+      agentDisbursementLastPayload = "";
+      syncAgentDisbursementFields();
+      setStatus(kind === "advance" ? "Agent advance recorded." : "Agent expense recorded.");
+      recorded = true;
+    } catch (error) { handleLandlordError(error, "Unable to record the amount sent to the agent."); }
+    finally {
+      agentDisbursementSubmitting = false;
+      if (submitButton instanceof HTMLButtonElement) submitButton.disabled = false;
+    }
+    if (recorded) {
+      await loadBuildingPerformance().catch((error) =>
+        handleLandlordError(error, "The agent payment was recorded, but performance could not be refreshed.")
+      );
+    }
+  })();
+});
+
+agentAdvanceSettlementFormEl?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (agentAdvanceSettlementSubmitting) return;
+  const advanceId = String(agentAdvanceSelectEl instanceof HTMLSelectElement ? agentAdvanceSelectEl.value : "").trim();
+  const kind = String(agentAdvanceSettlementKindEl instanceof HTMLSelectElement ? agentAdvanceSettlementKindEl.value : "");
+  const amountKsh = Number(agentAdvanceSettlementAmountEl instanceof HTMLInputElement ? agentAdvanceSettlementAmountEl.value : NaN);
+  const category = String(agentAdvanceSettlementCategoryEl instanceof HTMLSelectElement ? agentAdvanceSettlementCategoryEl.value : "");
+  const title = String(agentAdvanceSettlementTitleEl instanceof HTMLInputElement ? agentAdvanceSettlementTitleEl.value : "").trim();
+  if (!advanceId || !Number.isFinite(amountKsh) || amountKsh <= 0) {
+    showError("Select an open advance and enter a valid amount."); return;
+  }
+  if (kind === "spent" && (!category || title.length < 3)) {
+    showError("Choose an expense category and say what the advance was spent on."); return;
+  }
+  const payload = {
+    kind,
+    amountKsh,
+    category: kind === "spent" ? category : undefined,
+    title: kind === "spent" ? title : undefined,
+    payeeName: kind === "spent" ? String(agentAdvanceSettlementPayeeEl instanceof HTMLInputElement ? agentAdvanceSettlementPayeeEl.value : "").trim() || undefined : undefined,
+    paidAt: toIsoFromDateTimeLocal(agentAdvanceSettlementDateEl instanceof HTMLInputElement ? agentAdvanceSettlementDateEl.value : "") || undefined,
+    reference: String(agentAdvanceSettlementReferenceEl instanceof HTMLInputElement ? agentAdvanceSettlementReferenceEl.value : "").trim() || undefined,
+    note: String(agentAdvanceSettlementNoteEl instanceof HTMLInputElement ? agentAdvanceSettlementNoteEl.value : "").trim() || undefined
+  };
+  const serializedPayload = JSON.stringify({ advanceId, ...payload });
+  if (serializedPayload !== agentAdvanceSettlementLastPayload) {
+    agentAdvanceSettlementSubmissionId = crypto.randomUUID();
+    agentAdvanceSettlementLastPayload = serializedPayload;
+  }
+  const submitButton = agentAdvanceSettlementFormEl.querySelector('button[type="submit"]');
+  agentAdvanceSettlementSubmitting = true;
+  if (submitButton instanceof HTMLButtonElement) submitButton.disabled = true;
+  void (async () => {
+    let recorded = false;
+    try {
+      await requestJson(`/api/landlord/agent-advances/${encodeURIComponent(advanceId)}/settlements`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...payload, submissionId: agentAdvanceSettlementSubmissionId })
+      });
+      agentAdvanceSettlementFormEl.reset();
+      agentAdvanceSettlementSubmissionId = "";
+      agentAdvanceSettlementLastPayload = "";
+      syncAgentAdvanceSettlementFields();
+      setStatus(kind === "returned" ? "Returned agent advance recorded." : "Agent advance expense recorded.");
+      recorded = true;
+    } catch (error) { handleLandlordError(error, "Unable to reconcile the agent advance."); }
+    finally {
+      agentAdvanceSettlementSubmitting = false;
+      if (submitButton instanceof HTMLButtonElement) submitButton.disabled = false;
+    }
+    if (recorded) {
+      await loadBuildingPerformance().catch((error) =>
+        handleLandlordError(error, "The advance settlement was recorded, but performance could not be refreshed.")
+      );
+    }
+  })();
+});
+
 agentRemittanceFormEl?.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (agentRemittanceSubmitting) return;
   const buildingId = String(performanceBuildingEl instanceof HTMLSelectElement ? performanceBuildingEl.value : "").trim();
   const agentName = String(agentRemittanceNameEl instanceof HTMLInputElement ? agentRemittanceNameEl.value : "").trim();
   const amountKsh = Number(agentRemittanceAmountEl instanceof HTMLInputElement ? agentRemittanceAmountEl.value : NaN);
   if (!buildingId || !agentName || !Number.isFinite(amountKsh) || amountKsh <= 0) {
     showError("Choose a building, agent, and a valid remittance amount."); return;
   }
+  const payload = {
+    buildingId, agentName, amountKsh,
+    paidAt: toIsoFromDateTimeLocal(agentRemittanceDateEl instanceof HTMLInputElement ? agentRemittanceDateEl.value : "") || undefined,
+    reference: String(agentRemittanceReferenceEl instanceof HTMLInputElement ? agentRemittanceReferenceEl.value : "").trim() || undefined,
+    note: String(agentRemittanceNoteEl instanceof HTMLInputElement ? agentRemittanceNoteEl.value : "").trim() || undefined
+  };
+  const serializedPayload = JSON.stringify(payload);
+  if (serializedPayload !== agentRemittanceLastPayload) {
+    agentRemittanceSubmissionId = crypto.randomUUID();
+    agentRemittanceLastPayload = serializedPayload;
+  }
+  const submitButton = agentRemittanceFormEl.querySelector('button[type="submit"]');
+  agentRemittanceSubmitting = true;
+  if (submitButton instanceof HTMLButtonElement) submitButton.disabled = true;
   void (async () => {
+    let recorded = false;
     try {
-      await requestJson("/api/landlord/agent-remittances", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
-        buildingId, agentName, amountKsh,
-        paidAt: toIsoFromDateTimeLocal(agentRemittanceDateEl instanceof HTMLInputElement ? agentRemittanceDateEl.value : "") || undefined,
-        reference: String(agentRemittanceReferenceEl instanceof HTMLInputElement ? agentRemittanceReferenceEl.value : "").trim() || undefined,
-        note: String(agentRemittanceNoteEl instanceof HTMLInputElement ? agentRemittanceNoteEl.value : "").trim() || undefined
-      }) });
+      await requestJson("/api/landlord/agent-remittances", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...payload, submissionId: agentRemittanceSubmissionId })
+      });
       agentRemittanceFormEl.reset();
+      agentRemittanceSubmissionId = "";
+      agentRemittanceLastPayload = "";
       setStatus("Agent remittance recorded.");
-      await loadBuildingPerformance();
+      recorded = true;
     } catch (error) { handleLandlordError(error, "Unable to record agent remittance."); }
+    finally {
+      agentRemittanceSubmitting = false;
+      if (submitButton instanceof HTMLButtonElement) submitButton.disabled = false;
+    }
+    if (recorded) {
+      await loadBuildingPerformance().catch((error) =>
+        handleLandlordError(error, "Remittance was recorded, but performance could not be refreshed.")
+      );
+    }
   })();
 });
 performanceBuildingEl?.addEventListener("change", () => { void loadBuildingPerformance().catch((error) => handleLandlordError(error, "Unable to load building performance.")); });
@@ -14551,6 +14860,21 @@ expendituresBodyEl?.addEventListener("click", (event) => {
     target,
     String(target.dataset.expenditureId || "").trim(),
     String(target.dataset.title || "").trim()
+  );
+});
+
+performanceRemittancesEl?.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLButtonElement) || target.dataset.action !== "delete-agent-remittance") {
+    return;
+  }
+
+  handleDeleteAgentRemittanceClick(
+    target,
+    String(target.dataset.remittanceId || "").trim(),
+    String(target.dataset.agentName || "").trim(),
+    Number(target.dataset.amountKsh),
+    String(target.dataset.paidAt || "").trim()
   );
 });
 

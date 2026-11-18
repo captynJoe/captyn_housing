@@ -944,6 +944,15 @@ body.landlord-rooms-route .lh-workspace {
 }
 
 @media (max-width: 680px) {
+  #balances-section .mr-head {
+    flex-wrap: wrap;
+  }
+
+  #balances-section .bal-control-groups {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .mr-list {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -980,6 +989,14 @@ body.landlord-rooms-route .lh-workspace {
   border: 1px solid var(--captyn-line);
   border-radius: 999px;
   background: var(--captyn-panel-soft);
+}
+
+.bal-control-groups {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .bal-filters button {
@@ -1046,6 +1063,10 @@ body.landlord-rooms-route .lh-workspace {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   margin: 0;
+}
+
+.bal-figures.is-single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .bal-figures div {

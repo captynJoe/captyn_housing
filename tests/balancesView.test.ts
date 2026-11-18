@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   filterRows,
+  getBalanceAmount,
   isCheckedToday,
   splitUtilityPayment,
   type BalanceRow
@@ -48,4 +49,30 @@ test("filters rooms for the round", () => {
   assert.deepEqual(filterRows(rows, "unchecked", now).map((item) => item.houseNumber), ["A1", "A10"]);
   assert.deepEqual(filterRows(rows, "owing", now).map((item) => item.houseNumber), ["A1", "A10"]);
   assert.deepEqual(filterRows(rows, "all", now).map((item) => item.houseNumber), ["A1", "A2", "A3", "A10"]);
+});
+
+test("balance type filters and totals isolate rent or utilities", () => {
+  const rows = [
+    row("A1", {
+      rent: { balanceKsh: 9000, monthlyRentKsh: 9000, dueDate: "2026-10-05T00:00:00.000Z", status: "due" },
+      utilities: { water: 0, electricity: 0, total: 0 },
+      totalKsh: 9000
+    }),
+    row("A2", {
+      rent: { balanceKsh: 0, monthlyRentKsh: 5000, dueDate: "2026-10-05T00:00:00.000Z", status: "clear" },
+      utilities: { water: 850, electricity: 0, total: 850 },
+      totalKsh: 850
+    }),
+    row("A3", {
+      rent: { balanceKsh: 1000, monthlyRentKsh: 5000, dueDate: "2026-10-05T00:00:00.000Z", status: "due" },
+      utilities: { water: 400, electricity: 100, total: 500 },
+      totalKsh: 1500
+    })
+  ];
+
+  assert.equal(getBalanceAmount(rows[2], "both"), 1500);
+  assert.equal(getBalanceAmount(rows[2], "rent"), 1000);
+  assert.equal(getBalanceAmount(rows[2], "utilities"), 500);
+  assert.deepEqual(filterRows(rows, "owing", new Date("2026-10-02"), "rent").map((item) => item.houseNumber), ["A1", "A3"]);
+  assert.deepEqual(filterRows(rows, "owing", new Date("2026-10-02"), "utilities").map((item) => item.houseNumber), ["A2", "A3"]);
 });

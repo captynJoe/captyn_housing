@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="/landlord.css?v=30a4ae69ff" />
     <script src="/captyn-theme.js?v=6944e37fb6"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=d9fd4fe626" />
-    <link rel="stylesheet" href="/landlord-shell.css?v=ef1318231c" />
+    <link rel="stylesheet" href="/landlord-shell.css?v=7b295db5f2" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -955,6 +955,8 @@
             <article class="resident-overview-card"><span>Deposits received</span><strong id="performance-deposits-received">-</strong></article>
             <article class="resident-overview-card"><span>Average payment</span><strong id="performance-average-payment">-</strong></article>
             <article class="resident-overview-card"><span>Agent remittances to owner</span><strong id="performance-remitted">-</strong><small id="performance-remittance-count">-</small></article>
+            <article class="resident-overview-card"><span>Money sent to agents this month</span><strong id="performance-agent-disbursement-total">-</strong><small id="performance-agent-disbursement-count">-</small></article>
+            <article class="resident-overview-card"><span>Outstanding agent advances</span><strong id="performance-agent-advance-outstanding">-</strong><small>All months</small></article>
             <article class="resident-overview-card"><span>Busiest collection hour</span><strong id="performance-busiest-hour">-</strong><small id="performance-busiest-hour-count"></small></article>
           </div>
           <div class="performance-charts-grid">
@@ -965,13 +967,69 @@
             <article class="package-card performance-chart-card"><header><div><h3>Costs by category</h3><p class="status-text">Operating costs recorded during this month.</p></div></header><div id="performance-cost-chart" class="performance-bar-list"></div></article>
             <article class="package-card performance-chart-card"><header><div><h3>Cost details</h3><p class="status-text">Category and payee for each recorded cost.</p></div></header><div id="performance-expense-breakdown" class="stack-list"></div></article>
           </div>
+          <div class="package-card performance-agent-reconciliation">
+            <h3>Agent collection reconciliation</h3>
+            <p class="status-text">Unreconciled = collected - commission - remitted. Record commissions in Expenditure with category Agent commission and the agent's name as the payee. A negative amount means the recorded commission and remittance exceed recorded collections.</p>
+            <div class="table-wrap">
+              <table><thead><tr><th>Agent</th><th>Collected</th><th>Commission</th><th>Remitted</th><th>Unreconciled</th></tr></thead><tbody id="performance-agent-reconciliation-body"></tbody></table>
+            </div>
+          </div>
+          <div class="performance-breakdowns">
+            <form id="agent-disbursement-form" class="package-card">
+              <h3>Record money sent to an agent</h3>
+              <p class="status-text">Use this only for money the owner sends to an agent. Record tenant rent as paid to the building account. Choose Expense to count this as a cost now, or Advance to track it until the agent records spending or returns unused money.</p>
+              <div class="inline-fields compact-fields">
+                <label>Agent name<input id="agent-disbursement-name" type="text" maxlength="120" required /></label>
+                <label>Amount sent (KSh)<input id="agent-disbursement-amount" type="number" min="1" step="1" required /></label>
+                <label>Record as<select id="agent-disbursement-kind" required><option value="expense">Expense now</option><option value="advance">Advance</option></select></label>
+                <label>Sent on<input id="agent-disbursement-date" type="datetime-local" /></label>
+              </div>
+              <div class="inline-fields compact-fields" data-agent-disbursement-expense-fields>
+                <label>Expense category<select id="agent-disbursement-category">
+                  <option value="agent_commission">Agent commission</option><option value="staff">Staff</option><option value="maintenance">Maintenance</option><option value="utilities">Utilities</option><option value="common_water">Common water</option><option value="common_electricity">Common electricity</option><option value="security_lighting">Security lighting</option><option value="shared_services">Shared services</option><option value="cleaning">Cleaning</option><option value="security">Security</option><option value="supplies">Supplies</option><option value="other">Other</option>
+                </select></label>
+                <label>What was it for?<input id="agent-disbursement-title" type="text" maxlength="120" placeholder="Commission, salary, or repair payment" /></label>
+              </div>
+              <div class="inline-fields compact-fields">
+                <label>Reference (optional)<input id="agent-disbursement-reference" type="text" maxlength="120" /></label>
+                <label>Note (optional)<input id="agent-disbursement-note" type="text" maxlength="500" /></label>
+              </div>
+              <button type="submit">Save amount sent</button>
+            </form>
+            <div class="package-card"><h3>Money sent to agents this month</h3><div id="performance-agent-disbursements" class="stack-list"></div></div>
+          </div>
+          <div class="performance-breakdowns">
+            <form id="agent-advance-settlement-form" class="package-card">
+              <h3>Reconcile an agent advance</h3>
+              <p class="status-text">Record money the agent spent from an advance as an expense, or record unused money returned to the owner.</p>
+              <label>Open advance<select id="agent-advance-select" required><option value="">No open advances</option></select></label>
+              <div class="inline-fields compact-fields">
+                <label>Record as<select id="agent-advance-settlement-kind" required><option value="spent">Spent on an expense</option><option value="returned">Returned to owner</option></select></label>
+                <label>Amount (KSh)<input id="agent-advance-settlement-amount" type="number" min="1" step="1" required /></label>
+                <label>Date<input id="agent-advance-settlement-date" type="datetime-local" /></label>
+              </div>
+              <div class="inline-fields compact-fields" data-agent-advance-expense-fields>
+                <label>Expense category<select id="agent-advance-settlement-category">
+                  <option value="maintenance">Maintenance</option><option value="utilities">Utilities</option><option value="common_water">Common water</option><option value="common_electricity">Common electricity</option><option value="security_lighting">Security lighting</option><option value="shared_services">Shared services</option><option value="cleaning">Cleaning</option><option value="security">Security</option><option value="supplies">Supplies</option><option value="staff">Staff</option><option value="agent_commission">Agent commission</option><option value="other">Other</option>
+                </select></label>
+                <label>What was it spent on?<input id="agent-advance-settlement-title" type="text" maxlength="120" placeholder="Repair supplies" /></label>
+                <label>Paid to (optional)<input id="agent-advance-settlement-payee" type="text" maxlength="120" /></label>
+              </div>
+              <div class="inline-fields compact-fields">
+                <label>Reference (optional)<input id="agent-advance-settlement-reference" type="text" maxlength="120" /></label>
+                <label>Note (optional)<input id="agent-advance-settlement-note" type="text" maxlength="500" /></label>
+              </div>
+              <button type="submit">Save advance settlement</button>
+            </form>
+            <div class="package-card"><h3>Advance settlements this month</h3><div id="performance-agent-advance-settlements" class="stack-list"></div></div>
+          </div>
           <div class="performance-breakdowns">
             <form id="agent-remittance-form" class="package-card">
-              <h3>Record agent remittance</h3>
-              <p class="status-text">Record money an agent has handed over to the owner. This transfer is not counted again as income or a cost.</p>
+              <h3>Record agent remittance to owner</h3>
+              <p class="status-text">Record the amount an agent handed over. This transfer is not counted again as income or a cost. Record commission separately in Expenditure as an Agent commission and enter the agent as the payee.</p>
               <div class="inline-fields compact-fields">
                 <label>Agent name<input id="agent-remittance-name" type="text" maxlength="120" required /></label>
-                <label>Amount (KSh)<input id="agent-remittance-amount" type="number" min="1" step="1" required /></label>
+                <label>Amount handed over (KSh)<input id="agent-remittance-amount" type="number" min="1" step="1" required /></label>
                 <label>Received on<input id="agent-remittance-date" type="datetime-local" /></label>
               </div>
               <div class="inline-fields compact-fields">
@@ -1303,10 +1361,17 @@
         >
           <div class="panel-head mr-head">
             <h2>Balances</h2>
-            <div class="mr-toggle bal-filters" role="group" aria-label="Show">
-              <button type="button" data-balance-filter="all" aria-pressed="true">All</button>
-              <button type="button" data-balance-filter="unchecked" aria-pressed="false">Not checked</button>
-              <button type="button" data-balance-filter="owing" aria-pressed="false">Owing</button>
+            <div class="bal-control-groups">
+              <div class="mr-toggle bal-filters" role="group" aria-label="Balance type">
+                <button type="button" data-balance-type="both" aria-pressed="true">Both</button>
+                <button type="button" data-balance-type="rent" aria-pressed="false">Rent</button>
+                <button type="button" data-balance-type="utilities" aria-pressed="false">Utilities</button>
+              </div>
+              <div class="mr-toggle bal-filters" role="group" aria-label="Show rooms">
+                <button type="button" data-balance-filter="all" aria-pressed="true">All</button>
+                <button type="button" data-balance-filter="unchecked" aria-pressed="false">Not checked</button>
+                <button type="button" data-balance-filter="owing" aria-pressed="false">Owing</button>
+              </div>
             </div>
           </div>
           <div id="balances-summary" class="mr-summary"></div>
@@ -1643,6 +1708,7 @@
                   <option value="security">Security</option>
                   <option value="supplies">Supplies</option>
                   <option value="staff">Staff</option>
+                  <option value="agent_commission">Agent commission</option>
                   <option value="other">Other</option>
                 </select>
               </label>
@@ -2277,6 +2343,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=8cd2e17751"></script>
+    <script type="module" src="/landlord.js?v=d4773a2b7a"></script>
   </body>
 </html>

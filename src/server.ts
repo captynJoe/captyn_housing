@@ -1,4 +1,6 @@
 import "dotenv/config";
+import { houseStanding, phoneVariants, type HouseStanding } from "./services/houseStanding.js";
+import { rentMonthFigures, type RentMonthFigures } from "./services/rentMonth.js";
 import { houseBillingStatus, planHouseBillingChange, shiftBillingMonth as shiftHouseBillingMonth, type HouseBillingStatus } from "./services/houseBilling.js";
 import cors from "cors";
 import express from "express";
@@ -5470,11 +5472,15 @@ async function bootstrap() {
       const rentBalanceKsh = paymentAccess.rentEnabled
         ? Math.max(0, Number(rent?.balanceKsh ?? fallbackRentBalanceKsh))
         : 0;
+      // rentMonth covers this calendar month, even after the ledger has
+      // already added next month's rent a week early.
       const currentRentDueKsh = paymentAccess.rentEnabled
         ? Math.max(
             0,
             Number(
-              rent?.currentMonthOutstandingKsh ??
+              (rent?.rentMonth
+                ? rent.rentMonth.dueKsh + rent.rentMonth.penaltyDueKsh
+                : rent?.currentMonthOutstandingKsh) ??
                 (monthlyRentKsh > 0
                   ? Math.min(rentBalanceKsh, monthlyRentKsh)
                   : rentBalanceKsh)
@@ -5485,7 +5491,7 @@ async function bootstrap() {
         ? Math.max(
             0,
             Number(
-              rent?.currentMonthPaidKsh ??
+              (rent?.rentMonth?.paidKsh ?? rent?.currentMonthPaidKsh) ??
                 (monthlyRentKsh > 0
                   ? Math.max(0, monthlyRentKsh - currentRentDueKsh)
                   : 0)
@@ -5500,7 +5506,9 @@ async function bootstrap() {
         paymentAccess.rentEnabled && rent
           ? Math.max(0, Number(rent.totalLatePenaltyKsh ?? 0))
           : 0;
-      const rentArrearsKsh = Math.max(0, rentBalanceKsh - currentRentDueKsh);
+      const rentArrearsKsh = rent?.rentMonth
+        ? rent.rentMonth.earlierDueKsh
+        : Math.max(0, rentBalanceKsh - currentRentDueKsh);
       const utilitySummary = utilityBalanceByHouse.get(houseNumber);
       const utilityBalanceKsh = utilitySummary?.totalOpenKsh ?? 0;
       const currentUtilityDueKsh = utilitySummary?.currentDueKsh ?? 0;
@@ -6953,6 +6961,7 @@ async function bootstrap() {
       latestPaymentRecordedAt?: string;
       latestPaymentBillingMonth?: string;
       latestPaymentAmountKsh?: number;
+      rentMonth?: RentMonthFigures;
     }> = rentLedgerService
       .listCollectionStatus(limit)
       .filter((item) => visibleBuildingIds.has(item.buildingId))
@@ -6984,7 +6993,8 @@ async function bootstrap() {
         latestPaymentAt: item.latestPaymentAt,
         latestPaymentRecordedAt: item.latestPaymentRecordedAt,
         latestPaymentBillingMonth: item.latestPaymentBillingMonth,
-        latestPaymentAmountKsh: item.latestPaymentAmountKsh
+        latestPaymentAmountKsh: item.latestPaymentAmountKsh,
+        rentMonth: item.rentMonth
       }));
     const collectionRowsByKey = new Map(
       ledgerRows.map((item) => [
@@ -7108,17 +7118,28 @@ async function bootstrap() {
     // Houses not billed for rent this month: nothing is due, so they don't
     // count toward expected or unpaid rent, and say "not billed" rather than
     // "paid" or "not paid". Money they still owe from before stays visible.
+    const month = billingMonthFromDate(new Date());
     return [...collectionRowsByKey.values()].slice(0, limit).map((item) => {
-      const billing = houseBillingStatusFor(item.buildingId, item.houseNumber);
-      if (billing.rent.billed) {
-        return { ...item, billing };
-      }
-      const owesFromBefore = Math.max(0, Number(item.balanceKsh ?? 0)) > 0;
+      const billing = houseBillingStatusFor(item.buildingId, item.houseNumber, month);
       // Rows without a ledger record are placeholders charging a full month.
       const fromLedger = ledgerRows.includes(item as (typeof ledgerRows)[number]);
+      const rentMonth =
+        item.rentMonth ??
+        rentMonthFigures({
+          month,
+          monthlyRentKsh: item.monthlyRentKsh,
+          balanceKsh: billing.rent.billed ? item.monthlyRentKsh : 0,
+          cycleMonth: month,
+          isBilled: () => billing.rent.billed
+        });
+      if (billing.rent.billed) {
+        return { ...item, billing, rentMonth };
+      }
+      const owesFromBefore = Math.max(0, Number(item.balanceKsh ?? 0)) > 0;
       return {
         ...item,
         billing,
+        rentMonth,
         ...(fromLedger ? {} : { balanceKsh: 0, currentMonthOutstandingKsh: 0 }),
         paymentStatus: owesFromBefore && fromLedger ? item.paymentStatus : "NOT_BILLED"
       };
@@ -14195,6 +14216,47 @@ async function bootstrap() {
           }
         }
       });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  // CAPTYN WiFi asks whether a tenant's house is in good standing before a
+  // tenants-only promo (see services/houseStanding.ts). Same shared token as
+  // the Housing -> WiFi integration.
+  app.post("/api/internal/wifi/house-standing", async (req, res, next) => {
+    try {
+      const expectedToken = String(process.env.CAPTYN_WIFI_INTEGRATION_TOKEN ?? "").trim();
+      if (!expectedToken) {
+        return res.status(503).json({ error: "CAPTYN_WIFI_INTEGRATION_TOKEN is not set on this server." });
+      }
+      if (String(req.header("x-captyn-wifi-token") ?? "").trim() !== expectedToken) {
+        return res.status(401).json({ error: "Invalid CAPTYN WiFi token." });
+      }
+      if (!repositoryContext.prisma) {
+        return res.status(503).json({ error: "House standing needs the database." });
+      }
+      const buildingId = normalizeBuildingId(String(req.body?.buildingId ?? ""));
+      const variants = phoneVariants(String(req.body?.phone ?? ""));
+      if (!buildingId || variants.length === 0) {
+        return res.status(400).json({ error: "Send a buildingId and a Kenyan phone number." });
+      }
+
+      const tenancy = await repositoryContext.prisma.tenancy.findFirst({
+        where: { buildingId, active: true, unit: { isActive: true }, user: { phone: { in: variants } } },
+        select: { unit: { select: { houseNumber: true } } },
+        orderBy: { createdAt: "desc" }
+      });
+      if (!tenancy) {
+        const standing: HouseStanding = { eligible: false, reason: "not_a_tenant" };
+        return res.json({ data: standing });
+      }
+
+      await refreshRoomBillingHoldCache();
+      const houseNumber = normalizeHouseNumber(tenancy.unit.houseNumber);
+      const rent = rentLedgerService.getRentDue(buildingId, houseNumber);
+      const utilityBills = utilityBillingService.listResidentVisibleBillsForHouse(buildingId, houseNumber, undefined, 60);
+      return res.json({ data: houseStanding({ houseNumber, rent, utilityBills }) });
     } catch (error) {
       return next(error);
     }

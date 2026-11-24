@@ -472,6 +472,26 @@ test("does not add next month rent before the rollover window opens", () => {
   assert.equal(snapshot.dueDate, dueDate);
 });
 
+test("a month paid in full stays paid after next month's rent is added early", () => {
+  const service = new RentLedgerService();
+  // Next due date is a few days out, so the ledger has already charged it.
+  const dueDate = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString();
+
+  service.upsertRentDue(BUILDING_A, "R-2", {
+    monthlyRentKsh: 10_000,
+    balanceKsh: 0,
+    dueDate
+  });
+
+  const [row] = service.listCollectionStatus(10, BUILDING_A, new Date(dueDate));
+  assert.ok(row);
+  assert.equal(row.balanceKsh, 10_000);
+  assert.equal(row.currentMonthOutstandingKsh, 10_000);
+  assert.equal(row.rentMonth.rentKsh, 10_000);
+  assert.equal(row.rentMonth.paidKsh, 10_000);
+  assert.equal(row.rentMonth.dueKsh, 0);
+});
+
 test("applies fixed late rent penalty once after the grace period", () => {
   const service = new RentLedgerService();
   const dueDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();

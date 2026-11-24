@@ -297,6 +297,7 @@ const performanceMonthEl = document.getElementById("building-performance-month")
 const performanceSummaryEl = document.getElementById("building-performance-summary");
 const performanceMonthComparisonEl = document.getElementById("performance-month-comparison");
 const exportBuildingPerformanceBtnEl = document.getElementById("export-building-performance");
+const printBuildingPerformanceBtnEl = document.getElementById("print-building-performance");
 const performanceDailyChartEl = document.getElementById("performance-daily-chart");
 const performanceHourlyChartEl = document.getElementById("performance-hourly-chart");
 const performanceTypeChartEl = document.getElementById("performance-type-chart");
@@ -12224,6 +12225,9 @@ exportBuildingPerformanceBtnEl?.addEventListener("click", () => {
         .then(() => setStatus("Performance CSV exported."))
         .catch((error) => handleLandlordError(error, "Unable to export performance."))
         .finally(() => { exportBuildingPerformanceBtnEl.disabled = false; });
+});
+printBuildingPerformanceBtnEl?.addEventListener("click", () => {
+    window.print();
 });
 collectionsReportFromEl?.addEventListener("change", renderCollectionsReport);
 collectionsReportToEl?.addEventListener("change", renderCollectionsReport);

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { rentMonthFigures } from "./rentMonth.js";
 import type {
   RentMpesaCallbackInput,
   UpsertRentDueInput
@@ -1237,14 +1238,31 @@ export class RentLedgerService {
     return reminders;
   }
 
-  listCollectionStatus(limit = 500, buildingId?: string) {
+  listCollectionStatus(limit = 500, buildingId?: string, now = new Date()) {
     this.advanceVisibleRecordCycles(buildingId);
+    const month = billingMonthFromDateTime(now.toISOString());
     return [...this.records.values()]
       .filter((record) => buildingMatchesScope(record.buildingId, buildingId))
       .map((record) => {
         const snapshot = this.toSnapshot(record);
         const latestPayment = record.payments[0];
+        const rentMonth = rentMonthFigures({
+          month,
+          monthlyRentKsh: snapshot.monthlyRentKsh,
+          balanceKsh: snapshot.balanceKsh,
+          cycleMonth: snapshot.currentBillingMonth,
+          isBilled: (billingMonth) =>
+            !this.billingHoldPredicate?.({
+              buildingId: record.buildingId,
+              houseNumber: record.houseNumber,
+              billingMonth,
+              dueDate: record.dueDate
+            }),
+          latePenaltyCharges: snapshot.latePenaltyCharges,
+          payments: record.payments
+        });
         return {
+          rentMonth,
           buildingId: snapshot.buildingId,
           houseNumber: snapshot.houseNumber,
           monthlyRentKsh: snapshot.monthlyRentKsh,

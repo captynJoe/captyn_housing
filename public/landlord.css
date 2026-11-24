@@ -4473,6 +4473,160 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
   }
 }
 
+@page performance-report {
+  size: A4 landscape;
+  margin: 12mm;
+}
+
+@media print {
+  html,
+  body {
+    min-width: 0 !important;
+    background: #fff !important;
+    color: #17241f !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body[data-landlord-view="performance"] .backdrop,
+  body[data-landlord-view="performance"] .lh-topbar,
+  body[data-landlord-view="performance"] .lh-sidebar,
+  body[data-landlord-view="performance"] .landlord-notification-panel {
+    display: none !important;
+  }
+
+  body[data-landlord-view="performance"] .lh-shell,
+  body[data-landlord-view="performance"] .lh-workspace,
+  body[data-landlord-view="performance"] .landlord-content {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  body[data-landlord-view="performance"] .landlord-view:not(#building-performance-section) {
+    display: none !important;
+  }
+
+  body[data-landlord-view="performance"] #building-performance-section {
+    page: performance-report;
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    color: #17241f !important;
+  }
+
+  #building-performance-section .panel-head .action-row,
+  #building-performance-section .performance-controls,
+  #building-performance-section .performance-breakdowns > form {
+    display: none !important;
+  }
+
+  #building-performance-section .panel-head,
+  #building-performance-section .performance-charts-grid,
+  #building-performance-section .performance-breakdowns {
+    margin-top: 0 !important;
+  }
+
+  #building-performance-section .panel-head h2,
+  #building-performance-section h3,
+  #building-performance-section .resident-overview-card,
+  #building-performance-section .package-card,
+  #building-performance-section .performance-breakdowns > :not(form) {
+    color: #17241f !important;
+  }
+
+  #building-performance-section .resident-overview-card,
+  #building-performance-section .package-card {
+    border: 1px solid #d4ddd8 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+
+  #building-performance-section .performance-cards {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+
+  #building-performance-section .performance-charts-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+
+  #building-performance-section .performance-daily-card {
+    grid-column: 1 / -1 !important;
+  }
+
+  #building-performance-section .performance-breakdowns {
+    grid-template-columns: 1fr !important;
+  }
+
+  #building-performance-section .performance-breakdowns > :not(form) {
+    grid-column: 1 / -1 !important;
+  }
+
+  #building-performance-section .performance-chart-card,
+  #building-performance-section .resident-overview-card,
+  #building-performance-section .performance-agent-reconciliation,
+  #building-performance-section .performance-breakdowns > :not(form) {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  #building-performance-section .performance-chart,
+  #building-performance-section .performance-chart svg {
+    display: block !important;
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  #building-performance-section .performance-axis-label {
+    fill: #53625b !important;
+  }
+
+  #building-performance-section .performance-grid-line {
+    stroke: #dce3df !important;
+  }
+
+  #building-performance-section .performance-bar-track {
+    background: #e8eeea !important;
+  }
+
+  #building-performance-section .status-text,
+  #building-performance-section .performance-chart-legend,
+  #building-performance-section .performance-chart,
+  #building-performance-section .performance-row small,
+  #building-performance-section .performance-bar-row small {
+    color: #53625b !important;
+  }
+
+  #building-performance-section .performance-records:not([open]) > .table-wrap {
+    display: block !important;
+  }
+
+  #building-performance-section .table-wrap {
+    overflow: visible !important;
+  }
+
+  #building-performance-section table {
+    width: 100% !important;
+  }
+
+  #building-performance-section thead {
+    display: table-header-group;
+  }
+
+  #building-performance-section tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}
+
 /* Tenant lifecycle and guided move-in */
 .tenant-workspace-callout {
   display: flex;

@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=044c9c08af" />
-    <link rel="stylesheet" href="/landlord.css?v=30a4ae69ff" />
+    <link rel="stylesheet" href="/landlord.css?v=a07f076e9c" />
     <script src="/captyn-theme.js?v=6944e37fb6"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=d9fd4fe626" />
     <link rel="stylesheet" href="/landlord-shell.css?v=7b295db5f2" />
@@ -842,8 +842,8 @@
           </div>
           <div class="resident-overview-cards rent-month-summary-cards">
             <article class="resident-overview-card"><span>Rent scheduled this month</span><strong id="rent-month-expected">-</strong><small id="rent-month-house-count">-</small></article>
-            <article class="resident-overview-card"><span>Rent collected this month</span><strong id="rent-month-collected">-</strong></article>
-            <article class="resident-overview-card"><span>Rent still due this month</span><strong id="rent-month-unpaid">-</strong></article>
+            <article class="resident-overview-card"><span>Rent collected this month</span><strong id="rent-month-collected">-</strong><small id="rent-month-received"></small></article>
+            <article class="resident-overview-card"><span>Rent still due this month</span><strong id="rent-month-unpaid">-</strong><small id="rent-month-earlier"></small></article>
             <article class="resident-overview-card"><span>Collection rate</span><strong id="rent-month-rate">-</strong><small>Based on rent scheduled this month</small></article>
           </div>
           <div id="rent-payment-details" class="landlord-inline-block">
@@ -953,6 +953,7 @@
             </div>
             <div class="action-row">
               <button id="export-building-performance" type="button">Export CSV</button>
+              <button id="print-building-performance" type="button">Print / Save PDF</button>
               <button id="refresh-building-performance" type="button">Refresh</button>
             </div>
           </div>
@@ -2361,6 +2362,6 @@
       <section id="landlord-error" class="error-box hidden"></section>
     </main>
 
-    <script type="module" src="/landlord.js?v=3b72345356"></script>
+    <script type="module" src="/landlord.js?v=ad4a1f9dfa"></script>
   </body>
 </html>

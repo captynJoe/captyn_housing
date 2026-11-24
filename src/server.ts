@@ -7105,7 +7105,24 @@ async function bootstrap() {
       }
     }
 
-    return [...collectionRowsByKey.values()].slice(0, limit);
+    // Houses not billed for rent this month: nothing is due, so they don't
+    // count toward expected or unpaid rent, and say "not billed" rather than
+    // "paid" or "not paid". Money they still owe from before stays visible.
+    return [...collectionRowsByKey.values()].slice(0, limit).map((item) => {
+      const billing = houseBillingStatusFor(item.buildingId, item.houseNumber);
+      if (billing.rent.billed) {
+        return { ...item, billing };
+      }
+      const owesFromBefore = Math.max(0, Number(item.balanceKsh ?? 0)) > 0;
+      // Rows without a ledger record are placeholders charging a full month.
+      const fromLedger = ledgerRows.includes(item as (typeof ledgerRows)[number]);
+      return {
+        ...item,
+        billing,
+        ...(fromLedger ? {} : { balanceKsh: 0, currentMonthOutstandingKsh: 0 }),
+        paymentStatus: owesFromBefore && fromLedger ? item.paymentStatus : "NOT_BILLED"
+      };
+    });
   };
 
   const buildResidentRentStatusDetails = (

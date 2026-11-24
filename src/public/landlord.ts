@@ -994,7 +994,65 @@ function setPaymentInstructions(rows) {
 function setRegistryRows(rows) {
   state.registryRows = Array.isArray(rows) ? rows : [];
   state.registryRoomByKey = buildRoomIndex(state.registryRows);
+  renderNotBilledHouses();
 }
+
+function describeNotBilled(billing) {
+  const rentOff = billing?.rent?.billed === false;
+  const utilitiesOff = billing?.utilities?.billed === false;
+  const utilityType = billing?.utilities?.utilityType;
+  const utilityLabel = utilityType === "water" ? "Water" : utilityType === "electricity" ? "Electricity" : "Utilities";
+  if (rentOff && utilitiesOff) return `Rent and ${utilityLabel.toLowerCase()}`;
+  if (rentOff) return "Rent";
+  if (utilitiesOff) return utilityLabel;
+  return "";
+}
+
+// Setup: every house in the chosen building that isn't billed for rent or
+// utilities, with why and until when. Changes happen on the House page.
+function renderNotBilledHouses() {
+  const card = document.getElementById("not-billed-card");
+  const body = document.getElementById("not-billed-body");
+  const summary = document.getElementById("not-billed-summary");
+  if (!(card instanceof HTMLElement) || !(body instanceof HTMLElement) || !(summary instanceof HTMLElement)) {
+    return;
+  }
+  const selected = getSelectedSettingsBuildingId();
+  const buildingId = selected && selected !== "all" ? normalizeLookupBuildingId(selected) : "";
+  const rows = (Array.isArray(state.registryRows) ? state.registryRows : []).filter(
+    (item) => !buildingId || getRecordBuildingId(item) === buildingId
+  );
+  // Older API without house billing: keep the card out of the way.
+  card.classList.toggle("hidden", !rows.some((item) => item?.billing));
+  const notBilled = rows
+    .filter((item) => describeNotBilled(item?.billing))
+    .sort(compareStableRoomOrder);
+  summary.textContent = notBilled.length
+    ? `${notBilled.length} house${notBilled.length === 1 ? "" : "s"}`
+    : "Every house is billed.";
+  body.innerHTML = notBilled
+    .map((item) => {
+      const { rent, utilities } = item.billing;
+      const reasons = [...new Set([rent?.billed === false ? rent.reason : "", utilities?.billed === false ? utilities.reason : ""].filter(Boolean))];
+      const untils = [...new Set([rent, utilities].filter((charge) => charge?.billed === false).map((charge) => charge.untilMonth ? formatBillingMonth(charge.untilMonth) : "Until resumed"))];
+      return `<tr>
+        <td>${escapeHtml(item.houseNumber)}</td>
+        <td>${escapeHtml(describeNotBilled(item.billing))}</td>
+        <td>${escapeHtml(reasons.join(" · ") || "-")}</td>
+        <td>${escapeHtml(untils.join(" · "))}</td>
+        <td><button type="button" data-action="open-room-account" data-building-id="${escapeHtml(getRecordBuildingId(item))}" data-house-number="${escapeHtml(item.houseNumber)}">Open</button></td>
+      </tr>`;
+    })
+    .join("");
+}
+
+document.getElementById("not-billed-body")?.addEventListener("click", (event) => {
+  const button = event.target instanceof Element ? event.target.closest("[data-action='open-room-account']") : null;
+  if (!(button instanceof HTMLElement)) {
+    return;
+  }
+  openRoomAccountPage(button.dataset.buildingId, button.dataset.houseNumber);
+});
 
 function setResidentDirectory(rows) {
   state.residentDirectory = Array.isArray(rows) ? rows : [];
@@ -2772,7 +2830,14 @@ function getResidentUtilityBillingStatusLabel(resident, utilitySummary = null) {
 }
 
 function isResidentRentEnabled(resident) {
-  return resident?.rentEnabled !== false;
+  // A house set to "not billed" for rent has no rent due, paid or overdue.
+  return resident?.rentEnabled !== false && resident?.billing?.rent?.billed !== false;
+}
+
+// Neither rent nor any utility is billed (owner's house, staff shop, ...).
+function isResidentNotBilled(resident) {
+  const billing = resident?.billing;
+  return billing?.rent?.billed === false && billing?.utilities?.billed === false && !billing.utilities.utilityType;
 }
 
 function getResidentCurrentUtilityDueKsh(resident) {
@@ -2989,6 +3054,10 @@ function getResidentBillingStatusLabel(resident) {
   const utilitySummary = getResidentUtilityRoomSummary(resident);
   const utilityLabel = getResidentUtilityBillingStatusLabel(resident, utilitySummary);
 
+  if (isResidentNotBilled(resident) && getResidentOperationalOutstandingKsh(resident, utilitySummary) <= 0 && expenseBalanceKsh <= 0) {
+    return "Not billed";
+  }
+
   if (!isResidentRentEnabled(resident)) {
     const label = utilityLabel || "Clear";
 
@@ -3048,6 +3117,9 @@ function getResidentBillingToneClass(resident, utilitySummary = null) {
   }
 
   const resolvedUtilitySummary = utilitySummary ?? getResidentUtilityRoomSummary(resident);
+  if (isResidentNotBilled(resident) && getResidentOperationalOutstandingKsh(resident, resolvedUtilitySummary) <= 0) {
+    return "is-muted";
+  }
   const arrearsKsh = getResidentOperationalArrearsKsh(resident, resolvedUtilitySummary);
   const currentDueKsh = getResidentOperationalCurrentDueKsh(
     resident,
@@ -3088,6 +3160,9 @@ function getRentCollectionVisualState(item) {
   }
 
   const rawLabel = String(item?.paymentStatus ?? "").trim().toUpperCase();
+  if (rawLabel === "NOT_BILLED") {
+    return { label: "Not billed", toneClass: "is-muted" };
+  }
   return {
     label: rawLabel === "PAID" || !rawLabel ? "Paid" : rawLabel.replaceAll("_", " "),
     toneClass: "is-success"
@@ -5604,6 +5679,7 @@ function renderSettingsPanel() {
   if (!(settingsSummaryEl instanceof HTMLElement)) {
     return;
   }
+  renderNotBilledHouses();
 
   const buildingId = getSelectedSettingsBuildingId();
   const building = state.buildings.find((item) => item.id === buildingId) ?? null;

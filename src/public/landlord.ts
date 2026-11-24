@@ -6218,7 +6218,8 @@ function renderRentSheetRows(rows) {
     const residentLabel = String(item.residentName ?? "").trim() || (item.hasActiveResident ? "Resident linked" : "Vacant");
     const residentPhone = String(item.residentPhone ?? "").trim();
     const roomDefaultActive = item.roomDefaultActive !== false;
-    const needsRentSetup = Boolean(item.hasActiveResident) && resolvedMonthlyRentKsh <= 0 && roomDefaultActive;
+    const rentNotBilled = item.billing?.rent?.billed === false;
+    const needsRentSetup = Boolean(item.hasActiveResident) && resolvedMonthlyRentKsh <= 0 && roomDefaultActive && !rentNotBilled;
 
     const card = document.createElement("article");
     card.className = "rent-house-card";
@@ -6248,7 +6249,7 @@ function renderRentSheetRows(rows) {
         <div class="rent-house-summary">
           <span>Monthly rent</span>
           <strong>${resolvedMonthlyRentKsh > 0 ? escapeHtml(formatCurrency(resolvedMonthlyRentKsh)) : "Not set"}</strong>
-          <small>${escapeHtml(sourceLabel)}${item.rentSetupSource === "room_disabled" ? " · rent off" : ""}</small>
+          <small>${escapeHtml(sourceLabel)}${item.rentSetupSource === "room_disabled" ? " · rent off" : ""}${rentNotBilled ? ` · not billed${item.billing.rent.reason ? ` (${escapeHtml(item.billing.rent.reason)})` : ""}` : ""}</small>
         </div>
       </div>
       ${needsRentSetup ? '<p class="rent-house-warning">Set a rent amount before this resident can be billed.</p>' : ""}

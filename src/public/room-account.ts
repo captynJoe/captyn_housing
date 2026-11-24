@@ -51,6 +51,9 @@ const roomBillingHoldUtilityEl = document.getElementById("room-billing-hold-util
 const roomBillingHoldStartEl = document.getElementById("room-billing-hold-start");
 const roomBillingHoldEndEl = document.getElementById("room-billing-hold-end");
 const roomBillingHoldReasonEl = document.getElementById("room-billing-hold-reason");
+const roomBillingHoldUntilResumedEl = document.getElementById("room-billing-hold-until-resumed");
+// Same value the server uses for holds that run until someone resumes billing.
+const OPEN_ENDED_BILLING_MONTH = "2099-12";
 const roomBillingHoldSubmitEl = document.getElementById("room-billing-hold-submit");
 const roomBillingHoldsEl = document.getElementById("room-billing-holds");
 const roomManagementStatusEl = document.getElementById("room-management-status");
@@ -1068,9 +1071,94 @@ function formatBillingHoldScope(value, utilityType) {
 
 function formatBillingHoldRange(hold) {
   const start = formatBillingMonth(hold?.startMonth);
+  if (toBillingMonth(hold?.endMonth) >= OPEN_ENDED_BILLING_MONTH) {
+    return `From ${start} · until resumed`;
+  }
   const end = formatBillingMonth(hold?.endMonth);
   return start === end ? start : `${start} to ${end}`;
 }
+
+// Billing panel: what this house is billed for from this month on, rent and
+// utilities separately. Saving goes through PUT .../billing, which ends any
+// pause that already covered past months instead of deleting it.
+const houseBillingFormEl = document.getElementById("house-billing-form");
+const houseBillingSummaryEl = document.getElementById("house-billing-summary");
+const houseBillingRentEl = document.getElementById("house-billing-rent");
+const houseBillingUtilitiesEl = document.getElementById("house-billing-utilities");
+const houseBillingUntilEl = document.getElementById("house-billing-until");
+const houseBillingReasonEl = document.getElementById("house-billing-reason");
+
+function describeCharge(label, charge) {
+  if (!charge || charge.billed !== false) return `${label} billed`;
+  const what = charge.utilityType ? `${utilityTypeLabel(charge.utilityType)} not billed` : `${label} not billed`;
+  const until = charge.untilMonth ? ` until ${formatBillingMonth(charge.untilMonth)}` : "";
+  return `${what}${until}`;
+}
+
+function renderHouseBilling(payload) {
+  const billing = payload?.billing;
+  if (!billing) return;
+  // Hidden in the HTML so an older script never shows controls it can't run.
+  document.getElementById("house-billing-panel")?.classList.remove("hidden");
+  document.querySelector(".room-billing-hold-until")?.classList.remove("hidden");
+  const reasons = [billing.rent, billing.utilities].filter((c) => c?.billed === false && c.reason).map((c) => c.reason);
+  if (houseBillingSummaryEl instanceof HTMLElement) {
+    houseBillingSummaryEl.textContent = `${describeCharge("Rent", billing.rent)} · ${describeCharge("Utilities", billing.utilities)}${reasons.length ? ` — ${[...new Set(reasons)].join(" / ")}` : ""}`;
+  }
+  if (houseBillingRentEl instanceof HTMLSelectElement) houseBillingRentEl.value = billing.rent?.billed === false ? "off" : "billed";
+  if (houseBillingUtilitiesEl instanceof HTMLSelectElement) {
+    houseBillingUtilitiesEl.value = billing.utilities?.billed === false ? (billing.utilities.utilityType || "off") : "billed";
+  }
+  const off = [billing.rent, billing.utilities].find((c) => c?.billed === false);
+  if (houseBillingUntilEl instanceof HTMLInputElement) houseBillingUntilEl.value = off?.untilMonth || "";
+  if (houseBillingReasonEl instanceof HTMLInputElement) houseBillingReasonEl.value = off?.reason || "";
+  if (houseBillingFormEl instanceof HTMLElement) houseBillingFormEl.classList.toggle("hidden", !canManageBillingHolds());
+}
+
+async function saveHouseBilling(event) {
+  event.preventDefault();
+  if (state.loading || !canManageBillingHolds()) return;
+  const rentOff = houseBillingRentEl instanceof HTMLSelectElement && houseBillingRentEl.value === "off";
+  const utilitiesValue = houseBillingUtilitiesEl instanceof HTMLSelectElement ? houseBillingUtilitiesEl.value : "billed";
+  const utilitiesOff = utilitiesValue !== "billed";
+  const reason = String(houseBillingReasonEl?.value ?? "").trim();
+  const untilMonth = toBillingMonth(houseBillingUntilEl?.value) || undefined;
+  if ((rentOff || utilitiesOff) && reason.length < 3) {
+    showError("Add a reason for not billing this house.");
+    return;
+  }
+  const off = { billed: false, reason, untilMonth };
+  setLoading(true);
+  showError("");
+  setStatus("Saving billing...");
+  try {
+    await requestJson(
+      `/api/landlord/buildings/${encodeURIComponent(state.buildingId)}/rooms/${encodeURIComponent(state.houseNumber)}/billing`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          rent: rentOff ? off : { billed: true },
+          utilities: utilitiesOff
+            ? { ...off, utilityType: utilitiesValue === "water" || utilitiesValue === "electricity" ? utilitiesValue : undefined }
+            : { billed: true }
+        })
+      }
+    );
+    await loadRoomAccount();
+    setStatus("Billing saved.");
+  } catch (error) {
+    if (error?.status === 401) {
+      redirectToLogin();
+      return;
+    }
+    showError(error instanceof Error ? error.message : "Unable to save billing.");
+    setStatus("Billing save failed.");
+  } finally {
+    setLoading(false);
+  }
+}
+houseBillingFormEl?.addEventListener("submit", saveHouseBilling);
 
 function renderBillingHolds(payload) {
   if (!(roomBillingHoldsEl instanceof HTMLElement)) {
@@ -1653,6 +1741,7 @@ function renderRoomAccount(payload) {
   renderManagementForms(payload);
   renderChargeSetup(payload);
   renderProfile(payload);
+  renderHouseBilling(payload);
   renderBillingHolds(payload);
   renderAnomalies(payload);
   renderUtilityBills(payload);
@@ -1699,6 +1788,13 @@ function setBillingHoldFormEnabled(enabled) {
   });
 }
 
+function syncBillingHoldUntilResumed() {
+  if (roomBillingHoldEndEl instanceof HTMLInputElement && roomBillingHoldUntilResumedEl instanceof HTMLInputElement) {
+    roomBillingHoldEndEl.disabled = roomBillingHoldUntilResumedEl.checked;
+  }
+}
+roomBillingHoldUntilResumedEl?.addEventListener("change", syncBillingHoldUntilResumed);
+
 async function createBillingHold(event) {
   event.preventDefault();
   if (state.loading || !canManageBillingHolds()) {
@@ -1708,9 +1804,14 @@ async function createBillingHold(event) {
   const scope = String(roomBillingHoldScopeEl?.value ?? "utilities");
   const utilityType = String(roomBillingHoldUtilityEl?.value ?? "").trim();
   const startMonth = toBillingMonth(roomBillingHoldStartEl?.value) || currentBillingMonth();
-  const endMonth = toBillingMonth(roomBillingHoldEndEl?.value) || startMonth;
+  const untilResumed = roomBillingHoldUntilResumedEl instanceof HTMLInputElement && roomBillingHoldUntilResumedEl.checked;
+  const endMonth = untilResumed ? OPEN_ENDED_BILLING_MONTH : toBillingMonth(roomBillingHoldEndEl?.value) || startMonth;
   const reason = String(roomBillingHoldReasonEl?.value ?? "").trim();
 
+  if (reason.length < 3) {
+    showError("Add a reason for pausing billing.");
+    return;
+  }
   if (endMonth < startMonth) {
     showError("Billing hold end month must be the same as or after the start month.");
     return;
@@ -1735,8 +1836,9 @@ async function createBillingHold(event) {
           scope,
           utilityType: scope === "utilities" && utilityType ? utilityType : undefined,
           startMonth,
-          endMonth,
-          reason: reason || undefined
+          // Left out = until resumed (the server stores the open-ended month).
+          endMonth: untilResumed ? undefined : endMonth,
+          reason
         })
       }
     );

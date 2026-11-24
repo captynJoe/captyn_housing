@@ -16,6 +16,8 @@ export interface BalanceRow {
   residentName: string;
   residentPhone: string;
   hasActiveResident: boolean;
+  // Rent/utilities billed this month (billing holds); see houseBilling.ts.
+  billing?: { rent: { billed: boolean; reason?: string }; utilities: { billed: boolean; utilityType?: string; reason?: string } };
   rent: { balanceKsh: number; monthlyRentKsh: number; dueDate: string; status: string } | null;
   utilities: { water: number; electricity: number; total: number };
   totalKsh: number;
@@ -25,6 +27,18 @@ export interface BalanceRow {
 
 export type BalanceFilter = "all" | "unchecked" | "owing";
 export type BalanceType = "both" | "rent" | "utilities";
+
+// "Rent not billed · Owner's house" -- so nobody chases a house for what
+// it isn't charged.
+export function notBilledLabel(row: Pick<BalanceRow, "billing">): string {
+  const rentOff = row.billing?.rent?.billed === false;
+  const utilitiesOff = row.billing?.utilities?.billed === false;
+  if (!rentOff && !utilitiesOff) return "";
+  const utilityWord = row.billing?.utilities?.utilityType === "water" ? "Water" : row.billing?.utilities?.utilityType === "electricity" ? "Electricity" : "Utilities";
+  const what = rentOff && utilitiesOff ? "Not billed" : rentOff ? "Rent not billed" : `${utilityWord} not billed`;
+  const reason = (rentOff ? row.billing?.rent?.reason : undefined) || row.billing?.utilities?.reason;
+  return reason ? `${what} · ${reason}` : what;
+}
 
 export function getBalanceAmount(row: BalanceRow, type: BalanceType = "both"): number {
   if (type === "rent") {
@@ -275,6 +289,7 @@ export function createBalancesView(deps: BalancesViewDeps) {
           <span>${escapeHtml(row.residentName || (row.hasActiveResident ? "" : "Vacant"))}${
             row.residentPhone ? ` · ${escapeHtml(row.residentPhone)}` : ""
           }</span>
+          ${notBilledLabel(row) ? `<span>${escapeHtml(notBilledLabel(row))}</span>` : ""}
         </div>
         <span class="bal-check ${checked ? "is-done" : ""}">${checked ? "Checked today" : row.checkedAt ? `Checked ${escapeHtml(shortDate(row.checkedAt))}` : "Not checked"}</span>
       </header>

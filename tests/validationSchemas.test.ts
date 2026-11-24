@@ -4,6 +4,7 @@ import {
   accountChangePasswordSchema,
   adminAccessCredentialUpdateSchema,
   createRoomBillingHoldSchema,
+  OPEN_ENDED_BILLING_MONTH,
   depositRefundRecordSchema,
   landlordAgentAdvanceSettlementSchema,
   landlordAgentDisbursementSchema,
@@ -219,9 +220,24 @@ test("room billing holds require a valid month range", () => {
         scope: "rent",
         utilityType: "water",
         startMonth: "2026-06",
-        endMonth: "2026-05"
+        endMonth: "2026-05",
+        reason: "Tenant away"
       }),
     /End month must be/
+  );
+});
+
+test("an unbillable house: no end month means until resumed, and a reason is required", () => {
+  const parsed = createRoomBillingHoldSchema.parse({
+    scope: "all",
+    startMonth: "2026-11",
+    reason: "Caretaker house"
+  });
+  assert.equal(parsed.endMonth, OPEN_ENDED_BILLING_MONTH);
+
+  assert.throws(
+    () => createRoomBillingHoldSchema.parse({ scope: "all", startMonth: "2026-11", endMonth: "2026-12" }),
+    /reason|Required/i
   );
 });
 

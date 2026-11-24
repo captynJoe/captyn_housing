@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/admin.css?v=044c9c08af" />
-    <link rel="stylesheet" href="/landlord.css?v=30a4ae69ff" />
+    <link rel="stylesheet" href="/landlord.css?v=a07f076e9c" />
     <script src="/captyn-theme.js?v=6944e37fb6"></script>
     <link rel="stylesheet" href="/captyn-theme.css?v=d9fd4fe626" />
   </head>
@@ -300,6 +300,40 @@
         </div>
       </details>
 
+      <section id="house-billing-panel" class="panel wide-panel hidden">
+        <div class="panel-head">
+          <h2>Billing</h2>
+        </div>
+        <p id="house-billing-summary" class="status-text"></p>
+        <form id="house-billing-form" class="room-billing-hold-form">
+          <label>
+            Rent
+            <select id="house-billing-rent">
+              <option value="billed">Billed</option>
+              <option value="off">Not billed</option>
+            </select>
+          </label>
+          <label>
+            Utilities
+            <select id="house-billing-utilities">
+              <option value="billed">Billed</option>
+              <option value="off">Not billed</option>
+              <option value="water">Water not billed</option>
+              <option value="electricity">Electricity not billed</option>
+            </select>
+          </label>
+          <label>
+            Until
+            <input id="house-billing-until" type="month" />
+          </label>
+          <label class="room-billing-hold-reason">
+            Reason
+            <input id="house-billing-reason" type="text" maxlength="280" placeholder="Owner's house / staff shop / landlord waiver" />
+          </label>
+          <button id="house-billing-submit" type="submit">Save billing</button>
+        </form>
+      </section>
+
       <details id="room-billing-history" class="panel wide-panel room-account-disclosure">
         <summary class="room-account-disclosure-summary"><span>History & records</span><small>Billing holds, audit trail, bills, payments and issues</small></summary>
         <div class="room-account-disclosure-content">
@@ -330,11 +364,15 @@
           </label>
           <label>
             To
-            <input id="room-billing-hold-end" type="month" required />
+            <input id="room-billing-hold-end" type="month" />
+          </label>
+          <label class="room-billing-hold-until hidden">
+            <input id="room-billing-hold-until-resumed" type="checkbox" />
+            Until resumed
           </label>
           <label class="room-billing-hold-reason">
             Reason
-            <input id="room-billing-hold-reason" type="text" maxlength="280" placeholder="Tenant away / landlord approved" />
+            <input id="room-billing-hold-reason" type="text" minlength="3" maxlength="280" required placeholder="Caretaker house / landlord approved" />
           </label>
           <button id="room-billing-hold-submit" type="submit">Pause Billing</button>
         </form>

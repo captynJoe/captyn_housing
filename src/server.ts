@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { houseBillingStatus, planHouseBillingChange, shiftBillingMonth as shiftHouseBillingMonth, type HouseBillingStatus } from "./services/houseBilling.js";
 import cors from "cors";
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
@@ -166,6 +167,8 @@ import {
   landlordUtilityBulkSubmissionAuditCreateSchema,
   landlordUtilityBulkSubmissionAuditFinalizeSchema,
   createRoomBillingHoldSchema,
+  setHouseBillingSchema,
+  OPEN_ENDED_BILLING_MONTH,
   cancelRoomBillingHoldSchema,
   landlordUtilityRegistryUpsertSchema,
   landlordMeterReadingsSaveSchema,
@@ -639,6 +642,8 @@ interface LandlordUtilityRegistryRow {
   emergencyContactPhone?: string;
   agreementUpdatedAt?: string;
   hasActiveResident: boolean;
+  // Rent and utilities billed or not this month, from billing holds.
+  billing: HouseBillingStatus;
   rentEnabled: boolean;
   monthlyRentKsh: number;
   configuredMonthlyRentKsh: number;
@@ -3321,6 +3326,7 @@ async function bootstrap() {
     utilityType?: RoomBillingHoldUtilityType;
     startMonth: string;
     endMonth: string;
+    reason?: string;
   };
   type RoomBillingChargeKind = "rent" | "utility";
 
@@ -3421,6 +3427,15 @@ async function bootstrap() {
     return !hold.utilityType || hold.utilityType === input.utilityType;
   };
 
+  // A house's rent/utilities billing for a month, from its active holds.
+  const houseBillingStatusFor = (buildingId: string, houseNumber: string, month = billingMonthFromDate(new Date())) =>
+    houseBillingStatus(
+      roomBillingHoldCache.filter(
+        (hold) => hold.buildingId === normalizeBuildingId(buildingId) && hold.houseNumber === normalizeHouseNumber(houseNumber)
+      ),
+      month
+    );
+
   const isRoomBillingHeld = (input: {
     buildingId: string;
     houseNumber: string;
@@ -3461,7 +3476,8 @@ async function bootstrap() {
           scope: true,
           utilityType: true,
           startMonth: true,
-          endMonth: true
+          endMonth: true,
+          reason: true
         }
       });
 
@@ -3472,7 +3488,8 @@ async function bootstrap() {
         scope: normalizeRoomBillingHoldScope(hold.scope),
         utilityType: normalizeRoomBillingHoldUtilityType(hold.utilityType),
         startMonth: hold.startMonth,
-        endMonth: hold.endMonth
+        endMonth: hold.endMonth,
+        reason: hold.reason ?? undefined
       }));
       roomBillingHoldCacheLoadedAt = now;
     } catch (error) {
@@ -5541,6 +5558,7 @@ async function bootstrap() {
         emergencyContactPhone: agreement?.emergencyContactPhone,
         agreementUpdatedAt: agreement?.agreementUpdatedAt,
         hasActiveResident: Boolean(resident),
+        billing: houseBillingStatusFor(buildingId, houseNumber),
         rentEnabled: paymentAccess.rentEnabled,
         monthlyRentKsh,
         configuredMonthlyRentKsh,
@@ -6491,7 +6509,7 @@ async function bootstrap() {
   };
 
   const AUTO_ROOM_BILLING_HOLD_PREFIX = "Auto-paused";
-  const AUTO_ROOM_BILLING_HOLD_END_MONTH = "2099-12";
+  const AUTO_ROOM_BILLING_HOLD_END_MONTH = OPEN_ENDED_BILLING_MONTH;
 
   const isAutoRoomBillingHoldReason = (reason: string | null | undefined) =>
     String(reason ?? "").trim().startsWith(AUTO_ROOM_BILLING_HOLD_PREFIX);
@@ -6874,6 +6892,7 @@ async function bootstrap() {
       tickets,
       auditEvents,
       billingHolds,
+      billing: houseBillingStatusFor(building.id, normalizedHouseNumber),
       agreementState: resolvedAgreementState,
       monthlyCombinedCharge,
       buildingConfiguration
@@ -16162,6 +16181,7 @@ async function bootstrap() {
         residentPhone: row.residentPhone,
         residentUserId: row.residentUserId,
         hasActiveResident: row.hasActiveResident,
+        billing: row.billing,
         verificationStatus: row.verificationStatus,
         rentSetupSource: row.rentSetupSource,
         resolvedMonthlyRentKsh: row.configuredMonthlyRentKsh,
@@ -16738,6 +16758,7 @@ async function bootstrap() {
               residentPhone: row.residentPhone,
               residentUserId: row.residentUserId,
               hasActiveResident: row.hasActiveResident,
+              billing: row.billing,
               verificationStatus: row.verificationStatus,
               monthlyRentKsh: row.monthlyRentKsh,
               depositKsh: row.depositKsh,
@@ -16902,6 +16923,7 @@ async function bootstrap() {
               residentPhone: row.residentPhone,
               residentUserId: row.residentUserId,
               hasActiveResident: row.hasActiveResident,
+              billing: row.billing,
               verificationStatus: row.verificationStatus,
               monthlyRentKsh: row.monthlyRentKsh,
               depositKsh: row.depositKsh,
@@ -19021,7 +19043,7 @@ async function bootstrap() {
           buildingId: building.id,
           houseNumber: normalizedHouseNumber,
           action: "billing.hold.created",
-          summary: `Billing hold added for ${data.scope.replaceAll("_", " ")} from ${data.startMonth} to ${data.endMonth}.`,
+          summary: `Billing hold added for ${data.scope.replaceAll("_", " ")} from ${data.startMonth} ${data.endMonth >= OPEN_ENDED_BILLING_MONTH ? "until resumed" : `to ${data.endMonth}`}.`,
           actor,
           metadata: {
             billingHoldId: data.id,
@@ -19097,20 +19119,32 @@ async function bootstrap() {
 
       const parsed = cancelRoomBillingHoldSchema.parse(req.body ?? {});
       const actor = actorFromLandlordContext(context);
-      const data = existing.canceledAt
+      // Recurring utility charges walk forward from the last real bill and skip
+      // held months, so canceling a hold that already covered past months would
+      // bill all of them retroactively. End it at last month instead; a hold
+      // that has already finished stays as it is.
+      const currentMonth = billingMonthFromDate(new Date());
+      const data = existing.canceledAt || existing.endMonth < currentMonth
         ? mapRoomBillingHold(existing)
-        : mapRoomBillingHold(
-            await repositoryContext.prisma.roomBillingHold.update({
-              where: { id: existing.id },
-              data: {
-                canceledAt: new Date(),
-                canceledByUserId: actor.userId,
-                canceledByRole: actor.role,
-                canceledByName: actor.name,
-                cancelReason: parsed.reason
-              }
-            })
-          );
+        : existing.startMonth < currentMonth
+          ? mapRoomBillingHold(
+              await repositoryContext.prisma.roomBillingHold.update({
+                where: { id: existing.id },
+                data: { endMonth: shiftHouseBillingMonth(currentMonth, -1) }
+              })
+            )
+          : mapRoomBillingHold(
+              await repositoryContext.prisma.roomBillingHold.update({
+                where: { id: existing.id },
+                data: {
+                  canceledAt: new Date(),
+                  canceledByUserId: actor.userId,
+                  canceledByRole: actor.role,
+                  canceledByName: actor.name,
+                  cancelReason: parsed.reason
+                }
+              })
+            );
 
       await refreshRoomBillingHoldCache(true);
       await recordRoomAccountAuditEvent({
@@ -19139,6 +19173,92 @@ async function bootstrap() {
     "/api/landlord/buildings/:buildingId/rooms/:houseNumber/billing-holds/:holdId",
     handleCancelRoomBillingHold
   );
+
+  // Sets what a house is billed for from this month on, rent and utilities
+  // separately ("not billed" needs a reason; no end month = until resumed).
+  // Replaces whatever covers this month via planHouseBillingChange, which ends
+  // holds that covered past months rather than canceling them.
+  app.put("/api/landlord/buildings/:buildingId/rooms/:houseNumber/billing", async (req, res, next) => {
+    try {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) return;
+      if (context.role === "caretaker") {
+        return res.status(403).json({ error: "House manager accounts cannot change house billing." });
+      }
+      if (!repositoryContext.prisma) {
+        return res.status(503).json({ error: "House billing requires database connection." });
+      }
+      const buildingId = req.params.buildingId?.trim();
+      const houseNumber = normalizeHouseNumber(houseNumberQuerySchema.parse({ houseNumber: req.params.houseNumber }).houseNumber);
+      const building = buildingId ? await store.getBuilding(buildingId) : null;
+      if (!building) return res.status(404).json({ error: "Building not found" });
+      if (!(await canManageBuildingFromLandlordContext(context, building.id))) {
+        return res.status(403).json({ error: "Building access denied" });
+      }
+      const desired = setHouseBillingSchema.parse(req.body ?? {});
+      const month = billingMonthFromDate(new Date());
+      const prisma = repositoryContext.prisma;
+      const actor = actorFromLandlordContext(context);
+      const plan = await prisma.$transaction(async (tx) => {
+        const current = await tx.roomBillingHold.findMany({
+          where: { buildingId: building.id, houseNumber, canceledAt: null }
+        });
+        const plan = planHouseBillingChange(
+          current.map((hold) => ({
+            id: hold.id,
+            scope: normalizeRoomBillingHoldScope(hold.scope),
+            utilityType: normalizeRoomBillingHoldUtilityType(hold.utilityType),
+            startMonth: hold.startMonth,
+            endMonth: hold.endMonth,
+            reason: hold.reason ?? undefined
+          })),
+          month,
+          desired
+        );
+        for (const item of plan.end) {
+          await tx.roomBillingHold.update({ where: { id: item.id }, data: { endMonth: item.endMonth } });
+        }
+        if (plan.cancel.length > 0) {
+          await tx.roomBillingHold.updateMany({
+            where: { id: { in: plan.cancel } },
+            data: { canceledAt: new Date(), canceledByUserId: actor.userId, canceledByRole: actor.role, canceledByName: actor.name, cancelReason: "Billing changed" }
+          });
+        }
+        for (const item of plan.create) {
+          await tx.roomBillingHold.create({
+            data: {
+              buildingId: building.id,
+              houseNumber,
+              scope: item.scope,
+              utilityType: item.utilityType,
+              startMonth: item.startMonth,
+              endMonth: item.endMonth,
+              reason: item.reason,
+              createdByUserId: actor.userId,
+              createdByRole: actor.role,
+              createdByName: actor.name
+            }
+          });
+        }
+        return plan;
+      });
+      await refreshRoomBillingHoldCache(true);
+      const billing = houseBillingStatusFor(building.id, houseNumber, month);
+      const describe = (label: string, charge: { billed: boolean; reason?: string; untilMonth?: string }) =>
+        charge.billed ? `${label} billed` : `${label} not billed (${charge.reason ?? "no reason"}${charge.untilMonth ? `, until ${charge.untilMonth}` : ", until resumed"})`;
+      await recordRoomAccountAuditEvent({
+        buildingId: building.id,
+        houseNumber,
+        action: "billing.house.updated",
+        summary: `From ${month}: ${describe("rent", billing.rent)}; ${describe("utilities", billing.utilities)}.`,
+        actor,
+        metadata: { month, desired, plan }
+      });
+      return res.json({ data: billing, role: context.role });
+    } catch (error) {
+      return next(error);
+    }
+  });
   app.post(
     "/api/landlord/buildings/:buildingId/rooms/:houseNumber/billing-holds/:holdId/cancel",
     handleCancelRoomBillingHold
@@ -19514,6 +19634,7 @@ async function bootstrap() {
         residentName: row.residentName ?? "",
         residentPhone: row.residentPhone ?? "",
         hasActiveResident: Boolean(row.hasActiveResident),
+        billing: houseBillingStatusFor(building.id, houseNumber),
         rent: rent
           ? {
               balanceKsh: rentBalanceKsh,

@@ -1505,13 +1505,19 @@ export const depositRefundRecordSchema = z.object({
 
 export const roomBillingHoldScopeSchema = z.enum(["rent", "utilities", "all"]);
 
+// A hold that runs until someone resumes billing (an unbillable house).
+// Shared with the automatic move-out holds, which already used it.
+export const OPEN_ENDED_BILLING_MONTH = "2099-12";
+
 export const createRoomBillingHoldSchema = z
   .object({
     scope: roomBillingHoldScopeSchema,
     utilityType: utilityTypeSchema.optional(),
     startMonth: billingMonthSchema,
-    endMonth: billingMonthSchema,
-    reason: z.string().trim().min(3).max(280).optional()
+    // Left out: the house stays unbillable until billing is resumed.
+    endMonth: billingMonthSchema.optional().transform((value) => value ?? OPEN_ENDED_BILLING_MONTH),
+    // Every pause says why, so the house page and Balances can show it.
+    reason: z.string().trim().min(3, "Add a reason for pausing billing.").max(280)
   })
   .superRefine((value, ctx) => {
     if (value.endMonth < value.startMonth) {
@@ -1530,6 +1536,25 @@ export const createRoomBillingHoldSchema = z
       });
     }
   });
+
+const houseChargeBillingSchema = z
+  .object({
+    billed: z.boolean(),
+    utilityType: utilityTypeSchema.optional(),
+    reason: z.string().trim().max(280).optional(),
+    // Last month not billed; left out = until resumed.
+    untilMonth: billingMonthSchema.optional()
+  })
+  .superRefine((value, ctx) => {
+    if (!value.billed && (value.reason ?? "").length < 3) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["reason"], message: "Add a reason for not billing this house." });
+    }
+  });
+
+export const setHouseBillingSchema = z.object({
+  rent: houseChargeBillingSchema.refine((value) => !value.utilityType, { message: "Rent has no utility type." }),
+  utilities: houseChargeBillingSchema
+});
 
 export const cancelRoomBillingHoldSchema = z.object({
   reason: z.string().trim().max(280).optional()

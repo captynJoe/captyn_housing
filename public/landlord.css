@@ -4848,3 +4848,20 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
     margin-top: 10pt;
   }
 }
+
+/* Houses To Watch: the list scrolls in its own box so the column names stay
+   on screen. Phones use the card layout instead. */
+@media (min-width: 681px) {
+  .dashboard-watch-table {
+    max-height: calc(100vh - 140px);
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .dashboard-watch-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    box-shadow: 0 1px 0 var(--captyn-line);
+  }
+}

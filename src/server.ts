@@ -2,6 +2,7 @@ import "dotenv/config";
 import { houseStanding, phoneVariants, type HouseStanding } from "./services/houseStanding.js";
 import { rentMonthFigures, type RentMonthFigures } from "./services/rentMonth.js";
 import { buildReportHouses } from "./services/performanceReport.js";
+import { withDueDay } from "./services/rentSchedule.js";
 import { houseBillingStatus, planHouseBillingChange, shiftBillingMonth as shiftHouseBillingMonth, type HouseBillingStatus } from "./services/houseBilling.js";
 import cors from "cors";
 import express from "express";
@@ -1058,7 +1059,8 @@ function buildRentDueDateForChargeStart(
   const year = startDate.getUTCFullYear();
   const month = startDate.getUTCMonth();
   const lastDayOfMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-  const dueDay = normalizeOptionalRentDueDay(paymentDueDay) ?? startDate.getUTCDate();
+  // No due day set: the 1st, never the day the sheet happened to be saved.
+  const dueDay = normalizeOptionalRentDueDay(paymentDueDay) || 1;
 
   return new Date(
     Date.UTC(year, month, Math.min(dueDay, lastDayOfMonth), 0, 0, 0, 0)
@@ -1080,7 +1082,7 @@ function buildAgreementFallbackRentDueDate(
     ? Number(paymentDueDay)
     : parsedLeaseStart && !Number.isNaN(parsedLeaseStart.getTime())
       ? parsedLeaseStart.getUTCDate()
-      : now.getUTCDate();
+      : 1;
   const lastDayOfMonth = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)
   ).getUTCDate();
@@ -14251,7 +14253,7 @@ async function bootstrap() {
 
       const tenancy = await repositoryContext.prisma.tenancy.findFirst({
         where: { buildingId, active: true, unit: { isActive: true }, user: { phone: { in: variants } } },
-        select: { unit: { select: { houseNumber: true } } },
+        select: { id: true, unit: { select: { houseNumber: true } } },
         orderBy: { createdAt: "desc" }
       });
       if (!tenancy) {
@@ -14263,7 +14265,7 @@ async function bootstrap() {
       const houseNumber = normalizeHouseNumber(tenancy.unit.houseNumber);
       const rent = rentLedgerService.getRentDue(buildingId, houseNumber);
       const utilityBills = utilityBillingService.listResidentVisibleBillsForHouse(buildingId, houseNumber, undefined, 60);
-      return res.json({ data: houseStanding({ houseNumber, rent, utilityBills }) });
+      return res.json({ data: { ...houseStanding({ houseNumber, rent, utilityBills }), tenancyId: tenancy.id } });
     } catch (error) {
       return next(error);
     }
@@ -16520,11 +16522,16 @@ async function bootstrap() {
             });
           }
 
-          const dueDate = buildRentDueDateForChargeStart(
-            refreshed.configuredPaymentDueDay,
-            rentChargeStartDate
-          );
           const existing = rentLedgerService.getRentDue(building.id, houseNumber);
+          // A house already on the ledger keeps its billing month: resetting it
+          // to an earlier month would charge that month's rent again. Only the
+          // day moves, when the house's due day changed.
+          const configuredDueDay = normalizeOptionalRentDueDay(refreshed.configuredPaymentDueDay);
+          const dueDate = existing
+            ? configuredDueDay
+              ? withDueDay(existing.dueDate, configuredDueDay)
+              : existing.dueDate
+            : buildRentDueDateForChargeStart(refreshed.configuredPaymentDueDay, rentChargeStartDate);
           const existingArrearsKsh = Math.max(0, Number(existing?.arrearsKsh ?? 0));
           const existingCurrentMonthPaidKsh = Math.max(
             0,

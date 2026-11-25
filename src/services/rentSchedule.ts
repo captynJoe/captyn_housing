@@ -56,3 +56,13 @@ export function shiftDueDate(dueDate: string, months: number): string {
     Date.UTC(year, month, Math.min(date.getUTCDate(), lastDay), date.getUTCHours(), date.getUTCMinutes())
   ).toISOString();
 }
+
+// Same billing month, different due day (clamped to the month's last day).
+// Moving the day within the month never adds or skips a month's rent.
+export function withDueDay(dueDate: string, day: number): string {
+  const date = new Date(dueDate);
+  if (Number.isNaN(date.getTime()) || !Number.isInteger(day) || day < 1) return dueDate;
+  const lastDay = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+  date.setUTCDate(Math.min(day, lastDay));
+  return date.toISOString();
+}

@@ -2803,6 +2803,15 @@ function getResidentOperationalArrearsKsh(resident, utilitySummary = null) {
   );
 }
 
+// What a house owes that is due or late now. Leaves out next month's rent,
+// which the ledger adds a week before it is due.
+function getResidentOwedNowKsh(resident, utilitySummary = null) {
+  return (
+    getResidentOperationalArrearsKsh(resident, utilitySummary) +
+    getResidentOperationalCurrentDueKsh(resident, utilitySummary)
+  );
+}
+
 function getResidentOperationalOutstandingKsh(resident, utilitySummary = null) {
   const calculatedBalanceKsh =
     getResidentOperationalCurrentDueKsh(resident, utilitySummary) +
@@ -5259,7 +5268,7 @@ function renderDailyDashboard() {
   const outstanding = residentRows.length > 0
     ? residentRows.reduce(
         (sum, item) =>
-          sum + getResidentOperationalOutstandingKsh(item, getResidentUtilityRoomSummary(item)),
+          sum + getResidentOwedNowKsh(item, getResidentUtilityRoomSummary(item)),
         0
       )
     : rentRows.reduce((sum, item) => sum + Math.max(0, Number(item.balanceKsh ?? 0)), 0) +
@@ -5276,7 +5285,7 @@ function renderDailyDashboard() {
     }
   });
   residentRows.forEach((item) => {
-    if (getResidentOutstandingBalanceKsh(item) > 0) {
+    if (getResidentOwedNowKsh(item, getResidentUtilityRoomSummary(item)) > 0) {
       unpaidRoomKeys.add(`${getRecordBuildingId(item)}::${normalizeHouse(item.houseNumber)}`);
     }
   });
@@ -5323,7 +5332,7 @@ function getFocusedBuildingSummary(buildingId) {
     residentRows.length > 0
       ? residentRows.reduce(
           (sum, item) =>
-            sum + getResidentOperationalOutstandingKsh(item, getResidentUtilityRoomSummary(item)),
+            sum + getResidentOwedNowKsh(item, getResidentUtilityRoomSummary(item)),
           0
         )
       : utilityBills.reduce(
@@ -11365,7 +11374,7 @@ function renderMetrics() {
   const outstanding =
     residentRows.length > 0
       ? residentRows.reduce(
-          (sum, item) => sum + getResidentOutstandingBalanceKsh(item),
+          (sum, item) => sum + getResidentOwedNowKsh(item, getResidentUtilityRoomSummary(item)),
           0
         )
       : actionableBills.reduce((sum, item) => sum + utilityAmount(item.balanceKsh), 0);

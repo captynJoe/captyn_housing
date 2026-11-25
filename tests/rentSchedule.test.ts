@@ -54,3 +54,10 @@ test("a part-paid month inside its first five days is still just due", () => {
   });
   assert.equal(figures.stage, "due");
 });
+
+test("changing the due day keeps the billing month, so no month is charged twice", async () => {
+  const { withDueDay } = await import("../src/services/rentSchedule.js");
+  assert.equal(withDueDay("2026-12-01T00:00:00.000Z", 26), "2026-12-26T00:00:00.000Z");
+  assert.equal(withDueDay("2026-11-18T00:00:00.000Z", 1), "2026-11-01T00:00:00.000Z");
+  assert.equal(withDueDay("2026-02-10T00:00:00.000Z", 31), "2026-02-28T00:00:00.000Z");
+});

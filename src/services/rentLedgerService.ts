@@ -89,6 +89,9 @@ export interface RentDueRecord {
   houseNumber: string;
   monthlyRentKsh: number;
   balanceKsh: number;
+  // Rent paid beyond what was owed. Used up by the next charges, and given
+  // back if a payment is later moved to the deposit or unrecorded.
+  creditKsh?: number;
   dueDate: string;
   note?: string;
   openingArrears?: RentOpeningArrears;
@@ -281,6 +284,18 @@ function normalizeProviderReference(value: string): string {
   return value.trim().toUpperCase();
 }
 
+// Moves what the house owes by deltaKsh (charges up, payments down). Money
+// paid beyond the balance becomes credit instead of being dropped, so moving
+// part of a payment to the deposit later can't create a debt that was paid.
+function settleBalance(record: RentDueRecord, deltaKsh: number): void {
+  const netKsh =
+    Math.max(0, Math.round(Number(record.balanceKsh ?? 0))) -
+    Math.max(0, Math.round(Number(record.creditKsh ?? 0))) +
+    Math.round(Number(deltaKsh) || 0);
+  record.balanceKsh = Math.max(0, netKsh);
+  record.creditKsh = netKsh < 0 ? -netKsh : undefined;
+}
+
 function addMonthsPreservingUtcDay(value: string, months: number): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -407,6 +422,7 @@ export class RentLedgerService {
           houseNumber,
           monthlyRentKsh: Number(record.monthlyRentKsh ?? 0),
           balanceKsh: Number(record.balanceKsh ?? 0),
+          creditKsh: Math.max(0, Math.round(Number(record.creditKsh ?? 0))) || undefined,
           dueDate: record.dueDate,
           note: record.note,
           openingArrears:
@@ -547,6 +563,7 @@ export class RentLedgerService {
       houseNumber: normalizedHouse,
       monthlyRentKsh: input.monthlyRentKsh,
       balanceKsh: input.balanceKsh,
+      creditKsh: existing?.creditKsh,
       dueDate: input.dueDate,
       note: input.note?.trim(),
       openingArrears: options?.openingArrears ?? existing?.openingArrears,
@@ -690,7 +707,7 @@ export class RentLedgerService {
       }
 
       record.payments.splice(paymentIndex, 1);
-      record.balanceKsh = Math.max(0, Math.round(record.balanceKsh + (event.rentAmountKsh ?? event.amountKsh)));
+      settleBalance(record, event.rentAmountKsh ?? event.amountKsh);
       record.updatedAt = nowIso();
       if (record.note === "Rent cleared by CASH payment event.") {
         record.note = undefined;
@@ -865,7 +882,7 @@ export class RentLedgerService {
         event: { ...event },
         applied: true
       });
-      record.balanceKsh = Math.max(0, Math.round(record.balanceKsh + previousRentAmountKsh - rentAmountKsh));
+      settleBalance(record, previousRentAmountKsh - rentAmountKsh);
       record.updatedAt = nowIso();
       this.refreshRecordForBilling(record);
       this.emitStateChange();
@@ -1267,6 +1284,7 @@ export class RentLedgerService {
           houseNumber: snapshot.houseNumber,
           monthlyRentKsh: snapshot.monthlyRentKsh,
           balanceKsh: snapshot.balanceKsh,
+          creditKsh: snapshot.creditKsh ?? 0,
           dueDate: snapshot.dueDate,
           paymentStatus: snapshot.paymentStatus,
           paidAmountKsh: snapshot.paidAmountKsh,
@@ -1345,8 +1363,7 @@ export class RentLedgerService {
         }) ?? false;
 
       if (!isHeld) {
-        record.balanceKsh =
-          Math.max(0, Number(record.balanceKsh ?? 0)) + record.monthlyRentKsh;
+        settleBalance(record, record.monthlyRentKsh);
       }
       record.dueDate = nextDueDate;
       record.updatedAt = nowIso();
@@ -1415,7 +1432,7 @@ export class RentLedgerService {
       }.`
     };
     record.latePenaltyCharges = [...(record.latePenaltyCharges ?? []), charge];
-    record.balanceKsh = Math.max(0, Math.round(Number(record.balanceKsh ?? 0))) + policy.amountKsh;
+    settleBalance(record, policy.amountKsh);
     record.updatedAt = appliedAt;
     return true;
   }
@@ -1497,7 +1514,7 @@ export class RentLedgerService {
       buildingId: record.buildingId,
       houseNumber: record.houseNumber
     });
-    record.balanceKsh = Math.max(0, record.balanceKsh - (event.rentAmountKsh ?? event.amountKsh));
+    settleBalance(record, -(event.rentAmountKsh ?? event.amountKsh));
     record.updatedAt = nowIso();
 
     if (record.balanceKsh === 0 && !record.note?.trim()) {
@@ -1608,6 +1625,7 @@ export class RentLedgerService {
       houseNumber: record.houseNumber,
       monthlyRentKsh,
       balanceKsh,
+      creditKsh: Math.max(0, Number(record.creditKsh ?? 0)),
       dueDate: record.dueDate,
       note: record.note,
       updatedAt: record.updatedAt,

@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { houseStanding, phoneVariants, type HouseStanding } from "./services/houseStanding.js";
 import { rentMonthFigures, type RentMonthFigures } from "./services/rentMonth.js";
+import { buildReportHouses } from "./services/performanceReport.js";
 import { houseBillingStatus, planHouseBillingChange, shiftBillingMonth as shiftHouseBillingMonth, type HouseBillingStatus } from "./services/houseBilling.js";
 import cors from "cors";
 import express from "express";
@@ -6962,6 +6963,7 @@ async function bootstrap() {
       latestPaymentBillingMonth?: string;
       latestPaymentAmountKsh?: number;
       rentMonth?: RentMonthFigures;
+      creditKsh?: number;
     }> = rentLedgerService
       .listCollectionStatus(limit)
       .filter((item) => visibleBuildingIds.has(item.buildingId))
@@ -6994,7 +6996,8 @@ async function bootstrap() {
         latestPaymentRecordedAt: item.latestPaymentRecordedAt,
         latestPaymentBillingMonth: item.latestPaymentBillingMonth,
         latestPaymentAmountKsh: item.latestPaymentAmountKsh,
-        rentMonth: item.rentMonth
+        rentMonth: item.rentMonth,
+        creditKsh: item.creditKsh
       }));
     const collectionRowsByKey = new Map(
       ledgerRows.map((item) => [
@@ -17285,6 +17288,7 @@ async function bootstrap() {
         return res.status(403).json({ error: "Building access denied" });
       }
       const inMonth = (value?: string) => String(value ?? "").slice(0, 7) === month;
+      const isCurrentMonth = month === billingMonthFromDate(new Date());
       const rentPayments = rentLedgerService.listPayments({ buildingId }).filter((item) => inMonth(item.paidAt));
       const utilityPayments = utilityBillingService.listPayments({ buildingId, limit: 2_000 }).filter((item) => inMonth(item.paidAt));
       const approvedDeposits = [...residentPaymentReports.values()].filter((item) =>
@@ -17417,7 +17421,29 @@ async function bootstrap() {
         paymentCount: payments.length, expenseCount: expenses.length,
         collectors: [...collectors.values()].sort((a, b) => b.amountKsh - a.amountKsh),
         expenses: [...expenseBreakdown.values()].sort((a, b) => b.amountKsh - a.amountKsh),
-        payments
+        payments,
+        buildingName: building.name,
+        isCurrentMonth,
+        houses: buildReportHouses({
+          month,
+          isCurrentMonth,
+          payments,
+          houses: (await listLandlordResidentDirectoryRows([building])).map((row) => ({
+            houseNumber: row.houseNumber,
+            residentName: row.residentName,
+            hasActiveResident: row.hasActiveResident,
+            rentEnabled: row.rentEnabled,
+            rentBilled: row.billing?.rent.billed,
+            monthlyRentKsh: row.monthlyRentKsh,
+            rentDueDate: row.rentDueDate,
+            currentMonthRentPaidKsh: row.currentMonthRentPaidKsh,
+            currentRentDueKsh: row.currentRentDueKsh,
+            rentBalanceKsh: row.rentBalanceKsh,
+            depositRequiredKsh: row.depositRequiredKsh,
+            depositPaidKsh: row.depositPaidKsh,
+            utilityBalanceKsh: row.utilityBalanceKsh
+          }))
+        })
       }, role: context.role });
     } catch (error) {
       return next(error);

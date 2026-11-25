@@ -7926,6 +7926,15 @@ function renderApplications(rows) {
   renderDailyDashboard();
 }
 
+// Deposit is owed separately from rent; it never counts as rent due.
+function getResidentDepositDueKsh(resident) {
+  const requiredKsh = Number(resident?.depositRequiredKsh);
+  if (!Number.isFinite(requiredKsh) || requiredKsh <= 0) {
+    return 0;
+  }
+  return Math.max(0, Math.round(requiredKsh - Math.max(0, Number(resident?.depositPaidKsh ?? 0))));
+}
+
 // The server works out each house's figures for this calendar month
 // (rentMonth); the page only adds them up, so every card agrees.
 function sumRentMonth(rows) {
@@ -7975,6 +7984,7 @@ function renderRentStatus(rows) {
     const latestPaymentRecordedAt = String(item.latestPaymentRecordedAt || item.latestPaymentAt || "").trim();
     const canRecordPayment = quickPaymentAmountKsh > 0;
     const rentVisualState = getRentCollectionVisualState(item);
+    const depositDueKsh = getResidentDepositDueKsh(findResidentDirectoryEntry(item.buildingId, item.houseNumber));
     row.className = tableRowToneClass(rentVisualState.toneClass);
     row.innerHTML = `
       <td>${escapeHtml(buildingLabel)}</td>
@@ -7984,7 +7994,7 @@ function renderRentStatus(rows) {
       <td>${formatCurrency(item.rentMonth?.paidKsh ?? item.currentMonthPaidKsh ?? item.paidAmountKsh ?? 0)}</td>
       <td>${formatCurrency(latePenaltyKsh)}</td>
       <td>${formatCurrency(currentDueKsh)}</td>
-      <td>${formatCurrency(item.rentMonth?.earlierDueKsh ?? item.arrearsKsh ?? 0)}</td>
+      <td>${Number(item.creditKsh) > 0 && !Number(item.rentMonth?.earlierDueKsh ?? item.arrearsKsh) ? `Credit ${formatCurrency(item.creditKsh)}` : formatCurrency(item.rentMonth?.earlierDueKsh ?? item.arrearsKsh ?? 0)}${depositDueKsh > 0 ? `<br /><small>Deposit due ${escapeHtml(formatCurrency(depositDueKsh))}</small>` : ""}</td>
       <td>${escapeHtml(formatBillingMonth(billingMonth))}</td>
       <td>${formatDateTime(item.dueDate)}</td>
       <td>${escapeHtml(latestPaymentBillingMonth ? formatBillingMonth(latestPaymentBillingMonth) : "-")}</td>
@@ -10415,6 +10425,186 @@ function renderBuildingPerformance(data, previousData) {
   }
 }
 
+let lastBuildingPerformance = null;
+
+const REPORT_STATUS_LABELS = {
+  paid: "Paid",
+  part_paid: "Part paid",
+  not_paid: "Not paid",
+  not_yet_due: "Not due yet",
+  not_charged: "No rent charged",
+  empty: "Empty house"
+};
+
+function formatReportMonth(month) {
+  const date = new Date(`${month}-01T00:00:00`);
+  return Number.isNaN(date.getTime())
+    ? String(month)
+    : new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric" }).format(date);
+}
+
+function formatReportDate(value) {
+  const date = value ? new Date(value) : new Date();
+  return Number.isNaN(date.getTime())
+    ? ""
+    : new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric" }).format(date);
+}
+
+// A plain printed statement for the owner: big type, short sentences, one
+// question per section. Uses the same figures as the Performance page.
+function buildPerformanceReportHtml(data) {
+  const month = formatReportMonth(data.month);
+  const houses = Array.isArray(data.houses) ? data.houses : [];
+  const money = (value) => escapeHtml(formatCurrency(Math.round(Number(value) || 0)));
+  const sum = (rows, key) => rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
+  const tenant = (house) => escapeHtml(house.tenantName || "-");
+
+  const charged = houses.filter((house) => Number(house.rentKsh) > 0);
+  const paid = charged.filter((house) => house.status === "paid");
+  const notYetDue = charged.filter((house) => house.status === "not_yet_due");
+  const owing = charged.filter((house) => house.status === "part_paid" || house.status === "not_paid");
+  const notCharged = houses.filter((house) => Number(house.rentKsh) <= 0);
+  const rentShortKsh = sum(charged, "rentShortKsh");
+
+  const rentRows = (rows, withStatus) => rows.map((house) => `
+    <tr>
+      <td class="r-house">${escapeHtml(house.houseNumber)}</td>
+      <td>${tenant(house)}</td>
+      <td class="r-num">${money(house.rentKsh)}</td>
+      <td class="r-num">${money(house.rentPaidKsh)}</td>
+      <td class="r-num">${money(house.rentShortKsh)}</td>
+      ${withStatus ? `<td>${escapeHtml(house.status === "not_yet_due" && house.dueDate ? `Due ${formatReportDate(house.dueDate)}` : REPORT_STATUS_LABELS[house.status] || "")}</td>` : ""}
+    </tr>`).join("");
+  const rentTable = (title, rows, withStatus) => rows.length === 0 ? "" : `
+    <h3>${escapeHtml(title)} (${rows.length})</h3>
+    <table>
+      <thead><tr><th>House</th><th>Tenant</th><th class="r-num">Rent</th><th class="r-num">Paid</th><th class="r-num">Still owed</th>${withStatus ? "<th>Note</th>" : ""}</tr></thead>
+      <tbody>${rentRows(rows, withStatus)}</tbody>
+      <tfoot><tr><td colspan="2">Total</td><td class="r-num">${money(sum(rows, "rentKsh"))}</td><td class="r-num">${money(sum(rows, "rentPaidKsh"))}</td><td class="r-num">${money(sum(rows, "rentShortKsh"))}</td>${withStatus ? "<td></td>" : ""}</tr></tfoot>
+    </table>`;
+
+  const owesToday = houses
+    .map((house) => ({
+      ...house,
+      owesTotalKsh: (Number(house.owesRentTodayKsh) || 0) + (Number(house.owesDepositTodayKsh) || 0) + (Number(house.owesUtilitiesTodayKsh) || 0)
+    }))
+    .filter((house) => house.owesTotalKsh > 0);
+
+  const expenses = Array.isArray(data.expenses) ? data.expenses : [];
+  const agents = (Array.isArray(data.agentReconciliation) ? data.agentReconciliation : [])
+    .filter((item) => Number(item.collectedKsh) || Number(item.commissionKsh) || Number(item.remittedKsh));
+
+  const rentSentence = charged.length === 0
+    ? "No rent was charged this month."
+    : `${paid.length} of ${charged.length} houses have paid their rent in full.` +
+      (notYetDue.length > 0 ? ` ${notYetDue.length} ${notYetDue.length === 1 ? "is" : "are"} not due yet.` : "") +
+      (owing.length > 0 ? ` ${owing.length} still ${owing.length === 1 ? "owes" : "owe"}.` : "");
+
+  return `
+    <header class="r-head">
+      <h1>${escapeHtml(data.buildingName || getBuildingDisplayNameById(data.buildingId, data.buildingId))}</h1>
+      <p class="r-title">Monthly report for ${escapeHtml(month)}</p>
+      <p class="r-printed">Printed on ${escapeHtml(formatReportDate())}</p>
+    </header>
+
+    <section class="r-summary">
+      <h2>In short</h2>
+      <table class="r-key">
+        <tr><td>Money received in ${escapeHtml(month)}</td><td class="r-num">${money(data.totalReceivedKsh)}</td></tr>
+        <tr><td>Costs paid in ${escapeHtml(month)}</td><td class="r-num">${money(data.expenseTotalKsh)}</td></tr>
+        <tr class="r-strong"><td>Left after costs</td><td class="r-num">${money(data.netAfterCostsKsh)}</td></tr>
+        <tr><td>Rent for ${escapeHtml(month)} still owed</td><td class="r-num">${money(rentShortKsh)}</td></tr>
+      </table>
+      <p class="r-sentence">${escapeHtml(rentSentence)}</p>
+    </section>
+
+    <section>
+      <h2>1. Money received</h2>
+      <table>
+        <tbody>
+          <tr><td>Rent</td><td class="r-num">${money(data.rentReceivedKsh)}</td></tr>
+          <tr><td>Water and electricity</td><td class="r-num">${money(data.utilitiesReceivedKsh)}</td></tr>
+          <tr><td>Deposits</td><td class="r-num">${money(data.depositsReceivedKsh)}</td></tr>
+        </tbody>
+        <tfoot><tr><td>Total received</td><td class="r-num">${money(data.totalReceivedKsh)}</td></tr></tfoot>
+      </table>
+    </section>
+
+    <section>
+      <h2>2. Rent for ${escapeHtml(month)}: who has paid</h2>
+      ${charged.length === 0 ? "<p>No rent was charged this month.</p>" : ""}
+      ${rentTable("Not fully paid", [...owing, ...notYetDue], true)}
+      ${rentTable("Paid in full", paid, false)}
+      ${notCharged.length === 0 ? "" : `
+        <h3>No rent charged (${notCharged.length})</h3>
+        <p>${notCharged.map((house) => `${escapeHtml(house.houseNumber)}${house.status === "empty" ? " (empty)" : ""}`).join(", ")}</p>`}
+    </section>
+
+    <section>
+      <h2>3. Money owed today</h2>
+      ${owesToday.length === 0 ? "<p>Nobody owes anything today.</p>" : `
+        <table>
+          <thead><tr><th>House</th><th>Tenant</th><th class="r-num">Rent</th><th class="r-num">Deposit</th><th class="r-num">Water and electricity</th><th class="r-num">Total</th></tr></thead>
+          <tbody>${owesToday.map((house) => `
+            <tr>
+              <td class="r-house">${escapeHtml(house.houseNumber)}</td>
+              <td>${tenant(house)}</td>
+              <td class="r-num">${money(house.owesRentTodayKsh)}</td>
+              <td class="r-num">${money(house.owesDepositTodayKsh)}</td>
+              <td class="r-num">${money(house.owesUtilitiesTodayKsh)}</td>
+              <td class="r-num"><strong>${money(house.owesTotalKsh)}</strong></td>
+            </tr>`).join("")}
+          </tbody>
+          <tfoot><tr><td colspan="2">Total</td><td class="r-num">${money(sum(owesToday, "owesRentTodayKsh"))}</td><td class="r-num">${money(sum(owesToday, "owesDepositTodayKsh"))}</td><td class="r-num">${money(sum(owesToday, "owesUtilitiesTodayKsh"))}</td><td class="r-num">${money(sum(owesToday, "owesTotalKsh"))}</td></tr></tfoot>
+        </table>`}
+    </section>
+
+    <section>
+      <h2>4. Costs paid in ${escapeHtml(month)}</h2>
+      ${expenses.length === 0 ? "<p>No costs were recorded this month.</p>" : `
+        <table>
+          <thead><tr><th>What for</th><th>Paid to</th><th class="r-num">Amount</th></tr></thead>
+          <tbody>${expenses.map((item) => `
+            <tr><td>${escapeHtml(formatExpenditureCategory(item.category))}</td><td>${escapeHtml(item.payeeName || "-")}</td><td class="r-num">${money(item.amountKsh)}</td></tr>`).join("")}
+          </tbody>
+          <tfoot><tr><td colspan="2">Total costs</td><td class="r-num">${money(data.expenseTotalKsh)}</td></tr></tfoot>
+        </table>`}
+    </section>
+
+    ${agents.length === 0 ? "" : `
+    <section>
+      <h2>5. Money collected by agents</h2>
+      <table>
+        <thead><tr><th>Agent</th><th class="r-num">Collected</th><th class="r-num">Commission</th><th class="r-num">Given to owner</th><th class="r-num">Still with agent</th></tr></thead>
+        <tbody>${agents.map((item) => `
+          <tr><td>${escapeHtml(item.agentName)}</td><td class="r-num">${money(item.collectedKsh)}</td><td class="r-num">${money(item.commissionKsh)}</td><td class="r-num">${money(item.remittedKsh)}</td><td class="r-num">${money(Math.max(0, Number(item.unreconciledKsh) || 0))}</td></tr>`).join("")}
+        </tbody>
+      </table>
+    </section>`}
+  `;
+}
+
+function printBuildingPerformanceReport() {
+  if (!lastBuildingPerformance) {
+    showError("Load the month first, then print.");
+    return;
+  }
+  let container = document.getElementById("performance-print-report");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "performance-print-report";
+    document.body.append(container);
+  }
+  container.innerHTML = buildPerformanceReportHtml(lastBuildingPerformance);
+  document.body.classList.add("printing-performance-report");
+  const done = () => {
+    document.body.classList.remove("printing-performance-report");
+    window.removeEventListener("afterprint", done);
+  };
+  window.addEventListener("afterprint", done);
+  window.print();
+}
+
 async function loadBuildingPerformance() {
   syncPerformanceBuildingOptions();
   if (!(performanceBuildingEl instanceof HTMLSelectElement) || !(performanceMonthEl instanceof HTMLInputElement)) return;
@@ -10433,6 +10623,7 @@ async function loadBuildingPerformance() {
     requestJson(`/api/landlord/building-performance?${previousParams.toString()}`)
   ]);
   if (responseResult.status === "rejected") throw responseResult.reason;
+  lastBuildingPerformance = responseResult.value.data ?? null;
   renderBuildingPerformance(
     responseResult.value.data,
     previousResult.status === "fulfilled" ? previousResult.value.data : null
@@ -14942,9 +15133,7 @@ exportBuildingPerformanceBtnEl?.addEventListener("click", () => {
     .catch((error) => handleLandlordError(error, "Unable to export performance."))
     .finally(() => { exportBuildingPerformanceBtnEl.disabled = false; });
 });
-printBuildingPerformanceBtnEl?.addEventListener("click", () => {
-  window.print();
-});
+printBuildingPerformanceBtnEl?.addEventListener("click", printBuildingPerformanceReport);
 collectionsReportFromEl?.addEventListener("change", renderCollectionsReport);
 collectionsReportToEl?.addEventListener("change", renderCollectionsReport);
 exportCollectionsReportBtnEl?.addEventListener("click", exportCollectionsReportCsv);

@@ -492,6 +492,84 @@ test("a month paid in full stays paid after next month's rent is added early", (
   assert.equal(row.rentMonth.dueKsh, 0);
 });
 
+test("moving part of a payment to the deposit does not create rent owed", () => {
+  // House 4: rent 4,000 due, tenant paid 8,000 (rent + deposit) as one payment.
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  service.upsertRentDue(BUILDING_A, "4", { monthlyRentKsh: 4_000, balanceKsh: 4_000, dueDate });
+
+  const outcome = service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "4",
+    amountKsh: 8_000,
+    provider: "cash",
+    providerReference: "cash-house-4"
+  });
+  assert.equal(outcome.snapshot?.balanceKsh, 0);
+  assert.equal(outcome.snapshot?.creditKsh, 4_000);
+
+  const split = service.updateDepositAllocation({
+    buildingId: BUILDING_A,
+    houseNumber: "4",
+    paymentId: outcome.event.id,
+    depositAmountKsh: 4_000
+  });
+  assert.equal(split?.snapshot?.balanceKsh, 0);
+  assert.equal(split?.snapshot?.creditKsh, 0);
+
+  // Moving it back to rent restores the credit, not a lower balance.
+  const back = service.updateDepositAllocation({
+    buildingId: BUILDING_A,
+    houseNumber: "4",
+    paymentId: outcome.event.id,
+    depositAmountKsh: 0
+  });
+  assert.equal(back?.snapshot?.balanceKsh, 0);
+  assert.equal(back?.snapshot?.creditKsh, 4_000);
+});
+
+test("rent credit is used by the next month's charge", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString();
+  service.upsertRentDue(BUILDING_A, "C-1", {
+    monthlyRentKsh: 4_000,
+    balanceKsh: 4_000,
+    dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+  });
+  service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "C-1",
+    amountKsh: 6_000,
+    provider: "cash",
+    providerReference: "cash-c-1"
+  });
+  // Re-saving the house with a due date whose next cycle is already open.
+  service.upsertRentDue(BUILDING_A, "C-1", { monthlyRentKsh: 4_000, balanceKsh: 0, dueDate });
+
+  const snapshot = service.getRentDue(BUILDING_A, "C-1");
+  assert.equal(snapshot?.balanceKsh, 2_000);
+  assert.equal(snapshot?.creditKsh, 0);
+});
+
+test("unrecording a payment gives back only what it really paid", () => {
+  const service = new RentLedgerService();
+  const dueDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  service.upsertRentDue(BUILDING_A, "U-1", { monthlyRentKsh: 4_000, balanceKsh: 4_000, dueDate });
+  const outcome = service.recordPayment({
+    buildingId: BUILDING_A,
+    houseNumber: "U-1",
+    amountKsh: 5_000,
+    provider: "cash",
+    providerReference: "cash-u-1"
+  });
+  assert.equal(outcome.snapshot?.creditKsh, 1_000);
+
+  service.unrecordCashPayment({ buildingId: BUILDING_A, houseNumber: "U-1", paymentId: outcome.event.id });
+  const snapshot = service.getRentDue(BUILDING_A, "U-1");
+  assert.equal(snapshot?.balanceKsh, 4_000);
+  assert.equal(snapshot?.creditKsh, 0);
+});
+
 test("applies fixed late rent penalty once after the grace period", () => {
   const service = new RentLedgerService();
   const dueDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();

@@ -4718,3 +4718,133 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
     grid-template-columns: 1fr;
   }
 }
+
+/* Printed monthly owner report (Performance > Print / Save PDF). */
+#performance-print-report {
+  display: none;
+}
+
+@page owner-report {
+  size: A4 portrait;
+  margin: 16mm 14mm;
+}
+
+@media print {
+  body.printing-performance-report > *:not(#performance-print-report) {
+    display: none !important;
+  }
+
+  body.printing-performance-report #performance-print-report {
+    page: owner-report;
+    display: block !important;
+    color: #000;
+    background: #fff;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 15pt;
+    line-height: 1.45;
+  }
+
+  #performance-print-report .r-head {
+    border-bottom: 3px solid #000;
+    padding-bottom: 8pt;
+    margin-bottom: 14pt;
+  }
+
+  #performance-print-report h1 {
+    font-size: 26pt;
+    margin: 0;
+  }
+
+  #performance-print-report .r-title {
+    font-size: 19pt;
+    margin: 4pt 0 0;
+  }
+
+  #performance-print-report .r-printed {
+    font-size: 12pt;
+    margin: 4pt 0 0;
+  }
+
+  #performance-print-report section {
+    margin-top: 18pt;
+  }
+
+  #performance-print-report h2 {
+    font-size: 19pt;
+    margin: 0 0 8pt;
+    break-after: avoid;
+  }
+
+  #performance-print-report h3 {
+    font-size: 16pt;
+    margin: 12pt 0 6pt;
+    break-after: avoid;
+  }
+
+  #performance-print-report p {
+    margin: 6pt 0;
+  }
+
+  #performance-print-report table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 6pt;
+  }
+
+  #performance-print-report th,
+  #performance-print-report td {
+    border: 1px solid #000;
+    padding: 5pt 7pt;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  #performance-print-report th {
+    background: #e6e6e6;
+    font-size: 13pt;
+  }
+
+  #performance-print-report tr {
+    break-inside: avoid;
+  }
+
+  #performance-print-report thead {
+    display: table-header-group;
+  }
+
+  #performance-print-report tfoot td {
+    font-weight: 700;
+    border-top: 2px solid #000;
+  }
+
+  #performance-print-report .r-num {
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  #performance-print-report .r-house {
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  #performance-print-report .r-summary {
+    border: 2px solid #000;
+    padding: 10pt 12pt;
+    break-inside: avoid;
+  }
+
+  #performance-print-report .r-key td {
+    font-size: 16pt;
+    border: 0;
+    border-bottom: 1px solid #999;
+  }
+
+  #performance-print-report .r-key .r-strong td {
+    font-weight: 700;
+  }
+
+  #performance-print-report .r-sentence {
+    font-size: 16pt;
+    margin-top: 10pt;
+  }
+}

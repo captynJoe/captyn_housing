@@ -676,6 +676,8 @@ interface LandlordUtilityRegistryRow {
   lateRentPenaltyAmountKsh: number;
   rentArrearsKsh: number;
   rentDueDate?: string;
+  rentStage?: RentMonthFigures["stage"];
+  rentMonthDueDate?: string;
   currentMonthRentPaidKsh: number;
   currentMonthRentOutstandingKsh: number;
   totalRentPaidKsh: number;
@@ -5600,6 +5602,8 @@ async function bootstrap() {
         lateRentPenaltyAmountKsh: visibleLateRentPenaltyAmountKsh,
         rentArrearsKsh: visibleRentArrearsKsh,
         rentDueDate: visibleRentDueDate,
+        rentStage: billingVisible && paymentAccess.rentEnabled ? rent?.rentMonth?.stage : undefined,
+        rentMonthDueDate: billingVisible && paymentAccess.rentEnabled ? rent?.rentMonth?.dueDate : undefined,
         currentMonthRentPaidKsh: visibleCurrentMonthRentPaidKsh,
         currentMonthRentOutstandingKsh: visibleCurrentRentDueKsh,
         totalRentPaidKsh: visibleTotalRentPaidKsh,
@@ -17435,7 +17439,8 @@ async function bootstrap() {
             rentEnabled: row.rentEnabled,
             rentBilled: row.billing?.rent.billed,
             monthlyRentKsh: row.monthlyRentKsh,
-            rentDueDate: row.rentDueDate,
+            rentDueDate: row.rentMonthDueDate,
+            rentStage: row.rentStage,
             currentMonthRentPaidKsh: row.currentMonthRentPaidKsh,
             currentRentDueKsh: row.currentRentDueKsh,
             rentBalanceKsh: row.rentBalanceKsh,

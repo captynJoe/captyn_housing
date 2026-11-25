@@ -21,7 +21,9 @@ test("paid November in full: nothing due", () => {
     dueKsh: 0,
     penaltyDueKsh: 0,
     earlierDueKsh: 0,
-    receivedKsh: 10_000
+    receivedKsh: 10_000,
+    dueDate: undefined,
+    stage: "paid"
   });
 });
 

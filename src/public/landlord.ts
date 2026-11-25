@@ -3132,14 +3132,58 @@ function getResidentBillingToneClass(resident, utilitySummary = null) {
     resident,
     resolvedUtilitySummary
   );
+  // Rent counts as late only once its grace period has ended (after day 10).
+  const rentLate = resident?.rentStage === "late";
+  const utilityLate = Math.max(
+    getResidentUtilityArrearsKsh(resident),
+    utilityAmount(resolvedUtilitySummary?.overdueBalanceKsh)
+  ) > 0;
 
-  if (arrearsKsh > 0) {
-    return "is-danger";
+  return debtToneClass({
+    owedKsh: getResidentOperationalOutstandingKsh(resident, resolvedUtilitySummary),
+    monthlyRentKsh: getResidentMonthlyRentKsh(resident),
+    late: rentLate || utilityLate || getResidentExpenseBalanceKsh(resident) > 0,
+    dueKsh: arrearsKsh + currentDueKsh
+  });
+}
+
+// Day 1 to 5 due, 6 to 10 overdue (grace), after 10 late. See rentSchedule.ts.
+function getRentStageLabel(stage, dueDate, partPaid) {
+  const day = (offset) => {
+    const time = Date.parse(String(dueDate ?? ""));
+    if (!Number.isFinite(time)) return "";
+    return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "Africa/Nairobi" })
+      .format(new Date(time + offset * 24 * 60 * 60 * 1000));
+  };
+  const part = partPaid ? "Part paid · " : "";
+  switch (stage) {
+    case "upcoming":
+      return dueDate ? `Due ${day(0)}` : "Not due yet";
+    case "due":
+      return dueDate ? `${part}Pay by ${day(4)}` : `${part}Due`;
+    case "overdue":
+      return dueDate ? `${part}Overdue · grace to ${day(9)}` : `${part}Overdue`;
+    case "late":
+      return `${part}Late`;
+    default:
+      return "Paid";
   }
-  if (currentDueKsh > 0) {
-    return "is-warning";
+}
+
+// Colour by how much a house owes, not by what kind of charge it is:
+// red only when it owes half a month's rent or more and some of it is late;
+// any smaller or not-yet-due amount is yellow.
+const DEBT_RED_SHARE_OF_RENT = 0.5;
+const DEBT_RED_WITHOUT_RENT_KSH = 1000;
+
+function debtToneClass({ owedKsh, monthlyRentKsh, late, dueKsh = owedKsh }) {
+  const owed = Math.max(0, Number(owedKsh) || 0, Number(dueKsh) || 0);
+  if (owed <= 0) {
+    return "is-success";
   }
-  return "is-success";
+  const rent = Math.max(0, Number(monthlyRentKsh) || 0);
+  const redFromKsh = rent > 0 ? rent * DEBT_RED_SHARE_OF_RENT : DEBT_RED_WITHOUT_RENT_KSH;
+  return late && owed >= redFromKsh ? "is-danger" : "is-warning";
 }
 
 function getRentCollectionVisualState(item) {
@@ -3154,16 +3198,16 @@ function getRentCollectionVisualState(item) {
     Number(rentMonth ? rentMonth.paidKsh : item?.currentMonthPaidKsh ?? item?.paidAmountKsh ?? 0)
   );
 
-  if (arrearsKsh > 0) {
+  if (arrearsKsh > 0 || currentOutstandingKsh > 0) {
+    const stage = String(rentMonth?.stage ?? (arrearsKsh > 0 ? "late" : "due"));
+    const late = stage === "late";
     return {
-      label: "Overdue",
-      toneClass: "is-danger"
-    };
-  }
-  if (currentOutstandingKsh > 0) {
-    return {
-      label: currentPaidKsh > 0 ? "Partial" : "Unpaid",
-      toneClass: "is-warning"
+      label: getRentStageLabel(stage, rentMonth?.dueDate, currentPaidKsh > 0),
+      toneClass: debtToneClass({
+        owedKsh: arrearsKsh + currentOutstandingKsh + Math.max(0, Number(rentMonth?.penaltyDueKsh ?? 0)),
+        monthlyRentKsh: item?.monthlyRentKsh,
+        late
+      })
     };
   }
 
@@ -10473,7 +10517,7 @@ function buildPerformanceReportHtml(data) {
       <td class="r-num">${money(house.rentKsh)}</td>
       <td class="r-num">${money(house.rentPaidKsh)}</td>
       <td class="r-num">${money(house.rentShortKsh)}</td>
-      ${withStatus ? `<td>${escapeHtml(house.status === "not_yet_due" && house.dueDate ? `Due ${formatReportDate(house.dueDate)}` : REPORT_STATUS_LABELS[house.status] || "")}</td>` : ""}
+      ${withStatus ? `<td>${escapeHtml(house.stage ? getRentStageLabel(house.stage, house.dueDate, false) : REPORT_STATUS_LABELS[house.status] || "")}</td>` : ""}
     </tr>`).join("");
   const rentTable = (title, rows, withStatus) => rows.length === 0 ? "" : `
     <h3>${escapeHtml(title)} (${rows.length})</h3>

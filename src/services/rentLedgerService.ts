@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { rentMonthFigures } from "./rentMonth.js";
+import { rentSchedule, rentStage } from "./rentSchedule.js";
 import type {
   RentMpesaCallbackInput,
   UpsertRentDueInput
@@ -1232,15 +1233,19 @@ export class RentLedgerService {
       });
     }
 
-    if (daysToDue < 0) {
+    // Overdue only after the end of day 5 (see rentSchedule.ts).
+    const stage = rentStage(record.dueDate, now);
+    if (stage === "overdue" || stage === "late") {
       const todayKey = isoDateKey(createdAt);
+      const payBy = rentSchedule(record.dueDate).payBy;
+      const daysOverdue = payBy ? Math.max(1, Math.ceil((now.getTime() - payBy.getTime()) / (24 * 60 * 60 * 1000))) : 1;
       if (record.reminderState.overdueDateKey !== todayKey) {
         record.reminderState.overdueDateKey = todayKey;
         reminders.push({
           buildingId: record.buildingId,
           houseNumber: record.houseNumber,
           title: "Rent Overdue",
-          message: `Rent is overdue by ${Math.abs(daysToDue)} day(s). Outstanding balance is KSh ${record.balanceKsh.toLocaleString("en-US")}.`,
+          message: `Rent is overdue by ${daysOverdue} day(s). Outstanding balance is KSh ${record.balanceKsh.toLocaleString("en-US")}.`,
           level: "warning",
           createdAt,
           dedupeKey: `rent-reminder-overdue-${dedupeBase}-${todayKey}`
@@ -1268,6 +1273,8 @@ export class RentLedgerService {
           monthlyRentKsh: snapshot.monthlyRentKsh,
           balanceKsh: snapshot.balanceKsh,
           cycleMonth: snapshot.currentBillingMonth,
+          cycleDueDate: snapshot.dueDate,
+          now,
           isBilled: (billingMonth) =>
             !this.billingHoldPredicate?.({
               buildingId: record.buildingId,
@@ -1631,7 +1638,16 @@ export class RentLedgerService {
       updatedAt: record.updatedAt,
       payments: [...record.payments],
       latePenaltyCharges: [...(record.latePenaltyCharges ?? [])],
-      status: getStatus(record.balanceKsh, daysToDue),
+      // Overdue after the end of day 5 of the cycle, or when an older month
+      // is still owed (see rentSchedule.ts).
+      status:
+        balanceKsh <= 0
+          ? "clear"
+          : balanceKsh > currentMonthOutstandingKsh ||
+              rentStage(record.dueDate) === "overdue" ||
+              rentStage(record.dueDate) === "late"
+            ? "overdue"
+            : "due_soon",
       paymentStatus,
       currentBillingMonth,
       paidAmountKsh: currentMonthPaidKsh,

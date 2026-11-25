@@ -7,12 +7,17 @@
 // before it is due), then this month's late penalty, then this month's rent,
 // then older arrears.
 
+import { rentStage, shiftDueDate, type RentStage } from "./rentSchedule.js";
+
 export interface RentMonthInput {
   month: string;
   monthlyRentKsh: number;
   balanceKsh: number;
   // Billing month of the ledger's current cycle. Can already be next month.
   cycleMonth: string;
+  // Due date of the ledger's current cycle; gives this month's due day.
+  cycleDueDate?: string;
+  now?: Date;
   isBilled: (month: string) => boolean;
   latePenaltyCharges?: Array<{ billingMonth: string; amountKsh: number }>;
   payments?: Array<{ paidAt: string; amountKsh: number; rentAmountKsh?: number }>;
@@ -30,6 +35,16 @@ export interface RentMonthFigures {
   earlierDueKsh: number;
   // Rent money received during the month, whichever month it settled.
   receivedKsh: number;
+  // This month's due date and where the house is against it (see
+  // rentSchedule.ts). "paid" once nothing is owed; older debt is "late".
+  dueDate?: string;
+  stage: RentStage | "paid";
+}
+
+function monthsBetween(from: string, to: string): number {
+  const [fromYear, fromMonth] = from.split("-").map(Number);
+  const [toYear, toMonth] = to.split("-").map(Number);
+  return (toYear - fromYear) * 12 + (toMonth - fromMonth);
 }
 
 const money = (value: unknown) => Math.max(0, Math.round(Number(value) || 0));
@@ -75,6 +90,19 @@ export function rentMonthFigures(input: RentMonthInput): RentMonthFigures {
     .filter((payment) => monthOf(payment.paidAt) === month)
     .reduce((sum, payment) => sum + money(payment.rentAmountKsh ?? payment.amountKsh), 0);
 
+  const dueDate =
+    input.cycleDueDate && rentKsh > 0
+      ? shiftDueDate(input.cycleDueDate, monthsBetween(input.cycleMonth, month))
+      : undefined;
+  const stage: RentMonthFigures["stage"] =
+    remaining > 0
+      ? "late"
+      : dueKsh + penaltyDueKsh <= 0
+        ? "paid"
+        : dueDate
+          ? rentStage(dueDate, input.now)
+          : "due";
+
   return {
     month,
     rentKsh,
@@ -82,6 +110,8 @@ export function rentMonthFigures(input: RentMonthInput): RentMonthFigures {
     dueKsh,
     penaltyDueKsh,
     earlierDueKsh: remaining,
-    receivedKsh
+    receivedKsh,
+    dueDate,
+    stage
   };
 }

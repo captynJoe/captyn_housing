@@ -9,6 +9,9 @@ export type ReportHouseStatus =
   | "not_charged"
   | "empty";
 
+// Where unpaid rent stands against its due day (see rentSchedule.ts).
+export type ReportRentStage = "upcoming" | "due" | "overdue" | "late";
+
 export interface ReportHouseSource {
   houseNumber: string;
   residentName?: string;
@@ -16,7 +19,9 @@ export interface ReportHouseSource {
   rentEnabled?: boolean;
   rentBilled?: boolean;
   monthlyRentKsh?: number;
+  // This month's due date and stage, current month only.
   rentDueDate?: string;
+  rentStage?: string;
   // Live ledger figures for the current month.
   currentMonthRentPaidKsh?: number;
   currentRentDueKsh?: number;
@@ -37,6 +42,7 @@ export interface ReportHouse {
   utilitiesReceivedKsh: number;
   depositReceivedKsh: number;
   dueDate?: string;
+  stage?: ReportRentStage;
   // What the house owes as of today, whatever month the report is for.
   owesRentTodayKsh: number;
   owesDepositTodayKsh: number;
@@ -48,11 +54,9 @@ const money = (value: unknown) => Math.max(0, Math.round(Number(value) || 0));
 export function buildReportHouses(input: {
   month: string;
   isCurrentMonth: boolean;
-  now?: Date;
   houses: ReportHouseSource[];
   payments: Array<{ houseNumber: string; type: string; amountKsh: number }>;
 }): ReportHouse[] {
-  const now = input.now ?? new Date();
   const received = new Map<string, { rent: number; utilities: number; deposit: number }>();
   for (const payment of input.payments) {
     const key = String(payment.houseNumber ?? "").trim().toUpperCase();
@@ -84,12 +88,11 @@ export function buildReportHouses(input: {
         rentShortKsh = rentKsh - rentPaidKsh;
       }
 
-      const dueDate = house.rentDueDate;
-      const dueLater =
-        input.isCurrentMonth &&
-        Boolean(dueDate) &&
-        String(dueDate).slice(0, 7) === input.month &&
-        Date.parse(String(dueDate)) > now.getTime();
+      const dueDate = input.isCurrentMonth ? house.rentDueDate : undefined;
+      const stage = (["upcoming", "due", "overdue", "late"] as const).find(
+        (value) => value === house.rentStage
+      );
+      const dueLater = input.isCurrentMonth && stage === "upcoming";
 
       const status: ReportHouseStatus = !occupied
         ? "empty"
@@ -114,7 +117,8 @@ export function buildReportHouses(input: {
         rentReceivedKsh: got.rent,
         utilitiesReceivedKsh: got.utilities,
         depositReceivedKsh: got.deposit,
-        dueDate: dueLater ? dueDate : undefined,
+        dueDate,
+        stage: rentShortKsh > 0 ? (input.isCurrentMonth ? stage : "late") : undefined,
         owesRentTodayKsh: money(house.rentBalanceKsh),
         owesDepositTodayKsh:
           occupied && Number.isFinite(depositRequired)

@@ -5330,6 +5330,14 @@ function renderDailyDashboard() {
   const openIssues = getOpenIssueRowsForFocusedBuilding().length;
   const pendingRequests = getPendingApplicationRowsForFocusedBuilding().length;
 
+  // Deposits nobody has entered yet: one line that opens the list to fill in.
+  const depositCheckAlert = document.getElementById("deposit-check-alert");
+  if (depositCheckAlert instanceof HTMLButtonElement) {
+    const toCheck = residentRows.filter((item) => item?.depositNeedsCheck === true).length;
+    depositCheckAlert.hidden = toCheck === 0;
+    depositCheckAlert.textContent = `Deposit to check: ${toCheck} ${toCheck === 1 ? "house" : "houses"} · Fill in`;
+  }
+
   overviewDailyHeadingEl.textContent = `${buildingLabel} Dashboard`;
   overviewDailyCollectedEl.textContent = state.paymentsLoaded
     ? formatCurrency(rentCollectedThisMonth + utilityCollectedThisMonth)
@@ -6426,6 +6434,7 @@ function updateRentSheetRowStatus(row) {
   const depositDueKsh = values.occupied ? Math.max(0, values.depositKsh - values.depositPaidKsh) : 0;
   const utilityDepositDueKsh = values.occupied ? Math.max(0, values.utilityDepositKsh - values.utilityDepositPaidKsh) : 0;
   const extras = [
+    rentSheetRowNeedsDepositCheck(row) ? "deposit to check" : "",
     depositDueKsh > 0 ? `deposit due ${formatCurrency(depositDueKsh)}` : "",
     utilityDepositDueKsh > 0 ? `utility deposit due ${formatCurrency(utilityDepositDueKsh)}` : ""
   ].filter(Boolean);
@@ -6463,6 +6472,13 @@ function updateRentSheetRowStatus(row) {
   owesCell.textContent = formatCurrency(owesNowKsh);
   row.className = `rent-sheet-row ${tableRowToneClass(tone)}`;
   row.classList.toggle("is-changed", getRentSheetRowChanges(row).length > 0);
+}
+
+// No deposit amount yet for a tenant: flagged until someone types it in.
+function rentSheetRowNeedsDepositCheck(row) {
+  if (row.dataset.hasActiveResident !== "true") return false;
+  const typed = readRentSheetInput(row, "depositKsh");
+  return row.dataset.depositNeedsCheck === "true" && !(typed > 0) && !(getRentSheetDefaultValues().depositKsh > 0);
 }
 
 function getRentSheetRowChanges(row) {
@@ -6518,6 +6534,7 @@ function renderRentSheetRows(rows) {
     row.dataset.resolvedDueDay = String(item.resolvedDueDay ?? "");
     row.dataset.graceDays = item.roomDefaultGraceDays == null ? "" : String(item.roomDefaultGraceDays);
     row.dataset.active = item.roomDefaultActive === false ? "false" : "true";
+    row.dataset.depositNeedsCheck = item.depositNeedsCheck ? "true" : "false";
     row.innerHTML = `
       <td class="rent-sheet-house"><strong>${escapeHtml(houseNumber)}</strong></td>
       <td class="rent-sheet-tenant"><span>${escapeHtml(residentLabel)}</span>${residentPhone ? `<small>${escapeHtml(residentPhone)}</small>` : ""}</td>
@@ -6564,7 +6581,8 @@ function filterRentSheetHouses() {
       (filter === "occupied" && row.dataset.hasActiveResident === "true") ||
       (filter === "vacant" && row.dataset.hasActiveResident !== "true") ||
       (filter === "needs-rent" && row.dataset.needsRentSetup === "true") ||
-      (filter === "changed" && row.classList.contains("is-changed"));
+      (filter === "changed" && row.classList.contains("is-changed")) ||
+      (filter === "deposit-check" && rentSheetRowNeedsDepositCheck(row));
     row.hidden = !(matchesQuery && matchesFilter);
   });
 }
@@ -8386,7 +8404,7 @@ function renderRoomLedger(rows) {
         <strong>${escapeHtml(formatCurrency(rentBalanceKsh))}</strong>
         <small>Monthly ${escapeHtml(formatCurrency(monthlyRentKsh))}</small>
       </td>
-      <td>${escapeHtml(formatCurrency(depositKsh))}</td>
+      <td>${resident?.depositNeedsCheck ? renderTableStatusPill("To check", "is-warning") : escapeHtml(formatCurrency(depositKsh))}</td>
       <td>
         <strong>${escapeHtml(formatCurrency(utilityOpenKsh))}</strong>
         <span class="room-ledger-utility-status">${utilityStatus}</span>
@@ -12397,6 +12415,15 @@ openRentSheetBtnEl?.addEventListener("click", () => {
 
 residentsOpenRentSheetBtnEl?.addEventListener("click", () => {
   void openRentSheetModal();
+});
+
+document.getElementById("deposit-check-alert")?.addEventListener("click", async () => {
+  await openRentSheetModal();
+  const filter = document.getElementById("rent-sheet-filter");
+  if (filter instanceof HTMLSelectElement) {
+    filter.value = "deposit-check";
+    filterRentSheetHouses();
+  }
 });
 
 closeRentSheetBtnEl?.addEventListener("click", () => {

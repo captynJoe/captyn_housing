@@ -672,6 +672,7 @@ interface LandlordUtilityRegistryRow {
   rentSetupSource: "room_default" | "building_default" | "agreement_legacy" | "room_disabled" | "unset";
   depositKsh: number;
   depositRequiredKsh?: number;
+  depositNeedsCheck?: boolean;
   depositPaidKsh?: number;
   utilityDepositRequiredKsh?: number;
   utilityDepositPaidKsh?: number;
@@ -5614,6 +5615,8 @@ async function bootstrap() {
             ? undefined
             : Math.max(0, Number(agreement.depositKsh)),
         depositPaidKsh,
+        // Every tenant owes a deposit; no amount set means nobody has checked it yet.
+        depositNeedsCheck: Boolean(resident) && !(Number(agreement?.depositKsh) > 0),
         utilityDepositRequiredKsh: utilityDepositRequiredKsh ?? undefined,
         utilityDepositPaidKsh,
         utilityDepositNeedsSetup,
@@ -16771,6 +16774,7 @@ async function bootstrap() {
         monthlyRentKsh: row.monthlyRentKsh,
         depositKsh: row.depositRequiredKsh,
         depositPaidKsh: row.depositPaidKsh,
+        depositNeedsCheck: row.depositNeedsCheck,
         utilityDepositKsh: row.utilityDepositRequiredKsh,
         utilityDepositPaidKsh: row.utilityDepositPaidKsh,
         utilityDepositNeedsSetup: row.utilityDepositNeedsSetup,

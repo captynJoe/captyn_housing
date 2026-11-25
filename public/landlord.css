@@ -5085,3 +5085,18 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
     grid-column: 1 / -1;
   }
 }
+
+/* Dashboard follow-up line, e.g. deposits nobody has entered yet. */
+.dashboard-follow-up {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 14px;
+  border: 1px solid #e0b252;
+  border-radius: 10px;
+  background: #fff6e0;
+  color: #6b4500;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}

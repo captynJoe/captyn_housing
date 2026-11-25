@@ -12,6 +12,8 @@ export interface HouseStanding {
   eligible: boolean;
   reason: HouseStandingReason;
   houseNumber?: string;
+  // Opaque id of the tenancy, so WiFi can give a once-per-tenancy reward.
+  tenancyId?: string;
 }
 
 // Kenyan numbers arrive as 07..., 01..., 2547..., +2547...; compare on the

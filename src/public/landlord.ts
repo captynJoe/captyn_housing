@@ -6310,6 +6310,7 @@ function formatRentGraceDays(value) {
 }
 
 function setRentSheetDefaultInputs(data) {
+  setRentSheetUtilityDefaults(data);
   state.rentSheetDefaults = {
     monthlyRentKsh: data?.buildingDefaultMonthlyRentKsh ?? null,
     depositKsh: data?.buildingDefaultDepositKsh ?? null,
@@ -6347,6 +6348,7 @@ function setRentSheetDefaultInputs(data) {
 // Status uses the same day 1 / 5 / 10 rule as the rest of the app.
 const RENT_SHEET_FIELDS = [
   "monthlyRentKsh",
+  "utilityChargeKsh",
   "paymentDueDay",
   "monthRentPaidKsh",
   "owedBeforeKsh",
@@ -6358,6 +6360,7 @@ const RENT_SHEET_FIELDS = [
 
 const RENT_SHEET_FIELD_LABELS = {
   monthlyRentKsh: "rent",
+  utilityChargeKsh: "utility per month",
   paymentDueDay: "due day",
   monthRentPaidKsh: "rent paid this month",
   owedBeforeKsh: "owed from before",
@@ -6503,7 +6506,7 @@ function renderRentSheetRows(rows) {
   const monthHead = document.getElementById("rent-sheet-month-paid-head");
   if (monthHead) monthHead.textContent = `${formatBillingMonth(monthKey)} rent paid`;
   if (!Array.isArray(rows) || rows.length === 0) {
-    rentSheetBodyEl.innerHTML = '<tr><td colspan="12">No houses found for this building.</td></tr>';
+    rentSheetBodyEl.innerHTML = '<tr><td colspan="13">No houses found for this building.</td></tr>';
     updateRentSheetHouseControls();
     return;
   }
@@ -6539,6 +6542,7 @@ function renderRentSheetRows(rows) {
       <td class="rent-sheet-house"><strong>${escapeHtml(houseNumber)}</strong></td>
       <td class="rent-sheet-tenant"><span>${escapeHtml(residentLabel)}</span>${residentPhone ? `<small>${escapeHtml(residentPhone)}</small>` : ""}</td>
       <td>${input("monthlyRentKsh", item.roomDefaultMonthlyRentKsh, { placeholder: resolvedMonthlyRentKsh > 0 ? String(resolvedMonthlyRentKsh) : "Rent", label: `Rent for house ${houseNumber}` })}</td>
+      <td class="rent-sheet-utility-col">${input("utilityChargeKsh", item.utilityChargeKsh, { placeholder: rentSheetUtility.chargeKsh == null ? "" : String(rentSheetUtility.chargeKsh), label: `Monthly utility charge for house ${houseNumber}` })}</td>
       <td>${input("paymentDueDay", item.roomDefaultDueDay, { placeholder: String(item.resolvedDueDay ?? defaults.dueDay ?? 1), label: `Due day for house ${houseNumber}` })}</td>
       <td>${input("monthRentPaidKsh", occupied ? item.monthRentPaidKsh ?? 0 : "", { label: `Rent paid this month for house ${houseNumber}`, disabled: noTenant || !rentBilled })}</td>
       <td>${input("owedBeforeKsh", occupied ? item.owedBeforeKsh ?? 0 : "", { label: `Rent owed from before for house ${houseNumber}`, disabled: noTenant })}</td>
@@ -6628,8 +6632,61 @@ function getRentSheetDefaultsChanged() {
     (current.monthlyRentKsh ?? null) !== (defaults.monthlyRentKsh ?? null) ||
     (current.depositKsh ?? null) !== (defaults.depositKsh ?? null) ||
     (current.utilityDepositKsh ?? null) !== (defaults.utilityDepositKsh ?? null) ||
-    (current.dueDay ?? null) !== (defaults.dueDay ?? null)
+    (current.dueDay ?? null) !== (defaults.dueDay ?? null) ||
+    rentSheetUtilityDefaultsChanged()
   );
+}
+
+// Utility settings (combined-charge buildings): standard charge per month,
+// units it includes, and the price of each unit above that.
+let rentSheetUtility = { visible: false, chargeKsh: null, includedUnits: null, extraUnitPriceKsh: null };
+
+function readRentSheetUtilityInput(id) {
+  const element = document.getElementById(id);
+  return element instanceof HTMLInputElement ? toOptionalNumber(element.value) : null;
+}
+
+function getRentSheetUtilityDefaults() {
+  const chargeKsh = readRentSheetUtilityInput("rent-sheet-default-utility-charge");
+  const includedUnits = readRentSheetUtilityInput("rent-sheet-default-included-units");
+  const extraUnitPriceKsh = readRentSheetUtilityInput("rent-sheet-default-extra-unit-price");
+  if ([chargeKsh, includedUnits, extraUnitPriceKsh].some((amount) => amount != null && amount < 0)) {
+    throw new Error("Utility settings cannot be negative.");
+  }
+  return {
+    ...(chargeKsh != null ? { buildingUtilityChargeKsh: Math.round(chargeKsh) } : {}),
+    ...(includedUnits != null ? { buildingIncludedUnits: includedUnits } : {}),
+    ...(extraUnitPriceKsh != null ? { buildingExtraUnitPriceKsh: extraUnitPriceKsh } : {})
+  };
+}
+
+function rentSheetUtilityDefaultsChanged() {
+  if (!rentSheetUtility.visible) return false;
+  return (
+    readRentSheetUtilityInput("rent-sheet-default-utility-charge") !== (rentSheetUtility.chargeKsh ?? null) ||
+    readRentSheetUtilityInput("rent-sheet-default-included-units") !== (rentSheetUtility.includedUnits ?? null) ||
+    readRentSheetUtilityInput("rent-sheet-default-extra-unit-price") !== (rentSheetUtility.extraUnitPriceKsh ?? null)
+  );
+}
+
+function setRentSheetUtilityDefaults(data) {
+  const utility = data?.buildingUtility ?? {};
+  rentSheetUtility = {
+    visible: utility.mode === "combined_charge",
+    chargeKsh: utility.chargeKsh ?? null,
+    includedUnits: utility.includedUnits ?? null,
+    extraUnitPriceKsh: utility.extraUnitPriceKsh ?? null
+  };
+  const set = (id, value) => {
+    const element = document.getElementById(id);
+    if (element instanceof HTMLInputElement) element.value = value == null ? "" : String(value);
+  };
+  set("rent-sheet-default-utility-charge", rentSheetUtility.chargeKsh);
+  set("rent-sheet-default-included-units", rentSheetUtility.includedUnits);
+  set("rent-sheet-default-extra-unit-price", rentSheetUtility.extraUnitPriceKsh);
+  const group = document.getElementById("rent-sheet-utility-defaults");
+  if (group) group.hidden = !rentSheetUtility.visible;
+  document.querySelector(".rent-sheet-table")?.classList.toggle("hide-utility", !rentSheetUtility.visible);
 }
 
 function buildRentSheetPayload() {
@@ -6671,6 +6728,7 @@ function buildRentSheetPayload() {
     rows.push({
       houseNumber,
       monthlyRentKsh: roundOrNull(value("monthlyRentKsh")),
+      ...(rentSheetUtility.visible ? { utilityChargeKsh: roundOrNull(value("utilityChargeKsh")) } : {}),
       paymentDueDay: roundOrNull(value("paymentDueDay")),
       graceDays: row.dataset.graceDays === "" ? null : Number(row.dataset.graceDays),
       active: row.dataset.active !== "false",
@@ -6695,6 +6753,7 @@ function buildRentSheetPayload() {
     buildingDefaultUtilityDepositKsh: defaults.utilityDepositKsh == null ? null : Math.round(defaults.utilityDepositKsh),
     buildingDefaultDueDay: defaults.dueDay == null ? null : Math.round(defaults.dueDay),
     buildingDefaultGraceDays: Math.max(0, Math.round(Number(state.rentSheetDefaults.graceDays ?? 0))),
+    ...(rentSheetUtility.visible ? getRentSheetUtilityDefaults() : {}),
     chargeStartDate: state.rentSheetDefaults.chargeStartDate || null,
     note: String(rentSheetNoteEl?.value ?? "").trim() || undefined,
     rows,

@@ -5100,3 +5100,15 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
   text-align: left;
   cursor: pointer;
 }
+
+.rent-sheet-utility-defaults {
+  display: contents;
+}
+
+.rent-sheet-utility-defaults[hidden] {
+  display: none;
+}
+
+.rent-sheet-table.hide-utility .rent-sheet-utility-col {
+  display: none;
+}

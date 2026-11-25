@@ -16755,6 +16755,12 @@ async function bootstrap() {
       ),
       chargeStartDate: normalizeDateOnly(rentSetupMetadata.rentChargeStartDate),
       buildingDefaultGraceDays: Math.max(0, Number(configuration?.rentGraceDays ?? 0)),
+      buildingUtility: {
+        mode: configuration?.utilityBillingMode ?? "metered",
+        chargeKsh: normalizeOptionalNonNegativeInteger(configuration?.defaultCombinedUtilityChargeKsh),
+        includedUnits: configuration?.includedWaterUnits ?? null,
+        extraUnitPriceKsh: configuration?.defaultWaterRatePerUnitKsh ?? null
+      },
       rows: registryRows.map((row) => ({
         houseNumber: row.houseNumber,
         residentName: row.residentName,
@@ -16789,6 +16795,7 @@ async function bootstrap() {
         openingArrears: rentLedgerService.getRentDue(building.id, row.houseNumber)?.openingArrears ?? null,
         dueDate: row.rentDueDate,
         paymentStatus: row.rentPaymentStatus,
+        utilityChargeKsh: Number(row.combinedUtilityChargeKsh) > 0 ? Number(row.combinedUtilityChargeKsh) : null,
         // Tenant sheet: this calendar month, as the rest of the app reads it.
         month: billingMonthFromDate(new Date()),
         monthRentPaidKsh: row.currentMonthRentPaidKsh ?? 0,
@@ -16912,6 +16919,9 @@ async function bootstrap() {
             defaultMonthlyRentKsh: parsed.buildingDefaultMonthlyRentKsh,
             defaultRentDueDay: parsed.buildingDefaultDueDay,
             rentGraceDays: parsed.buildingDefaultGraceDays,
+            defaultCombinedUtilityChargeKsh: parsed.buildingUtilityChargeKsh,
+            includedWaterUnits: parsed.buildingIncludedUnits,
+            defaultWaterRatePerUnitKsh: parsed.buildingExtraUnitPriceKsh,
             metadata: {
               ...currentMetadata,
               rentDefaultDepositKsh: buildingDefaultDepositKsh,
@@ -16989,6 +16999,24 @@ async function bootstrap() {
           }
 
           changedHouses.add(houseNumber);
+        }
+
+        // Per-house standard utility charge (0 = building default).
+        const utilityRows = parsed.rows.filter((row) => row.utilityChargeKsh !== undefined);
+        for (const row of utilityRows) {
+          const houseNumber = normalizeHouseNumber(row.houseNumber);
+          const before = Number(roomRowsByHouse.get(houseNumber)?.combinedUtilityChargeKsh ?? 0);
+          const after = Math.max(0, Math.round(Number(row.utilityChargeKsh ?? 0)));
+          if (before === after) continue;
+          upsertUtilityChargeDefaultsForBuilding(building.id, [{ houseNumber, combinedUtilityChargeKsh: after }]);
+          await recordRoomAccountAuditEvent({
+            buildingId: building.id,
+            houseNumber,
+            action: "utility.charge.updated",
+            summary: `Monthly utility charge ${after > 0 ? `set to KSh ${after.toLocaleString("en-US")}` : "back to the building default"} (was ${before > 0 ? `KSh ${before.toLocaleString("en-US")}` : "building default"}). Applies from the next bill.`,
+            actor,
+            metadata: { previousKsh: before, utilityChargeKsh: after }
+          });
         }
 
         await syncDerivedBuildingConfigurationState();

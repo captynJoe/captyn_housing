@@ -1850,6 +1850,11 @@
             <label>Due day<input id="rent-sheet-default-due-day" type="number" inputmode="numeric" min="1" max="31" step="1" placeholder="1" /></label>
             <label>Deposit (KSh)<input id="rent-sheet-default-deposit" type="number" inputmode="numeric" min="0" step="1" placeholder="Not set" /></label>
             <label>Utility deposit (KSh)<input id="rent-sheet-default-utility-deposit" type="number" inputmode="numeric" min="0" step="1" placeholder="Not set" /></label>
+            <span class="rent-sheet-utility-defaults" id="rent-sheet-utility-defaults" hidden>
+              <label>Utility / month (KSh)<input id="rent-sheet-default-utility-charge" type="number" inputmode="numeric" min="0" step="1" placeholder="Not set" /></label>
+              <label>Included units<input id="rent-sheet-default-included-units" type="number" inputmode="decimal" min="0" step="0.1" placeholder="0" /></label>
+              <label>Price per extra unit (KSh)<input id="rent-sheet-default-extra-unit-price" type="number" inputmode="numeric" min="0" step="1" placeholder="Not set" /></label>
+            </span>
             <input id="rent-sheet-default-grace-days" type="hidden" />
             <input id="rent-sheet-charge-start-date" type="hidden" />
             <input id="rent-sheet-note" type="hidden" />
@@ -1883,6 +1888,7 @@
                     <th>House</th>
                     <th>Tenant</th>
                     <th>Rent</th>
+                    <th class="rent-sheet-utility-col">Utility / month</th>
                     <th>Due day</th>
                     <th id="rent-sheet-month-paid-head">Rent paid this month</th>
                     <th>Owed before</th>

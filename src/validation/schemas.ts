@@ -393,6 +393,11 @@ export const landlordRentSetupSheetSchema = z.object({
   buildingDefaultUtilityDepositKsh: optionalRentAmountSchema,
   buildingDefaultDueDay: optionalRentDueDaySchema,
   buildingDefaultGraceDays: z.number().int().min(0).max(31).optional(),
+  // Standard monthly utility charge, the units it includes, and the price of
+  // each unit above that when the meter is read.
+  buildingUtilityChargeKsh: z.number().int().min(0).max(100_000).optional(),
+  buildingIncludedUnits: z.number().min(0).max(100_000).optional(),
+  buildingExtraUnitPriceKsh: z.number().min(0).max(100_000).optional(),
   chargeStartDate: optionalRentDateSchema,
   note: z.string().trim().max(280).optional(),
   rows: z
@@ -406,6 +411,8 @@ export const landlordRentSetupSheetSchema = z.object({
         utilityDepositPaidKsh: optionalRentAmountSchema,
         balanceKsh: optionalRentAmountSchema,
         currentMonthPaidKsh: optionalRentAmountSchema,
+        // Standard monthly utility charge for this house; null = building default.
+        utilityChargeKsh: z.number().int().min(0).max(100_000).nullable().optional(),
         // Tenant sheet: this calendar month's rent paid, and rent owed from before.
         monthRentPaidKsh: optionalRentAmountSchema,
         owedBeforeKsh: z.number().int().min(0).max(5_000_000).nullable().optional(),

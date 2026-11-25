@@ -5032,3 +5032,56 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
     border-color: #000;
   }
 }
+
+/* Leaving notices (Tenants & Units). */
+.absence-notices {
+  display: grid;
+  gap: 10px;
+}
+
+.absence-notice {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--captyn-line);
+  border-radius: 10px;
+}
+
+.absence-photo img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 8px;
+  display: block;
+}
+
+.absence-body {
+  display: grid;
+  gap: 2px;
+}
+
+.absence-body small {
+  color: var(--captyn-muted);
+}
+
+.absence-body .is-warning-text {
+  color: #b26b00;
+  font-weight: 600;
+}
+
+.absence-actions {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 680px) {
+  .absence-notice {
+    grid-template-columns: 64px 1fr;
+  }
+
+  .absence-actions {
+    grid-column: 1 / -1;
+  }
+}

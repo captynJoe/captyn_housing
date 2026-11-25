@@ -3,6 +3,14 @@ import { houseStanding, phoneVariants, type HouseStanding } from "./services/hou
 import { balanceForRentMonth, rentMonthFigures, type RentMonthFigures } from "./services/rentMonth.js";
 import { buildReportHouses } from "./services/performanceReport.js";
 import { withDueDay } from "./services/rentSchedule.js";
+import {
+  awayUsage,
+  fullMonthsAway,
+  isShortNotice,
+  isValidDate,
+  validateAbsenceRequest,
+  type AbsenceNotice
+} from "./services/houseAbsence.js";
 import { houseBillingStatus, planHouseBillingChange, shiftBillingMonth as shiftHouseBillingMonth, type HouseBillingStatus } from "./services/houseBilling.js";
 import cors from "cors";
 import express from "express";
@@ -328,6 +336,7 @@ const notificationSweepToken = String(process.env.NOTIFICATION_SWEEP_TOKEN ?? ""
 const ADMIN_AUTH_STATE_KEY = "admin_auth_v1";
 const RENT_LEDGER_STATE_KEY = "rent_ledger_v1";
 const RENT_PAYMENT_ARRANGEMENTS_STATE_KEY = "rent_payment_arrangements_v1";
+const HOUSE_ABSENCE_NOTICES_STATE_KEY = "house_absence_notices_v1";
 const UTILITY_BILLING_STATE_KEY = "utility_billing_v1";
 const UTILITY_BULK_SUBMISSION_AUDIT_STATE_KEY = "utility_bulk_submission_audit_v1";
 const USER_SUPPORT_STATE_KEY = "user_support_v1";
@@ -1477,6 +1486,8 @@ async function bootstrap() {
     ResidentPasswordRecoveryRequestRecord
   >();
   const residentPaymentReports = new Map<string, ResidentPaymentReportRecord>();
+  // Tenants going away or moving out (see services/houseAbsence.ts).
+  const houseAbsenceNotices = new Map<string, AbsenceNotice>();
   const rentPaymentArrangements = new Map<string, { id: string; buildingId: string; houseNumber: string; residentUserId?: string; balanceAtPromiseKsh: number; promisedDate: string; note?: string; status: "active" | "fulfilled" | "missed" | "cancelled"; createdAt: string; updatedAt: string; createdByName: string }>();
   const rentPaymentArrangementKey = (buildingId: string, houseNumber: string) => `${normalizeBuildingId(buildingId)}:${normalizeHouseNumber(houseNumber)}`;
   const accountPasswordRecoveryRequests = new Map<
@@ -4014,6 +4025,11 @@ async function bootstrap() {
         if (!item?.buildingId || !item?.houseNumber || !item?.promisedDate) continue;
         rentPaymentArrangements.set(rentPaymentArrangementKey(item.buildingId, item.houseNumber), item);
       }
+      houseAbsenceNotices.clear();
+      const absenceState = await loadAppStateJsonSafely<AbsenceNotice[]>(HOUSE_ABSENCE_NOTICES_STATE_KEY);
+      for (const item of Array.isArray(absenceState) ? absenceState : []) {
+        if (item?.id && item.buildingId && item.houseNumber) houseAbsenceNotices.set(item.id, item);
+      }
       const utilityStateNormalized = utilityBillingService.importState(utilityState);
       userSupportService.importState(userSupportState);
       paymentAccessService.importState(paymentAccessState);
@@ -6185,7 +6201,8 @@ async function bootstrap() {
   // otherwise excluded from owner alerts on purpose (those report caretaker actions TO the owner);
   // this is a narrow, additive exception for reminders that genuinely belong to both roles, not a
   // general unblock — a defense-in-depth filter alongside recipientUserIds actually being scoped.
-  const CARETAKER_VISIBLE_NOTIFICATION_ACTIONS = new Set([ACTION_METER_READING_DUE]);
+  const ACTION_HOUSE_ABSENCE = "house.absence";
+  const CARETAKER_VISIBLE_NOTIFICATION_ACTIONS = new Set([ACTION_METER_READING_DUE, ACTION_HOUSE_ABSENCE]);
   const LEGACY_OWNER_ALERT_USER_ID = "legacy-owner-alerts";
   const ownerAlertUserIdForLandlordContext = (context: {
     role: string;
@@ -7673,6 +7690,11 @@ async function bootstrap() {
       RENT_LEDGER_STATE_KEY,
       rentLedgerService.exportState()
     );
+  };
+
+  const persistHouseAbsenceNotices = async () => {
+    if (!appStateService) return;
+    await appStateService.queueSetJson(HOUSE_ABSENCE_NOTICES_STATE_KEY, [...houseAbsenceNotices.values()]);
   };
 
   const persistRentPaymentArrangements = async () => {
@@ -13453,6 +13475,17 @@ async function bootstrap() {
           normalizeUploadFolderSegment(session.buildingId, "building"),
           normalizeUploadFolderSegment(session.houseNumber, "house")
         ];
+      } else if (parsed.category === "meter_photo") {
+        const session = await getResidentSession(req, res);
+        if (!session) {
+          return;
+        }
+
+        targetDirectorySegments = [
+          "meters",
+          normalizeUploadFolderSegment(session.buildingId, "building"),
+          normalizeUploadFolderSegment(session.houseNumber, "house")
+        ];
       } else if (parsed.category === "resident_identity") {
         const userSession = await resolveOptionalUserSession(req);
         if (userSession?.role === "tenant") {
@@ -14048,6 +14081,454 @@ async function bootstrap() {
           utilityPayments: utilityPaymentsMessage
         }
       });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  // ---- Going away / moving out (services/houseAbsence.ts) ----
+  const nairobiToday = () => new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const formatAbsenceDay = (date: string) =>
+    new Date(`${date}T12:00:00.000Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  const listAbsenceNoticesFor = (buildingId: string, houseNumber?: string) =>
+    [...houseAbsenceNotices.values()]
+      .filter(
+        (item) =>
+          item.buildingId === normalizeBuildingId(buildingId) &&
+          (!houseNumber || item.houseNumber === normalizeHouseNumber(houseNumber))
+      )
+      .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+  const isOpenAbsenceNotice = (item: AbsenceNotice) =>
+    item.status === "pending" || (item.status === "confirmed" && item.kind === "away");
+  const absenceSummary = (item: AbsenceNotice) =>
+    item.kind === "away"
+      ? `away ${formatAbsenceDay(item.leaveDate)} to ${formatAbsenceDay(String(item.returnDate))}`
+      : `moving out ${formatAbsenceDay(item.leaveDate)}${item.shortNotice ? " (short notice)" : ""}`;
+
+  const notifyBuildingOfAbsence = async (
+    notice: AbsenceNotice,
+    title: string,
+    message: string,
+    dedupeSuffix: string
+  ) => {
+    if (!userAccountService) return;
+    const building = await store.getBuilding(notice.buildingId);
+    const ownerStaff = await userAccountService.listLandlordAndStaffUsers(notice.buildingId);
+    const recipientUserIds = [
+      ...new Set([
+        ...ownerStaff.users.map((item) => item.id),
+        ...listCaretakerRecordsForBuilding(notice.buildingId).map((record) => record.userId),
+        LEGACY_OWNER_ALERT_USER_ID
+      ])
+    ];
+    const notification = ownerNotificationService.enqueue({
+      title,
+      message,
+      level: "warning",
+      source: "system",
+      action: ACTION_HOUSE_ABSENCE,
+      buildingId: notice.buildingId,
+      buildingName: building?.name,
+      houseNumber: notice.houseNumber,
+      recipientUserIds,
+      dedupeKey: `house-absence-${notice.id}-${dedupeSuffix}`,
+      url: "/landlord?view=tenants",
+      metadata: { noticeId: notice.id }
+    });
+    if (notification) {
+      void pushNotificationService.notifyUserIds(recipientUserIds, {
+        title: notification.title,
+        body: notification.message,
+        level: notification.level,
+        tag: notification.dedupeKey ?? `owner-alert-${notification.id}`,
+        url: notification.url ?? "/landlord"
+      });
+    }
+  };
+
+  // Meter photos are uploaded under /uploads/meters/<building>/<house>/.
+  const isOwnMeterPhoto = (url: string, buildingId: string, houseNumber: string) => {
+    let pathname = "";
+    try {
+      pathname = new URL(url, "http://local").pathname;
+    } catch {
+      return false;
+    }
+    const prefix = `/uploads/meters/${normalizeUploadFolderSegment(buildingId, "building")}/${normalizeUploadFolderSegment(houseNumber, "house")}/`;
+    return pathname.startsWith(prefix) && !pathname.includes("..");
+  };
+
+  const notifyTenantOfAbsence = (notice: AbsenceNotice, title: string, body: string) => {
+    if (!notice.tenantUserId) return;
+    void pushNotificationService.notifyUserIds([notice.tenantUserId], {
+      title,
+      body,
+      level: "info",
+      tag: `house-absence-${notice.id}-${notice.status}`,
+      url: "/resident"
+    });
+  };
+
+  app.get("/api/user/absence-notices", async (req, res, next) => {
+    try {
+      const session = await getResidentSession(req, res);
+      if (!session) return;
+      return res.json({ data: listAbsenceNoticesFor(session.buildingId, session.houseNumber).slice(0, 10) });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.post("/api/user/absence-notices", async (req, res, next) => {
+    try {
+      const session = await getResidentSession(req, res);
+      if (!session) return;
+      const kind = req.body?.kind === "move_out" ? "move_out" : req.body?.kind === "away" ? "away" : null;
+      if (!kind) {
+        return res.status(400).json({ error: "Choose going away or moving out." });
+      }
+      const input = {
+        kind,
+        leaveDate: String(req.body?.leaveDate ?? "").trim(),
+        returnDate: kind === "away" ? String(req.body?.returnDate ?? "").trim() : undefined,
+        meterReading: Number(req.body?.meterReading),
+        meterPhotoUrl: String(req.body?.meterPhotoUrl ?? "").trim()
+      } as const;
+      const today = nairobiToday();
+      const problem = validateAbsenceRequest(input, today);
+      if (problem) {
+        return res.status(400).json({ error: problem });
+      }
+      if (!isOwnMeterPhoto(input.meterPhotoUrl, session.buildingId, session.houseNumber)) {
+        return res.status(400).json({ error: "Upload the meter photo again." });
+      }
+      if (listAbsenceNoticesFor(session.buildingId, session.houseNumber).some(isOpenAbsenceNotice)) {
+        return res.status(409).json({ error: "You already have a notice open. Cancel it or wait for it to be closed first." });
+      }
+      const account = userAccountService
+        ? await userAccountService.getSession(readUserSessionToken(req))
+        : null;
+      const submittedAt = new Date().toISOString();
+      const notice: AbsenceNotice = {
+        id: randomUUID(),
+        buildingId: normalizeBuildingId(session.buildingId),
+        houseNumber: normalizeHouseNumber(session.houseNumber),
+        tenantUserId: session.userId,
+        tenantName: account?.fullName || undefined,
+        kind,
+        leaveDate: input.leaveDate,
+        returnDate: input.returnDate,
+        leaveMeter: { reading: input.meterReading, photoUrl: input.meterPhotoUrl, at: submittedAt },
+        note: String(req.body?.note ?? "").trim().slice(0, 280) || undefined,
+        status: "pending",
+        submittedAt,
+        shortNotice: kind === "move_out" && isShortNotice(today, input.leaveDate)
+      };
+      houseAbsenceNotices.set(notice.id, notice);
+      await persistHouseAbsenceNotices();
+      await recordRoomAccountAuditEvent({
+        buildingId: notice.buildingId,
+        houseNumber: notice.houseNumber,
+        action: `absence.${kind}.requested`,
+        summary: `Tenant gave notice: ${absenceSummary(notice)}. Meter ${notice.leaveMeter.reading}.`,
+        actor: { userId: session.userId, role: "tenant", name: notice.tenantName },
+        metadata: { noticeId: notice.id, meter: notice.leaveMeter }
+      });
+      await notifyBuildingOfAbsence(
+        notice,
+        kind === "away" ? "Tenant going away" : "Tenant moving out",
+        `House ${notice.houseNumber}${notice.tenantName ? ` (${notice.tenantName})` : ""}: ${absenceSummary(notice)}. Meter ${notice.leaveMeter.reading}. Check the photo and confirm.`,
+        "requested"
+      );
+      return res.status(201).json({
+        data: notice,
+        message: notice.shortNotice
+          ? "Sent. This is less than one month's notice, so the building may hold part of your deposit."
+          : "Sent to management to confirm."
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.post("/api/user/absence-notices/:id/cancel", async (req, res, next) => {
+    try {
+      const session = await getResidentSession(req, res);
+      if (!session) return;
+      const notice = houseAbsenceNotices.get(String(req.params.id));
+      if (!notice || notice.houseNumber !== normalizeHouseNumber(session.houseNumber) || notice.buildingId !== normalizeBuildingId(session.buildingId)) {
+        return res.status(404).json({ error: "Notice not found." });
+      }
+      if (notice.status !== "pending") {
+        return res.status(409).json({ error: "Only a notice that hasn't been confirmed yet can be cancelled. Ask management." });
+      }
+      notice.status = "cancelled";
+      await persistHouseAbsenceNotices();
+      await recordRoomAccountAuditEvent({
+        buildingId: notice.buildingId,
+        houseNumber: notice.houseNumber,
+        action: `absence.${notice.kind}.cancelled`,
+        summary: `Tenant cancelled the notice: ${absenceSummary(notice)}.`,
+        actor: { userId: session.userId, role: "tenant", name: notice.tenantName }
+      });
+      return res.json({ data: notice });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.post("/api/user/absence-notices/:id/return", async (req, res, next) => {
+    try {
+      const session = await getResidentSession(req, res);
+      if (!session) return;
+      const notice = houseAbsenceNotices.get(String(req.params.id));
+      if (!notice || notice.houseNumber !== normalizeHouseNumber(session.houseNumber) || notice.buildingId !== normalizeBuildingId(session.buildingId)) {
+        return res.status(404).json({ error: "Notice not found." });
+      }
+      if (notice.kind !== "away" || notice.status !== "confirmed") {
+        return res.status(409).json({ error: "There is no confirmed time away to end." });
+      }
+      const date = String(req.body?.returnDate ?? "").trim();
+      const reading = Number(req.body?.meterReading);
+      const photoUrl = String(req.body?.meterPhotoUrl ?? "").trim();
+      if (!isValidDate(date) || date < notice.leaveDate || date > nairobiToday()) {
+        return res.status(400).json({ error: "Choose the day you came back." });
+      }
+      if (!isOwnMeterPhoto(photoUrl, session.buildingId, session.houseNumber)) {
+        return res.status(400).json({ error: "Take a photo of the water meter." });
+      }
+      if (!Number.isFinite(reading) || reading < 0) {
+        return res.status(400).json({ error: "Type the number shown on the water meter." });
+      }
+      notice.return = {
+        date,
+        meter: { reading, photoUrl, at: new Date().toISOString() },
+        submittedAt: new Date().toISOString()
+      };
+      await persistHouseAbsenceNotices();
+      await recordRoomAccountAuditEvent({
+        buildingId: notice.buildingId,
+        houseNumber: notice.houseNumber,
+        action: "absence.away.back",
+        summary: `Tenant says they are back on ${formatAbsenceDay(date)}. Meter ${reading} (was ${notice.leaveMeter.reading}).`,
+        actor: { userId: session.userId, role: "tenant", name: notice.tenantName },
+        metadata: { noticeId: notice.id, meter: notice.return.meter }
+      });
+      await notifyBuildingOfAbsence(
+        notice,
+        "Tenant is back",
+        `House ${notice.houseNumber} is back on ${formatAbsenceDay(date)}. Meter ${reading} (was ${notice.leaveMeter.reading}). Check the photo and confirm.`,
+        "back"
+      );
+      return res.json({ data: notice, message: "Sent to management to confirm." });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  const resolveAbsenceNoticeForManager = async (req: express.Request, res: express.Response) => {
+    const context = await resolveLandlordAccessContext(req, res);
+    if (!context) return null;
+    const notice = houseAbsenceNotices.get(String(req.params.id));
+    if (!notice) {
+      res.status(404).json({ error: "Notice not found." });
+      return null;
+    }
+    if (!(await canManageBuildingFromLandlordContext(context, notice.buildingId))) {
+      res.status(403).json({ error: "Building access denied" });
+      return null;
+    }
+    return { context, notice, actor: actorFromLandlordContext(context) };
+  };
+
+  app.get("/api/landlord/absence-notices", async (req, res, next) => {
+    try {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) return;
+      const visibleBuildings = await listVisibleBuildingsForLandlordContext(context);
+      const requested = typeof req.query.buildingId === "string" ? normalizeBuildingId(req.query.buildingId) : "";
+      const data = visibleBuildings
+        .filter((building) => !requested || building.id === requested)
+        .flatMap((building) => listAbsenceNoticesFor(building.id))
+        .filter((item) => item.status !== "cancelled")
+        .slice(0, 200);
+      return res.json({ data });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.post("/api/landlord/absence-notices/:id/confirm", async (req, res, next) => {
+    try {
+      const resolved = await resolveAbsenceNoticeForManager(req, res);
+      if (!resolved) return;
+      const { notice, actor } = resolved;
+      if (notice.status !== "pending") {
+        return res.status(409).json({ error: "This notice was already handled." });
+      }
+      if (notice.kind === "away" && repositoryContext.prisma) {
+        const pause = fullMonthsAway(notice.leaveDate, String(notice.returnDate));
+        if (pause) {
+          const hold = await repositoryContext.prisma.roomBillingHold.create({
+            data: {
+              buildingId: notice.buildingId,
+              houseNumber: notice.houseNumber,
+              scope: "utilities",
+              utilityType: null,
+              startMonth: pause.startMonth,
+              endMonth: pause.endMonth,
+              reason: `Away ${formatAbsenceDay(notice.leaveDate)} – ${formatAbsenceDay(String(notice.returnDate))}`,
+              createdByUserId: actor.userId,
+              createdByRole: actor.role,
+              createdByName: actor.name
+            }
+          });
+          await refreshRoomBillingHoldCache(true);
+          notice.holdId = hold.id;
+          notice.pauseFrom = pause.startMonth;
+          notice.pauseTo = pause.endMonth;
+        }
+      }
+      notice.status = "confirmed";
+      notice.decidedAt = new Date().toISOString();
+      notice.decidedByName = actor.name;
+      notice.decidedByRole = actor.role;
+      await persistHouseAbsenceNotices();
+      await recordRoomAccountAuditEvent({
+        buildingId: notice.buildingId,
+        houseNumber: notice.houseNumber,
+        action: `absence.${notice.kind}.confirmed`,
+        summary: `Confirmed: ${absenceSummary(notice)}${notice.pauseFrom ? `. Utilities not billed ${notice.pauseFrom} to ${notice.pauseTo}; rent still billed` : ""}.`,
+        actor,
+        metadata: { noticeId: notice.id, holdId: notice.holdId ?? null }
+      });
+      notifyTenantOfAbsence(
+        notice,
+        "Notice confirmed",
+        notice.kind === "away"
+          ? `Your time away is confirmed. Rent is still due each month${notice.pauseFrom ? `; utilities pause for the whole months you're away` : ""}. Tap "I'm back" with a meter photo when you return.`
+          : `Your move-out on ${formatAbsenceDay(notice.leaveDate)} is confirmed.`
+      );
+      return res.json({ data: notice });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.post("/api/landlord/absence-notices/:id/reject", async (req, res, next) => {
+    try {
+      const resolved = await resolveAbsenceNoticeForManager(req, res);
+      if (!resolved) return;
+      const { notice, actor } = resolved;
+      const reason = String(req.body?.reason ?? "").trim().slice(0, 280);
+      if (!reason) return res.status(400).json({ error: "Say why, so the tenant can fix it." });
+      if (notice.status !== "pending" && !(notice.kind === "away" && notice.return && !notice.return.confirmedAt)) {
+        return res.status(409).json({ error: "This notice was already handled." });
+      }
+      if (notice.status === "pending") {
+        notice.status = "rejected";
+        notice.rejectReason = reason;
+        notice.decidedAt = new Date().toISOString();
+        notice.decidedByName = actor.name;
+        notice.decidedByRole = actor.role;
+      } else {
+        // A "back" report that doesn't match the photo: clear it so the tenant can send it again.
+        notice.return = undefined;
+      }
+      await persistHouseAbsenceNotices();
+      await recordRoomAccountAuditEvent({
+        buildingId: notice.buildingId,
+        houseNumber: notice.houseNumber,
+        action: `absence.${notice.kind}.rejected`,
+        summary: `Not confirmed: ${reason}`,
+        actor,
+        metadata: { noticeId: notice.id }
+      });
+      notifyTenantOfAbsence(notice, "Notice not confirmed", reason);
+      return res.json({ data: notice });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.post("/api/landlord/absence-notices/:id/confirm-return", async (req, res, next) => {
+    try {
+      const resolved = await resolveAbsenceNoticeForManager(req, res);
+      if (!resolved) return;
+      const { notice, actor } = resolved;
+      if (notice.kind !== "away" || notice.status !== "confirmed" || !notice.return || notice.return.confirmedAt) {
+        return res.status(409).json({ error: "There is no return waiting to be confirmed." });
+      }
+      const back = notice.return;
+      // Utilities pause only for the whole months actually away.
+      const pause = fullMonthsAway(notice.leaveDate, back.date);
+      if (notice.holdId && repositoryContext.prisma) {
+        if (pause) {
+          await repositoryContext.prisma.roomBillingHold.update({
+            where: { id: notice.holdId },
+            data: { startMonth: pause.startMonth, endMonth: pause.endMonth }
+          });
+        } else {
+          await repositoryContext.prisma.roomBillingHold.update({
+            where: { id: notice.holdId },
+            data: {
+              canceledAt: new Date(),
+              canceledByUserId: actor.userId,
+              canceledByRole: actor.role,
+              canceledByName: actor.name,
+              cancelReason: "Came back before a whole month away"
+            }
+          });
+        }
+        await refreshRoomBillingHoldCache(true);
+        // Months no longer paused get their standard charge.
+        await ensureRecurringUtilityBillsCurrent("absence-return", {
+          buildingId: notice.buildingId,
+          houseNumber: notice.houseNumber
+        });
+      }
+      notice.pauseFrom = pause?.startMonth;
+      notice.pauseTo = pause?.endMonth;
+
+      // Water used while away: per unit, no included units.
+      const rate = getMeterReadingRates(notice.buildingId).water ?? 0;
+      const usage = awayUsage(notice.leaveMeter.reading, back.meter.reading, rate);
+      if (usage.chargeKsh > 0) {
+        const billingMonth = back.date.slice(0, 7);
+        const dueDate = new Date(Date.parse(`${back.date}T20:59:00.000Z`) + 7 * 24 * 60 * 60 * 1000).toISOString();
+        utilityBillingService.addBillCharge({
+          utilityType: "water",
+          buildingId: notice.buildingId,
+          houseNumber: notice.houseNumber,
+          billingMonth,
+          amountKsh: usage.chargeKsh,
+          dueDate,
+          note: `Water used while away: ${usage.units} units × KSh ${rate}`
+        });
+        await persistUtilityBillingStateNow();
+      }
+      back.confirmedAt = new Date().toISOString();
+      back.confirmedByName = actor.name;
+      back.unitsUsedWhileAway = usage.units;
+      back.chargedKsh = usage.chargeKsh;
+      notice.status = "returned";
+      await persistHouseAbsenceNotices();
+      await recordRoomAccountAuditEvent({
+        buildingId: notice.buildingId,
+        houseNumber: notice.houseNumber,
+        action: "absence.away.returned",
+        summary: `Back on ${formatAbsenceDay(back.date)}. ${pause ? `Utilities not billed ${pause.startMonth} to ${pause.endMonth}.` : "No whole month away, so utilities were billed as usual."} Water used while away: ${usage.units} units${usage.chargeKsh > 0 ? `, KSh ${usage.chargeKsh.toLocaleString("en-US")} added` : ""}.`,
+        actor,
+        metadata: { noticeId: notice.id, units: usage.units, chargeKsh: usage.chargeKsh }
+      });
+      notifyTenantOfAbsence(
+        notice,
+        "Welcome back",
+        usage.chargeKsh > 0
+          ? `The meter shows ${usage.units} units used while you were away: KSh ${usage.chargeKsh.toLocaleString("en-US")} added to this month's water bill.`
+          : "Your return is confirmed. Billing is back to normal."
+      );
+      return res.json({ data: notice });
     } catch (error) {
       return next(error);
     }

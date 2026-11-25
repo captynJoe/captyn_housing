@@ -2183,3 +2183,28 @@ input[type="radio"] {
 .resident-access-request[open] summary {
   margin-bottom: 4px;
 }
+
+/* Going away or moving out. */
+.resident-absence {
+  margin-top: 18px;
+}
+
+.resident-absence-kind {
+  display: grid;
+  gap: 6px;
+}
+
+.resident-absence-kind label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.resident-absence-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--captyn-line, rgba(11, 46, 34, 0.14));
+  border-radius: 10px;
+}

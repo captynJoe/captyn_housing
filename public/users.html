@@ -346,6 +346,22 @@
               <section class="section-head"><div><h2>Your bills</h2><p class="item-details">Rent and utility charges for your house.</p></div><button id="refresh-all-btn" type="button" class="ghost-btn">Refresh</button></section>
               <section class="resident-rent-bill"><h3>Rent</h3><section id="rent-due" class="rent-wrap"></section></section>
               <section class="resident-utilities-bills"><div class="section-head"><div><h3>Utilities</h3><p id="utility-bills-summary" class="item-details">Loading balances...</p></div></div><section id="utility-bills-list" class="stack-list"></section></section>
+              <section class="resident-absence" id="resident-absence">
+                <h3>Going away or moving out</h3>
+                <div id="resident-absence-current"></div>
+                <form id="resident-absence-form" class="report-form">
+                  <div class="resident-absence-kind" role="radiogroup" aria-label="What are you doing?">
+                    <label><input type="radio" name="resident-absence-kind" value="away" checked /> Going away for a while</label>
+                    <label><input type="radio" name="resident-absence-kind" value="move_out" /> Moving out</label>
+                  </div>
+                  <label>Day you leave<input id="resident-absence-leave" type="date" required /></label>
+                  <label id="resident-absence-return-label">Day you expect to be back<input id="resident-absence-return" type="date" /></label>
+                  <label>Photo of the water meter<input id="resident-absence-photo" type="file" accept="image/*" capture="environment" required /></label>
+                  <label>Number on the water meter<input id="resident-absence-reading" type="number" inputmode="decimal" min="0" step="0.001" required /></label>
+                  <p id="resident-absence-hint" class="item-details"></p>
+                  <button id="resident-absence-submit" type="submit">Send to management</button>
+                </form>
+              </section>
               <button type="button" class="rv-inline-link" data-open-resident-view="payments">Payment options and history →</button>
             </article>
           </section>

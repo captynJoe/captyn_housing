@@ -4123,6 +4123,206 @@ function renderResidentPaymentReports(reports = []) {
   });
 }
 
+// ---- Going away / moving out (rules: src/services/houseAbsence.ts) ----
+let residentAbsenceNotices = [];
+
+function absenceMonthLabel(month) {
+  const date = new Date(`${month}-01T12:00:00Z`);
+  return date.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+function absenceDayLabel(day) {
+  return new Date(`${day}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+// Whole months away: the tenant is present on the day they leave and the day they're back.
+function absenceFullMonths(leaveDate, returnDate) {
+  if (!leaveDate || !returnDate || returnDate <= leaveDate) return [];
+  const months = [];
+  const [ly, lm] = leaveDate.split("-").map(Number);
+  const end = returnDate.slice(0, 7);
+  for (let cursor = new Date(Date.UTC(ly, lm, 1)); ; cursor.setUTCMonth(cursor.getUTCMonth() + 1)) {
+    const key = `${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, "0")}`;
+    if (key >= end) break;
+    months.push(key);
+  }
+  return months;
+}
+
+function uploadMeterPhoto(file) {
+  return uploadImageFiles([file], {
+    createUploadRequest: () => ({ ...createResidentSupportUploadRequest(), fields: { category: "meter_photo" } })
+  }).then((urls) => urls[0]);
+}
+
+function selectedAbsenceKind() {
+  const checked = document.querySelector('input[name="resident-absence-kind"]:checked');
+  return checked instanceof HTMLInputElement ? checked.value : "away";
+}
+
+function updateAbsenceFormHint() {
+  const kind = selectedAbsenceKind();
+  const leave = document.getElementById("resident-absence-leave")?.value ?? "";
+  const back = document.getElementById("resident-absence-return")?.value ?? "";
+  const returnLabel = document.getElementById("resident-absence-return-label");
+  const returnInput = document.getElementById("resident-absence-return");
+  const hint = document.getElementById("resident-absence-hint");
+  if (returnLabel) returnLabel.hidden = kind !== "away";
+  if (returnInput instanceof HTMLInputElement) returnInput.required = kind === "away";
+  if (!(hint instanceof HTMLElement)) return;
+  if (kind === "move_out") {
+    hint.textContent = "Give at least one month's notice. Less than that may affect your deposit.";
+    return;
+  }
+  const months = absenceFullMonths(leave, back);
+  hint.textContent = !leave || !back
+    ? "Rent is still due every month. Utilities stop only for whole months you're away."
+    : months.length === 0
+      ? "These dates don't cover a whole month, so utilities stay billed as usual."
+      : `Rent is still due every month. Utilities won't be billed for ${months.map(absenceMonthLabel).join(", ")}.`;
+}
+
+function renderResidentAbsence() {
+  const current = document.getElementById("resident-absence-current");
+  const form = document.getElementById("resident-absence-form");
+  if (!(current instanceof HTMLElement) || !(form instanceof HTMLFormElement)) return;
+  const open = residentAbsenceNotices.find(
+    (item) => item.status === "pending" || (item.status === "confirmed" && item.kind === "away")
+  );
+  const latest = residentAbsenceNotices[0];
+  form.hidden = Boolean(open);
+  current.replaceChildren();
+  const notice = open ?? (latest && ["rejected", "returned", "confirmed"].includes(latest.status) ? latest : null);
+  if (!notice) return;
+
+  const what = notice.kind === "away"
+    ? `Away ${absenceDayLabel(notice.leaveDate)} to ${absenceDayLabel(notice.returnDate)}`
+    : `Moving out ${absenceDayLabel(notice.leaveDate)}${notice.shortNotice ? " (short notice)" : ""}`;
+  const card = document.createElement("div");
+  card.className = "resident-absence-card";
+  let status = "";
+  let actions = "";
+  if (notice.status === "pending") {
+    status = "Waiting for management to check your meter photo.";
+    actions = `<button type="button" class="ghost-btn" data-absence-cancel="${escapeHtml(notice.id)}">Cancel</button>`;
+  } else if (notice.status === "rejected") {
+    status = `Not confirmed: ${notice.rejectReason ?? ""}`;
+  } else if (notice.status === "returned") {
+    status = notice.return?.chargedKsh > 0
+      ? `Back on ${absenceDayLabel(notice.return.date)}. ${notice.return.unitsUsedWhileAway} units used while away were billed.`
+      : `Back on ${absenceDayLabel(notice.return.date)}.`;
+  } else if (notice.kind === "move_out") {
+    status = "Confirmed.";
+  } else if (notice.return && !notice.return.confirmedAt) {
+    status = "Waiting for management to confirm your return.";
+  } else {
+    status = notice.pauseFrom
+      ? `Confirmed. Utilities not billed ${absenceMonthLabel(notice.pauseFrom)} to ${absenceMonthLabel(notice.pauseTo)}. Rent is still due.`
+      : "Confirmed. Rent is still due.";
+    actions = `
+      <form class="report-form" data-absence-back="${escapeHtml(notice.id)}">
+        <strong>I'm back</strong>
+        <label>Day you came back<input name="returnDate" type="date" required /></label>
+        <label>Photo of the water meter<input name="photo" type="file" accept="image/*" capture="environment" required /></label>
+        <label>Number on the water meter<input name="meterReading" type="number" inputmode="decimal" min="0" step="0.001" required /></label>
+        <button type="submit">Send</button>
+      </form>`;
+  }
+  card.innerHTML = `<strong>${escapeHtml(what)}</strong><p class="item-details">${escapeHtml(status)}</p>${actions}`;
+  current.append(card);
+}
+
+async function loadResidentAbsence() {
+  try {
+    const payload = await requestJson("/api/user/absence-notices", {}, { auth: true });
+    residentAbsenceNotices = Array.isArray(payload.data) ? payload.data : [];
+  } catch {
+    residentAbsenceNotices = [];
+  }
+  renderResidentAbsence();
+  updateAbsenceFormHint();
+}
+
+async function submitResidentAbsence(event) {
+  event.preventDefault();
+  clearFeedback();
+  const submit = document.getElementById("resident-absence-submit");
+  const photo = document.getElementById("resident-absence-photo");
+  const file = photo instanceof HTMLInputElement ? photo.files?.[0] : null;
+  if (!file) {
+    showFeedback("Take a photo of the water meter.");
+    return;
+  }
+  if (submit instanceof HTMLButtonElement) submit.disabled = true;
+  try {
+    const meterPhotoUrl = await uploadMeterPhoto(file);
+    const payload = await requestJson("/api/user/absence-notices", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: selectedAbsenceKind(),
+        leaveDate: document.getElementById("resident-absence-leave")?.value,
+        returnDate: document.getElementById("resident-absence-return")?.value || undefined,
+        meterReading: Number(document.getElementById("resident-absence-reading")?.value),
+        meterPhotoUrl
+      })
+    }, { auth: true });
+    event.target.reset();
+    showFeedback(payload.message ?? "Sent to management to confirm.", "success");
+    await loadResidentAbsence();
+  } catch (error) {
+    showFeedback(error instanceof Error ? error.message : "Could not send the notice.");
+  } finally {
+    if (submit instanceof HTMLButtonElement) submit.disabled = false;
+  }
+}
+
+document.getElementById("resident-absence-form")?.addEventListener("submit", submitResidentAbsence);
+document.getElementById("resident-absence-form")?.addEventListener("input", updateAbsenceFormHint);
+document.getElementById("resident-absence-form")?.addEventListener("change", updateAbsenceFormHint);
+document.getElementById("resident-absence-current")?.addEventListener("click", async (event) => {
+  const button = event.target instanceof HTMLElement ? event.target.closest("[data-absence-cancel]") : null;
+  if (!(button instanceof HTMLButtonElement)) return;
+  button.disabled = true;
+  try {
+    await requestJson(`/api/user/absence-notices/${encodeURIComponent(button.dataset.absenceCancel)}/cancel`, { method: "POST" }, { auth: true });
+    await loadResidentAbsence();
+  } catch (error) {
+    showFeedback(error instanceof Error ? error.message : "Could not cancel.");
+    button.disabled = false;
+  }
+});
+document.getElementById("resident-absence-current")?.addEventListener("submit", async (event) => {
+  const form = event.target;
+  if (!(form instanceof HTMLFormElement) || !form.dataset.absenceBack) return;
+  event.preventDefault();
+  clearFeedback();
+  const file = form.elements.namedItem("photo")?.files?.[0];
+  if (!file) {
+    showFeedback("Take a photo of the water meter.");
+    return;
+  }
+  const button = form.querySelector("button[type=submit]");
+  if (button instanceof HTMLButtonElement) button.disabled = true;
+  try {
+    const meterPhotoUrl = await uploadMeterPhoto(file);
+    const payload = await requestJson(`/api/user/absence-notices/${encodeURIComponent(form.dataset.absenceBack)}/return`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        returnDate: form.elements.namedItem("returnDate")?.value,
+        meterReading: Number(form.elements.namedItem("meterReading")?.value),
+        meterPhotoUrl
+      })
+    }, { auth: true });
+    showFeedback(payload.message ?? "Sent.", "success");
+    await loadResidentAbsence();
+  } catch (error) {
+    showFeedback(error instanceof Error ? error.message : "Could not send.");
+    if (button instanceof HTMLButtonElement) button.disabled = false;
+  }
+});
+
 async function submitResidentPaymentReport(event) {
   event.preventDefault();
   clearFeedback();
@@ -4526,6 +4726,7 @@ async function loadTenantData() {
     state.utilityPayments = data.utilityPayments ?? [];
     renderUtilityPayments(state.utilityPayments, messages.utilityPayments);
     renderResidentPaymentReports(data.residentPaymentReports ?? []);
+    void loadResidentAbsence();
     syncPaymentMessaging();
     updateResidentNavDots();
     renderResidentIdentityNotice();

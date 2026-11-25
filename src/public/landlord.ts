@@ -5753,6 +5753,7 @@ function setPreferredBuildingSelection(buildingId, options = {}) {
   renderOverviewCollections(state.rentStatus);
   renderResidentDirectory(state.residentDirectory);
   renderMetrics();
+  renderAbsenceNotices();
   renderMessageCenterBuildingOptions();
   renderMessageCenter();
   renderDailyDashboard();
@@ -10478,6 +10479,100 @@ function renderBuildingPerformance(data, previousData) {
   }
 }
 
+// ---- Leaving notices: tenants going away or moving out (houseAbsence.ts) ----
+let absenceNotices = [];
+
+function absenceDay(day) {
+  return day
+    ? new Date(`${day}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })
+    : "-";
+}
+
+function renderAbsenceNotices() {
+  const section = document.getElementById("absence-notices-section");
+  const list = document.getElementById("absence-notices-list");
+  if (!(section instanceof HTMLElement) || !(list instanceof HTMLElement)) return;
+  const focused = getFocusedBuildingId();
+  const today = new Date().toISOString().slice(0, 10);
+  // What needs a decision first, then who is away now, then move-outs coming up.
+  const rows = absenceNotices
+    .filter((item) => !focused || normalizeLookupBuildingId(item.buildingId) === focused)
+    .filter((item) =>
+      item.status === "pending" ||
+      (item.kind === "away" && item.status === "confirmed") ||
+      (item.kind === "move_out" && item.status === "confirmed" && item.leaveDate >= today)
+    )
+    .sort((a, b) => {
+      const rank = (item) => item.status === "pending" || (item.return && !item.return.confirmedAt) ? 0 : 1;
+      return rank(a) - rank(b) || a.leaveDate.localeCompare(b.leaveDate);
+    });
+  section.hidden = rows.length === 0;
+  list.replaceChildren();
+  rows.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "absence-notice";
+    const backWaiting = item.return && !item.return.confirmedAt;
+    const meter = backWaiting ? item.return.meter : item.leaveMeter;
+    const what = item.kind === "away"
+      ? `Going away ${absenceDay(item.leaveDate)} – back ${absenceDay(item.returnDate)}`
+      : `Moving out ${absenceDay(item.leaveDate)}`;
+    const status = item.status === "pending"
+      ? item.kind === "away" ? "Check the meter photo and confirm" : item.shortNotice ? "Short notice (less than a month)" : "Check the meter photo and confirm"
+      : backWaiting
+        ? `Back ${absenceDay(item.return.date)}: meter ${item.return.meter.reading} (was ${item.leaveMeter.reading}). Confirm return.`
+        : item.kind === "away"
+          ? item.pauseFrom ? `Away now · utilities not billed ${formatBillingMonth(item.pauseFrom)} – ${formatBillingMonth(item.pauseTo)}` : "Away now"
+          : "Confirmed";
+    const canDecide = item.status === "pending" || backWaiting;
+    card.innerHTML = `
+      <a class="absence-photo" href="${escapeHtml(meter.photoUrl)}" target="_blank" rel="noopener"><img src="${escapeHtml(meter.photoUrl)}" alt="Water meter photo, house ${escapeHtml(item.houseNumber)}" loading="lazy" /></a>
+      <div class="absence-body">
+        <strong>House ${escapeHtml(item.houseNumber)}${item.tenantName ? ` · ${escapeHtml(item.tenantName)}` : ""}</strong>
+        <span>${escapeHtml(what)}</span>
+        <span>Meter ${escapeHtml(String(meter.reading))}</span>
+        <small class="${item.shortNotice && item.status === "pending" ? "is-warning-text" : ""}">${escapeHtml(status)}</small>
+      </div>
+      ${canDecide ? `<div class="absence-actions">
+        <button type="button" data-absence-action="${backWaiting ? "confirm-return" : "confirm"}" data-absence-id="${escapeHtml(item.id)}">${backWaiting ? "Confirm return" : "Confirm"}</button>
+        <button type="button" class="ghost-btn" data-absence-action="reject" data-absence-id="${escapeHtml(item.id)}">Reject</button>
+      </div>` : ""}
+    `;
+    list.append(card);
+  });
+}
+
+async function loadAbsenceNotices() {
+  const payload = await requestJson("/api/landlord/absence-notices");
+  absenceNotices = Array.isArray(payload?.data) ? payload.data : [];
+  renderAbsenceNotices();
+}
+
+document.getElementById("absence-notices-list")?.addEventListener("click", async (event) => {
+  const button = event.target instanceof HTMLElement ? event.target.closest("[data-absence-action]") : null;
+  if (!(button instanceof HTMLButtonElement)) return;
+  const action = button.dataset.absenceAction;
+  const id = button.dataset.absenceId;
+  let body = {};
+  if (action === "reject") {
+    const reason = window.prompt("Why? The tenant will see this (e.g. \"Photo is blurry, please retake\").");
+    if (!reason || !reason.trim()) return;
+    body = { reason: reason.trim() };
+  }
+  button.disabled = true;
+  try {
+    await requestJson(`/api/landlord/absence-notices/${encodeURIComponent(id)}/${action}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    setStatus(action === "reject" ? "Sent back to the tenant." : "Confirmed.");
+    await Promise.all([loadAbsenceNotices(), loadBills()]);
+  } catch (error) {
+    handleLandlordError(error, "Could not update the notice.");
+    button.disabled = false;
+  }
+});
+
 let lastBuildingPerformance = null;
 
 const REPORT_STATUS_LABELS = {
@@ -12100,7 +12195,8 @@ async function hydrateDeferredLandlordData() {
     loadPayments,
     loadPaymentCorrections,
     loadExpenditures,
-    loadMoveOutSettlements
+    loadMoveOutSettlements,
+    loadAbsenceNotices
   ];
 
   landlordDeferredHydrationPromise = Promise.allSettled(loaders.map((loader) => loader()))

@@ -219,7 +219,8 @@ export const residentPushSubscriptionSchema = z.object({
 export const mediaUploadCategorySchema = z.enum([
   "support_evidence",
   "resident_identity",
-  "building_profile"
+  "building_profile",
+  "meter_photo"
 ]);
 
 export const mediaUploadSignatureRequestSchema = z.object({

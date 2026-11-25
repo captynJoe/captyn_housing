@@ -1806,6 +1806,44 @@ export class UtilityBillingService {
     return { bill: this.toSnapshot(record), charge };
   }
 
+  // Adds a separate charge to a house's bill for a month (e.g. water the
+  // meter showed used while the house was away), opening the bill if the month
+  // has none yet. The note says what it is for.
+  addBillCharge(input: {
+    utilityType: UtilityType;
+    buildingId: string;
+    houseNumber: string;
+    billingMonth: string;
+    amountKsh: number;
+    dueDate: string;
+    note: string;
+  }): UtilityBillSnapshot {
+    const amountKsh = Math.max(0, Math.round(Number(input.amountKsh) || 0));
+    const normalizedBuildingId = normalizeBuildingId(input.buildingId);
+    const normalizedHouse = normalizeHouseNumber(input.houseNumber);
+    const key = ledgerKey(input.utilityType, normalizedBuildingId, normalizedHouse);
+    let record = (this.billsByLedger.get(key) ?? []).find((item) => item.billingMonth === input.billingMonth);
+    if (!record) {
+      this.createBill(input.utilityType, normalizedBuildingId, normalizedHouse, {
+        billingMonth: input.billingMonth,
+        fixedChargeKsh: 0,
+        dueDate: input.dueDate,
+        note: input.note
+      });
+      record = (this.billsByLedger.get(key) ?? []).find((item) => item.billingMonth === input.billingMonth);
+      if (!record) {
+        throw new Error(`Unable to open the ${input.billingMonth} bill for ${normalizedHouse}.`);
+      }
+    } else {
+      record.note = [record.note, input.note].filter(Boolean).join(" · ");
+    }
+    record.adjustmentKsh = adjustmentTotal(record) + amountKsh;
+    record.balanceKsh = Math.max(0, record.amountKsh + adjustmentTotal(record) - paidTotal(record));
+    record.updatedAt = nowIso();
+    this.emitStateChange();
+    return this.toSnapshot(record);
+  }
+
   // A reading recorded today bills the current month, unless that month (or a
   // later one) is already billed, in which case it takes the next free month.
   resolveReadingBillMonth(

@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { houseStanding, phoneVariants, type HouseStanding } from "./services/houseStanding.js";
-import { rentMonthFigures, type RentMonthFigures } from "./services/rentMonth.js";
+import { balanceForRentMonth, rentMonthFigures, type RentMonthFigures } from "./services/rentMonth.js";
 import { buildReportHouses } from "./services/performanceReport.js";
 import { withDueDay } from "./services/rentSchedule.js";
 import { houseBillingStatus, planHouseBillingChange, shiftBillingMonth as shiftHouseBillingMonth, type HouseBillingStatus } from "./services/houseBilling.js";
@@ -16295,7 +16295,13 @@ async function bootstrap() {
         arrearsKsh: row.rentArrearsKsh,
         openingArrears: rentLedgerService.getRentDue(building.id, row.houseNumber)?.openingArrears ?? null,
         dueDate: row.rentDueDate,
-        paymentStatus: row.rentPaymentStatus
+        paymentStatus: row.rentPaymentStatus,
+        // Tenant sheet: this calendar month, as the rest of the app reads it.
+        month: billingMonthFromDate(new Date()),
+        monthRentPaidKsh: row.currentMonthRentPaidKsh ?? 0,
+        owedBeforeKsh: row.rentArrearsKsh ?? 0,
+        rentStage: row.rentStage ?? null,
+        monthDueDate: row.rentMonthDueDate ?? null
       }))
     };
   };
@@ -16577,8 +16583,40 @@ async function bootstrap() {
               recordedAt: new Date().toISOString()
             };
           }
-          const baseBalanceKsh =
-            requestedBalanceKsh != null
+          // The tenant sheet keys this month's rent paid and what was owed from
+          // before; the balance is worked out from those (see rentMonth.ts).
+          const sheetMonth = billingMonthFromDate(new Date());
+          const sheetMonthRentPaidKsh = normalizeOptionalNonNegativeInteger(sourceRow?.monthRentPaidKsh);
+          const sheetOwedBeforeKsh = normalizeOptionalNonNegativeInteger(sourceRow?.owedBeforeKsh);
+          const isRentBilledFor = (billingMonth: string) =>
+            !isRoomBillingHeld({ buildingId: building.id, houseNumber, kind: "rent", billingMonth });
+          const currentFigures = existing
+            ? rentMonthFigures({
+                month: sheetMonth,
+                monthlyRentKsh: existing.monthlyRentKsh,
+                balanceKsh: existing.balanceKsh,
+                cycleMonth: existing.currentBillingMonth,
+                isBilled: isRentBilledFor,
+                latePenaltyCharges: existing.latePenaltyCharges
+              })
+            : null;
+          if (sheetMonthRentPaidKsh != null && sheetMonthRentPaidKsh > monthlyRentKsh) {
+            return res.status(400).json({
+              error: `Rent paid this month for ${houseNumber} cannot be more than its rent of KSh ${monthlyRentKsh.toLocaleString("en-US")}.`
+            });
+          }
+          const sheetSetsMonth = sheetMonthRentPaidKsh != null || sheetOwedBeforeKsh != null;
+          const baseBalanceKsh = sheetSetsMonth
+            ? balanceForRentMonth({
+                month: sheetMonth,
+                monthlyRentKsh,
+                cycleMonth: existing && monthlyRentKsh > 0 ? String(dueDate).slice(0, 7) : sheetMonth,
+                isBilled: isRentBilledFor,
+                paidKsh: sheetMonthRentPaidKsh ?? currentFigures?.paidKsh ?? 0,
+                earlierDueKsh: sheetOwedBeforeKsh ?? currentFigures?.earlierDueKsh ?? 0,
+                penaltyDueKsh: currentFigures?.penaltyDueKsh ?? 0
+              })
+            : requestedBalanceKsh != null
               ? requestedBalanceKsh
               : currentMonthPaidKsh == null
                 ? Math.max(0, Number(existing?.balanceKsh ?? 0))
@@ -16593,7 +16631,7 @@ async function bootstrap() {
           if (
             refreshed.hasActiveResident &&
             paymentAccessService.isEnabled(building.id, "rent") &&
-            (existing || monthlyRentKsh > 0 || requestedBalanceKsh != null || openingArrearsAdditionKsh > 0)
+            (existing || monthlyRentKsh > 0 || requestedBalanceKsh != null || openingArrearsAdditionKsh > 0 || sheetSetsMonth)
           ) {
             rentSnapshot = rentLedgerService.upsertRentDue(building.id, houseNumber, {
               monthlyRentKsh,
@@ -16603,6 +16641,26 @@ async function bootstrap() {
                 parsed.note?.trim() ||
                 `House Default saved for ${building.name} ${houseNumber}.`
             }, { openingArrears });
+          }
+
+          if (sheetSetsMonth && rentSnapshot) {
+            const before = currentFigures;
+            await recordRoomAccountAuditEvent({
+              buildingId: building.id,
+              houseNumber,
+              action: "rent.sheet.month_set",
+              summary: `Tenant sheet: ${sheetMonth} rent paid KSh ${(sheetMonthRentPaidKsh ?? before?.paidKsh ?? 0).toLocaleString("en-US")}, owed from before KSh ${(sheetOwedBeforeKsh ?? before?.earlierDueKsh ?? 0).toLocaleString("en-US")}.`,
+              actor,
+              metadata: {
+                month: sheetMonth,
+                previousPaidKsh: before?.paidKsh ?? null,
+                previousOwedBeforeKsh: before?.earlierDueKsh ?? null,
+                monthRentPaidKsh: sheetMonthRentPaidKsh,
+                owedBeforeKsh: sheetOwedBeforeKsh,
+                previousBalanceKsh: existing?.balanceKsh ?? null,
+                balanceKsh
+              }
+            });
           }
 
           if (openingArrearsAdditionKsh > 0 && openingArrears && rentSnapshot) {

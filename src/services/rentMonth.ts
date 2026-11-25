@@ -115,3 +115,29 @@ export function rentMonthFigures(input: RentMonthInput): RentMonthFigures {
     stage
   };
 }
+
+// The ledger balance that makes a month read as `paidKsh` of its rent paid
+// with `earlierDueKsh` owed from before: the opposite of rentMonthFigures.
+// Rent the ledger already charged for later months stays on top.
+export function balanceForRentMonth(input: {
+  month: string;
+  monthlyRentKsh: number;
+  cycleMonth: string;
+  isBilled: (month: string) => boolean;
+  paidKsh: number;
+  earlierDueKsh: number;
+  penaltyDueKsh?: number;
+}): number {
+  const monthlyRentKsh = money(input.monthlyRentKsh);
+  const rentKsh = input.cycleMonth >= input.month && input.isBilled(input.month) ? monthlyRentKsh : 0;
+  let laterChargesKsh = 0;
+  for (let later = shiftMonth(input.month, 1); later <= input.cycleMonth; later = shiftMonth(later, 1)) {
+    if (input.isBilled(later)) laterChargesKsh += monthlyRentKsh;
+  }
+  return (
+    money(input.earlierDueKsh) +
+    Math.max(0, rentKsh - money(input.paidKsh)) +
+    money(input.penaltyDueKsh) +
+    laterChargesKsh
+  );
+}

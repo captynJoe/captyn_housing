@@ -836,7 +836,7 @@
             <h2>Rent</h2>
             <div class="action-row">
               <button id="rent-payment-corrections-btn" type="button">Correct a payment</button>
-              <button id="open-rent-sheet-btn" type="button">One-Time Rent Setup Sheet</button>
+              <button id="open-rent-sheet-btn" type="button">Tenant Sheet</button>
               <button id="refresh-rent-status" type="button">Refresh</button>
             </div>
           </div>
@@ -1294,7 +1294,7 @@
               <details class="lh-more-menu">
                 <summary>More</summary>
                 <div class="lh-more-menu-list">
-                  <button id="residents-open-rent-sheet-btn" type="button">Rent Setup Sheet</button>
+                  <button id="residents-open-rent-sheet-btn" type="button">Tenant Sheet</button>
                   <button id="residents-open-match-btn" type="button">Open Account</button>
                   <button id="house-sheet-export-btn" type="button">Export Excel</button>
                   <button id="house-sheet-import-btn" type="button">Import Excel</button>
@@ -1824,7 +1824,7 @@
       <div id="rent-sheet-backdrop" class="landlord-drawer-backdrop hidden"></div>
       <aside id="rent-sheet-modal" class="landlord-sheet-modal hidden" aria-label="Rent setup sheet">
         <header class="landlord-drawer-head rent-sheet-header">
-          <h2>Rent Setup Sheet</h2>
+          <h2>Tenant Sheet</h2>
           <label class="rent-sheet-building-picker">
             <span>Building</span>
             <select id="rent-sheet-building-select"></select>
@@ -1833,75 +1833,23 @@
         </header>
 
         <form id="rent-sheet-form" class="package-card landlord-sheet-form rent-sheet-form">
-          <details class="rent-sheet-defaults" aria-labelledby="rent-sheet-defaults-title">
-            <summary class="rent-sheet-defaults-summary">
-              <span>
-                <strong id="rent-sheet-defaults-title">Building defaults</strong>
-                <small>Set rent, rent deposit, utility deposit, and billing terms</small>
-              </span>
-              <span class="rent-sheet-defaults-toggle">Edit defaults</span>
-            </summary>
-            <div class="rent-sheet-defaults-content">
-              <div class="rent-sheet-default-grid">
-              <label>
-                Monthly rent (KSh)
-                <input id="rent-sheet-default-monthly-rent" type="number" min="0" step="1" placeholder="Not set" />
-              </label>
-              <label>
-                Rent deposit required (KSh)
-                <input id="rent-sheet-default-deposit" type="number" min="0" step="1" placeholder="Not set" />
-              </label>
-              <label>
-                Utility deposit required (KSh)
-                <input id="rent-sheet-default-utility-deposit" type="number" min="0" step="1" placeholder="Not set" />
-              </label>
-              <label>
-                Rent due day
-                <input id="rent-sheet-default-due-day" type="number" min="1" max="31" step="1" placeholder="Not set" />
-              </label>
-              <label>
-                Grace period (days)
-                <input id="rent-sheet-default-grace-days" type="number" min="0" max="31" step="1" placeholder="0" />
-              </label>
-              <label>
-                Start charging from
-                <input id="rent-sheet-charge-start-date" type="date" />
-              </label>
-              </div>
-              <details class="rent-sheet-note-details">
-              <summary>Add a note for this setup</summary>
-              <label>
-                Note (optional)
-                <input
-                  id="rent-sheet-note"
-                  type="text"
-                  maxlength="280"
-                  placeholder="House rent setup by landlord."
-                />
-              </label>
-              </details>
-              <p class="rent-sheet-help">
-                Defaults fill blank house settings. Add past rent owed as Opening Arrears on the house card; use Payment Corrections for old receipts.
-              </p>
-            </div>
-          </details>
+          <div class="rent-sheet-defaults-bar" aria-label="Building defaults">
+            <strong>Building defaults</strong>
+            <label>Rent (KSh)<input id="rent-sheet-default-monthly-rent" type="number" inputmode="numeric" min="0" step="1" placeholder="Not set" /></label>
+            <label>Due day<input id="rent-sheet-default-due-day" type="number" inputmode="numeric" min="1" max="31" step="1" placeholder="1" /></label>
+            <label>Deposit (KSh)<input id="rent-sheet-default-deposit" type="number" inputmode="numeric" min="0" step="1" placeholder="Not set" /></label>
+            <label>Utility deposit (KSh)<input id="rent-sheet-default-utility-deposit" type="number" inputmode="numeric" min="0" step="1" placeholder="Not set" /></label>
+            <input id="rent-sheet-default-grace-days" type="hidden" />
+            <input id="rent-sheet-charge-start-date" type="hidden" />
+            <input id="rent-sheet-note" type="hidden" />
+          </div>
 
           <section class="rent-sheet-houses-section" aria-labelledby="rent-sheet-houses-title">
-            <div class="rent-sheet-section-heading rent-sheet-houses-heading">
-              <div>
-                <h3 id="rent-sheet-houses-title">House settings</h3>
-                <p>Set exceptions and opening balances house by house.</p>
-              </div>
-              <div class="rent-sheet-counts" aria-live="polite">
-                <span><strong id="rent-sheet-count-total">0</strong> houses</span>
-                <span><strong id="rent-sheet-count-occupied">0</strong> occupied</span>
-                <span><strong id="rent-sheet-count-needs-rent">0</strong> need rent setup</span>
-              </div>
-            </div>
             <div class="rent-sheet-tools">
+              <h3 id="rent-sheet-houses-title" class="sr-only">Houses</h3>
               <label class="rent-sheet-search">
-                <span class="sr-only">Search houses or residents</span>
-                <input id="rent-sheet-search" type="search" placeholder="Search house or resident…" autocomplete="off" />
+                <span class="sr-only">Search houses or tenants</span>
+                <input id="rent-sheet-search" type="search" placeholder="Search house or tenant…" autocomplete="off" />
               </label>
               <label class="rent-sheet-filter-label">
                 <span class="sr-only">Filter houses</span>
@@ -1909,18 +1857,40 @@
                   <option value="all">All houses</option>
                   <option value="occupied">Occupied</option>
                   <option value="vacant">Vacant</option>
-                  <option value="needs-rent">Needs rent setup</option>
+                  <option value="needs-rent">Needs rent</option>
+                  <option value="changed">Changed</option>
                 </select>
               </label>
-              <button id="rent-sheet-reload-btn" type="button" class="ghost-btn">Reload houses</button>
+              <span class="rent-sheet-counts" aria-live="polite"><strong id="rent-sheet-count-total">0</strong> houses · <strong id="rent-sheet-count-occupied">0</strong> occupied · <strong id="rent-sheet-count-needs-rent">0</strong> need rent</span>
+              <button id="rent-sheet-reload-btn" type="button" class="ghost-btn">Reload</button>
             </div>
-            <div id="rent-sheet-body" class="rent-sheet-houses" aria-live="polite"></div>
+            <div class="table-wrap rent-sheet-table-wrap">
+              <table class="rent-sheet-table">
+                <thead>
+                  <tr>
+                    <th>House</th>
+                    <th>Tenant</th>
+                    <th>Rent</th>
+                    <th>Due day</th>
+                    <th id="rent-sheet-month-paid-head">Rent paid this month</th>
+                    <th>Owed before</th>
+                    <th>Deposit needed</th>
+                    <th>Deposit paid</th>
+                    <th>Utility deposit needed</th>
+                    <th>Utility deposit paid</th>
+                    <th>Status</th>
+                    <th>Owes now</th>
+                  </tr>
+                </thead>
+                <tbody id="rent-sheet-body" aria-live="polite"></tbody>
+              </table>
+            </div>
           </section>
 
           <div class="rent-sheet-footer">
             <p id="rent-sheet-status" class="status-text" role="status"></p>
             <div class="action-row">
-              <button id="rent-sheet-submit-btn" type="submit">Save rent setup</button>
+              <button id="rent-sheet-submit-btn" type="submit">Save changes</button>
             </div>
           </div>
         </form>

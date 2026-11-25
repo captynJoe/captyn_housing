@@ -4865,3 +4865,122 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
     box-shadow: 0 1px 0 var(--captyn-line);
   }
 }
+
+/* Tenant sheet: one row per house, typed like a spreadsheet. */
+.rent-sheet-defaults-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--captyn-line);
+  border-radius: 10px;
+  background: var(--captyn-panel-soft);
+}
+
+.rent-sheet-defaults-bar > strong {
+  align-self: center;
+  margin-right: 4px;
+}
+
+.rent-sheet-defaults-bar label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+}
+
+.rent-sheet-defaults-bar input {
+  width: 120px;
+}
+
+.rent-sheet-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 12px 0 8px;
+}
+
+.rent-sheet-tools .rent-sheet-search {
+  flex: 1 1 220px;
+}
+
+.rent-sheet-counts {
+  font-size: 0.85rem;
+  color: var(--captyn-muted);
+}
+
+.rent-sheet-table-wrap {
+  max-height: calc(100vh - 290px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.rent-sheet-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  box-shadow: 0 1px 0 var(--captyn-line);
+}
+
+.rent-sheet-table td {
+  padding: 6px 8px;
+  vertical-align: middle;
+}
+
+.rent-sheet-house strong {
+  font-size: 1rem;
+}
+
+.rent-sheet-tenant {
+  min-width: 130px;
+}
+
+.rent-sheet-tenant small,
+.rent-sheet-status small {
+  display: block;
+  color: var(--captyn-muted);
+  font-size: 0.75rem;
+  margin-top: 2px;
+}
+
+.rent-sheet-input {
+  width: 96px;
+  padding: 6px 8px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rent-sheet-input[data-field="paymentDueDay"] {
+  width: 60px;
+}
+
+.rent-sheet-input:disabled {
+  opacity: 0.45;
+}
+
+.rent-sheet-status {
+  min-width: 170px;
+}
+
+.rent-sheet-owes {
+  font-weight: 700;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.rent-sheet-row.is-changed td:first-child {
+  box-shadow: inset 4px 0 0 #c98a00;
+}
+
+@media (max-width: 680px) {
+  .rent-sheet-table-wrap {
+    max-height: none;
+  }
+
+  .rent-sheet-input,
+  .rent-sheet-input[data-field="paymentDueDay"],
+  .rent-sheet-defaults-bar input {
+    width: 100%;
+  }
+}

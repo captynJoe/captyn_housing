@@ -124,3 +124,28 @@ test("money received only counts in the month it came in", () => {
   assert.equal(figures.receivedKsh, 2_000);
   assert.equal(figures.paidKsh, 10_000);
 });
+
+test("sheet entry round-trips: paid this month and owed before give back the same figures", async () => {
+  const { balanceForRentMonth } = await import("../src/services/rentMonth.js");
+  for (const cycleMonth of [NOV, "2026-12"]) {
+    const read = (paidKsh: number, earlierDueKsh: number) => {
+      const balanceKsh = balanceForRentMonth({ month: NOV, monthlyRentKsh: 5_000, cycleMonth, isBilled: billed, paidKsh, earlierDueKsh });
+      return rentMonthFigures({ month: NOV, monthlyRentKsh: 5_000, balanceKsh, cycleMonth, isBilled: billed });
+    };
+    assert.deepEqual([read(4_100, 0).paidKsh, read(4_100, 0).dueKsh, read(4_100, 0).earlierDueKsh], [4_100, 900, 0]);
+    assert.deepEqual([read(0, 2_000).paidKsh, read(0, 2_000).dueKsh, read(0, 2_000).earlierDueKsh], [0, 5_000, 2_000]);
+    // One balance, oldest rent cleared first: the total owed is kept, the
+    // first 2,000 of the 4,100 counts against the older debt.
+    const mixed = read(4_100, 2_000);
+    assert.equal(mixed.dueKsh + mixed.earlierDueKsh, 2_900);
+    assert.equal(mixed.paidKsh, 2_100);
+  }
+  // December already added and not billed: nothing extra on top.
+  assert.equal(
+    balanceForRentMonth({
+      month: NOV, monthlyRentKsh: 5_000, cycleMonth: "2026-12",
+      isBilled: (month) => month !== "2026-12", paidKsh: 5_000, earlierDueKsh: 0
+    }),
+    0
+  );
+});

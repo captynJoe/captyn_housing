@@ -405,6 +405,9 @@ export const landlordRentSetupSheetSchema = z.object({
         utilityDepositPaidKsh: optionalRentAmountSchema,
         balanceKsh: optionalRentAmountSchema,
         currentMonthPaidKsh: optionalRentAmountSchema,
+        // Tenant sheet: this calendar month's rent paid, and rent owed from before.
+        monthRentPaidKsh: optionalRentAmountSchema,
+        owedBeforeKsh: z.number().int().min(0).max(5_000_000).nullable().optional(),
         openingArrearsKsh: z.number().int().min(0).max(5_000_000).nullable().optional(),
         openingArrearsAsOf: optionalRentDateSchema,
         openingArrearsNote: z.string().trim().max(280).nullable().optional(),

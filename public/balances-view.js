@@ -1,3 +1,13 @@
+export function notBilledLabel(row) {
+    const rentOff = row.billing?.rent?.billed === false;
+    const utilitiesOff = row.billing?.utilities?.billed === false;
+    if (!rentOff && !utilitiesOff)
+        return "";
+    const utilityWord = row.billing?.utilities?.utilityType === "water" ? "Water" : row.billing?.utilities?.utilityType === "electricity" ? "Electricity" : "Utilities";
+    const what = rentOff && utilitiesOff ? "Not billed" : rentOff ? "Rent not billed" : `${utilityWord} not billed`;
+    const reason = (rentOff ? row.billing?.rent?.reason : undefined) || row.billing?.utilities?.reason;
+    return reason ? `${what} · ${reason}` : what;
+}
 export function getBalanceAmount(row, type = "both") {
     if (type === "rent") {
         return Math.max(0, Number(row.rent?.balanceKsh) || 0);
@@ -188,6 +198,7 @@ export function createBalancesView(deps) {
         <div class="mr-room">
           <strong>${escapeHtml(row.houseNumber)}</strong>
           <span>${escapeHtml(row.residentName || (row.hasActiveResident ? "" : "Vacant"))}${row.residentPhone ? ` · ${escapeHtml(row.residentPhone)}` : ""}</span>
+          ${notBilledLabel(row) ? `<span>${escapeHtml(notBilledLabel(row))}</span>` : ""}
         </div>
         <span class="bal-check ${checked ? "is-done" : ""}">${checked ? "Checked today" : row.checkedAt ? `Checked ${escapeHtml(shortDate(row.checkedAt))}` : "Not checked"}</span>
       </header>

@@ -2,7 +2,7 @@ import { initResponsiveTables } from "./mobile-table.js?v=3e39d752dc";
 import { notifyError, notifyStatus } from "./notifications.js?v=62acc56b74";
 import { applyHouseSheetImport, buildXlsx, describeHouseSheetPlan, houseSheetRowsFromRegistry, houseSheetTable, parseHouseSheet, prepareHouseSheetImport, readSpreadsheet } from "./house-sheet.js?v=3b029b9a8a";
 import { createMeterReadingsView } from "./meter-readings.js?v=4568140d42";
-import { createBalancesView } from "./balances-view.js?v=0627c140d5";
+import { createBalancesView } from "./balances-view.js?v=97b4ee8609";
 import { createUploadedImageGallery, renderSelectedImagePreviews, uploadImageFiles, validateImageFiles } from "./media-upload.js?v=549f6d7675";
 import { applyDocumentBranding, getLandlordPortalTitle, getLandlordShellBrand } from "./portal-branding.js?v=9b283694b2";
 const LANDLORD_SW_URL = "/resident-sw.js?v=c3d081b975";
@@ -281,6 +281,8 @@ const rentMonthHouseCountEl = document.getElementById("rent-month-house-count");
 const rentMonthCollectedEl = document.getElementById("rent-month-collected");
 const rentMonthUnpaidEl = document.getElementById("rent-month-unpaid");
 const rentMonthRateEl = document.getElementById("rent-month-rate");
+const rentMonthReceivedEl = document.getElementById("rent-month-received");
+const rentMonthEarlierEl = document.getElementById("rent-month-earlier");
 const residentPaymentReportsListEl = document.getElementById("resident-payment-reports-list");
 const residentPaymentReportsEmptyEl = document.getElementById("resident-payment-reports-empty");
 const refreshResidentPaymentReportsBtnEl = document.getElementById("refresh-resident-payment-reports");
@@ -537,6 +539,8 @@ const refreshMoveOutSettlementsBtnEl = document.getElementById("refresh-move-out
 const landlordErrorEl = document.getElementById("landlord-error");
 const state = {
     role: "-",
+    billsLoaded: false,
+    paymentsLoaded: false,
     activeLandlordView: "overview",
     buildings: [],
     buildingById: new Map(),
@@ -762,7 +766,60 @@ function setPaymentInstructions(rows) {
 function setRegistryRows(rows) {
     state.registryRows = Array.isArray(rows) ? rows : [];
     state.registryRoomByKey = buildRoomIndex(state.registryRows);
+    renderNotBilledHouses();
 }
+function describeNotBilled(billing) {
+    const rentOff = billing?.rent?.billed === false;
+    const utilitiesOff = billing?.utilities?.billed === false;
+    const utilityType = billing?.utilities?.utilityType;
+    const utilityLabel = utilityType === "water" ? "Water" : utilityType === "electricity" ? "Electricity" : "Utilities";
+    if (rentOff && utilitiesOff)
+        return `Rent and ${utilityLabel.toLowerCase()}`;
+    if (rentOff)
+        return "Rent";
+    if (utilitiesOff)
+        return utilityLabel;
+    return "";
+}
+function renderNotBilledHouses() {
+    const card = document.getElementById("not-billed-card");
+    const body = document.getElementById("not-billed-body");
+    const summary = document.getElementById("not-billed-summary");
+    if (!(card instanceof HTMLElement) || !(body instanceof HTMLElement) || !(summary instanceof HTMLElement)) {
+        return;
+    }
+    const selected = getSelectedSettingsBuildingId();
+    const buildingId = selected && selected !== "all" ? normalizeLookupBuildingId(selected) : "";
+    const rows = (Array.isArray(state.registryRows) ? state.registryRows : []).filter((item) => !buildingId || getRecordBuildingId(item) === buildingId);
+    card.classList.toggle("hidden", !rows.some((item) => item?.billing));
+    const notBilled = rows
+        .filter((item) => describeNotBilled(item?.billing))
+        .sort(compareStableRoomOrder);
+    summary.textContent = notBilled.length
+        ? `${notBilled.length} house${notBilled.length === 1 ? "" : "s"}`
+        : "Every house is billed.";
+    body.innerHTML = notBilled
+        .map((item) => {
+        const { rent, utilities } = item.billing;
+        const reasons = [...new Set([rent?.billed === false ? rent.reason : "", utilities?.billed === false ? utilities.reason : ""].filter(Boolean))];
+        const untils = [...new Set([rent, utilities].filter((charge) => charge?.billed === false).map((charge) => charge.untilMonth ? formatBillingMonth(charge.untilMonth) : "Until resumed"))];
+        return `<tr>
+        <td>${escapeHtml(item.houseNumber)}</td>
+        <td>${escapeHtml(describeNotBilled(item.billing))}</td>
+        <td>${escapeHtml(reasons.join(" · ") || "-")}</td>
+        <td>${escapeHtml(untils.join(" · "))}</td>
+        <td><button type="button" data-action="open-room-account" data-building-id="${escapeHtml(getRecordBuildingId(item))}" data-house-number="${escapeHtml(item.houseNumber)}">Open</button></td>
+      </tr>`;
+    })
+        .join("");
+}
+document.getElementById("not-billed-body")?.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest("[data-action='open-room-account']") : null;
+    if (!(button instanceof HTMLElement)) {
+        return;
+    }
+    openRoomAccountPage(button.dataset.buildingId, button.dataset.houseNumber);
+});
 function setResidentDirectory(rows) {
     state.residentDirectory = Array.isArray(rows) ? rows : [];
     state.residentDirectoryByKey = buildRoomIndex(state.residentDirectory);
@@ -2189,7 +2246,11 @@ function getResidentUtilityBillingStatusLabel(resident, utilitySummary = null) {
     return "";
 }
 function isResidentRentEnabled(resident) {
-    return resident?.rentEnabled !== false;
+    return resident?.rentEnabled !== false && resident?.billing?.rent?.billed !== false;
+}
+function isResidentNotBilled(resident) {
+    const billing = resident?.billing;
+    return billing?.rent?.billed === false && billing?.utilities?.billed === false && !billing.utilities.utilityType;
 }
 function getResidentCurrentUtilityDueKsh(resident) {
     if (!canDisplayResidentBilling(resident)) {
@@ -2346,6 +2407,9 @@ function getResidentBillingStatusLabel(resident) {
     const expenseBalanceKsh = getResidentExpenseBalanceKsh(resident);
     const utilitySummary = getResidentUtilityRoomSummary(resident);
     const utilityLabel = getResidentUtilityBillingStatusLabel(resident, utilitySummary);
+    if (isResidentNotBilled(resident) && getResidentOperationalOutstandingKsh(resident, utilitySummary) <= 0 && expenseBalanceKsh <= 0) {
+        return "Not billed";
+    }
     if (!isResidentRentEnabled(resident)) {
         const label = utilityLabel || "Clear";
         if (expenseBalanceKsh > 0) {
@@ -2396,6 +2460,9 @@ function getResidentBillingToneClass(resident, utilitySummary = null) {
         return "is-warning";
     }
     const resolvedUtilitySummary = utilitySummary ?? getResidentUtilityRoomSummary(resident);
+    if (isResidentNotBilled(resident) && getResidentOperationalOutstandingKsh(resident, resolvedUtilitySummary) <= 0) {
+        return "is-muted";
+    }
     const arrearsKsh = getResidentOperationalArrearsKsh(resident, resolvedUtilitySummary);
     const currentDueKsh = getResidentOperationalCurrentDueKsh(resident, resolvedUtilitySummary);
     if (arrearsKsh > 0) {
@@ -2407,9 +2474,10 @@ function getResidentBillingToneClass(resident, utilitySummary = null) {
     return "is-success";
 }
 function getRentCollectionVisualState(item) {
-    const arrearsKsh = Math.max(0, Number(item?.arrearsKsh ?? 0));
-    const currentOutstandingKsh = Math.max(0, Number(item?.currentMonthOutstandingKsh ?? item?.balanceKsh ?? 0));
-    const currentPaidKsh = Math.max(0, Number(item?.currentMonthPaidKsh ?? item?.paidAmountKsh ?? 0));
+    const rentMonth = item?.rentMonth;
+    const arrearsKsh = Math.max(0, Number(rentMonth ? rentMonth.earlierDueKsh : item?.arrearsKsh ?? 0));
+    const currentOutstandingKsh = Math.max(0, Number(rentMonth ? rentMonth.dueKsh : item?.currentMonthOutstandingKsh ?? item?.balanceKsh ?? 0));
+    const currentPaidKsh = Math.max(0, Number(rentMonth ? rentMonth.paidKsh : item?.currentMonthPaidKsh ?? item?.paidAmountKsh ?? 0));
     if (arrearsKsh > 0) {
         return {
             label: "Overdue",
@@ -2423,6 +2491,9 @@ function getRentCollectionVisualState(item) {
         };
     }
     const rawLabel = String(item?.paymentStatus ?? "").trim().toUpperCase();
+    if (rawLabel === "NOT_BILLED") {
+        return { label: "Not billed", toneClass: "is-muted" };
+    }
     return {
         label: rawLabel === "PAID" || !rawLabel ? "Paid" : rawLabel.replaceAll("_", " "),
         toneClass: "is-success"
@@ -4067,7 +4138,7 @@ function renderDailyDashboard() {
     const rentRows = getRowsForFocusedBuilding(state.rentStatus);
     const utilityBills = getActionableUtilityBills(getRowsForFocusedBuilding(state.bills));
     const currentMonthKey = currentBillingMonth();
-    const rentCollectedThisMonth = residentRows.reduce((sum, item) => sum + getResidentCurrentMonthRentPaidKsh(item), 0);
+    const rentCollectedThisMonth = sumRentMonth(rentRows).receivedKsh;
     const utilityCollectedThisMonth = getRowsForFocusedBuilding(state.payments)
         .filter((item) => monthKeyFromValue(item.paidAt || item.billingMonth) === currentMonthKey)
         .reduce((sum, item) => sum + Math.max(0, Number(item.amountKsh ?? 0)), 0);
@@ -4077,7 +4148,7 @@ function renderDailyDashboard() {
             utilityBills.reduce((sum, item) => sum + utilityAmount(item.balanceKsh), 0);
     const unpaidRoomKeys = new Set();
     rentRows.forEach((item) => {
-        const balanceKsh = Math.max(0, Number(item.currentMonthOutstandingKsh ?? item.balanceKsh ?? 0));
+        const balanceKsh = Math.max(0, Number(item.rentMonth?.dueKsh ?? item.currentMonthOutstandingKsh ?? item.balanceKsh ?? 0));
         if (balanceKsh > 0) {
             unpaidRoomKeys.add(`${getRecordBuildingId(item)}::${normalizeHouse(item.houseNumber)}`);
         }
@@ -4096,9 +4167,11 @@ function renderDailyDashboard() {
     const openIssues = getOpenIssueRowsForFocusedBuilding().length;
     const pendingRequests = getPendingApplicationRowsForFocusedBuilding().length;
     overviewDailyHeadingEl.textContent = `${buildingLabel} Dashboard`;
-    overviewDailyCollectedEl.textContent = formatCurrency(rentCollectedThisMonth + utilityCollectedThisMonth);
-    overviewDailyOutstandingEl.textContent = formatCurrency(outstanding);
-    overviewDailyUnpaidEl.textContent = String(unpaidRoomKeys.size);
+    overviewDailyCollectedEl.textContent = state.paymentsLoaded
+        ? formatCurrency(rentCollectedThisMonth + utilityCollectedThisMonth)
+        : "-";
+    overviewDailyOutstandingEl.textContent = state.billsLoaded ? formatCurrency(outstanding) : "-";
+    overviewDailyUnpaidEl.textContent = state.billsLoaded ? String(unpaidRoomKeys.size) : "-";
     overviewDailyIssuesEl.textContent = String(openIssues);
     overviewDailyRequestsEl.textContent = String(pendingRequests);
     overviewDailyVacantEl.textContent = String(vacantRooms);
@@ -4178,8 +4251,8 @@ function renderLandlordFocusPanel() {
     }
     landlordFocusUnitsEl.textContent = String(summary.units);
     landlordFocusResidentsEl.textContent = String(summary.residentUsers);
-    landlordFocusOpenBillsEl.textContent = String(summary.openBills);
-    landlordFocusOutstandingEl.textContent = formatCurrency(summary.outstanding);
+    landlordFocusOpenBillsEl.textContent = state.billsLoaded ? String(summary.openBills) : "-";
+    landlordFocusOutstandingEl.textContent = state.billsLoaded ? formatCurrency(summary.outstanding) : "-";
     landlordFocusNoteEl.textContent = `${summary.building.name} • ${summary.building.county} • ${summary.building.address} • Updated ${formatDateTime(summary.building.updatedAt)}`;
 }
 function matchesBuildingManagementQuery(building, query) {
@@ -4464,6 +4537,7 @@ function renderSettingsPanel() {
     if (!(settingsSummaryEl instanceof HTMLElement)) {
         return;
     }
+    renderNotBilledHouses();
     const buildingId = getSelectedSettingsBuildingId();
     const building = state.buildings.find((item) => item.id === buildingId) ?? null;
     const hasBuildings = Array.isArray(state.buildings) && state.buildings.length > 0;
@@ -5008,7 +5082,8 @@ function renderRentSheetRows(rows) {
         const residentLabel = String(item.residentName ?? "").trim() || (item.hasActiveResident ? "Resident linked" : "Vacant");
         const residentPhone = String(item.residentPhone ?? "").trim();
         const roomDefaultActive = item.roomDefaultActive !== false;
-        const needsRentSetup = Boolean(item.hasActiveResident) && resolvedMonthlyRentKsh <= 0 && roomDefaultActive;
+        const rentNotBilled = item.billing?.rent?.billed === false;
+        const needsRentSetup = Boolean(item.hasActiveResident) && resolvedMonthlyRentKsh <= 0 && roomDefaultActive && !rentNotBilled;
         const card = document.createElement("article");
         card.className = "rent-house-card";
         card.dataset.houseNumber = houseNumber;
@@ -5037,7 +5112,7 @@ function renderRentSheetRows(rows) {
         <div class="rent-house-summary">
           <span>Monthly rent</span>
           <strong>${resolvedMonthlyRentKsh > 0 ? escapeHtml(formatCurrency(resolvedMonthlyRentKsh)) : "Not set"}</strong>
-          <small>${escapeHtml(sourceLabel)}${item.rentSetupSource === "room_disabled" ? " · rent off" : ""}</small>
+          <small>${escapeHtml(sourceLabel)}${item.rentSetupSource === "room_disabled" ? " · rent off" : ""}${rentNotBilled ? ` · not billed${item.billing.rent.reason ? ` (${escapeHtml(item.billing.rent.reason)})` : ""}` : ""}</small>
         </div>
       </div>
       ${needsRentSetup ? '<p class="rent-house-warning">Set a rent amount before this resident can be billed.</p>' : ""}
@@ -6382,23 +6457,41 @@ function renderApplications(rows) {
     });
     renderDailyDashboard();
 }
+function sumRentMonth(rows) {
+    const total = { rentKsh: 0, paidKsh: 0, dueKsh: 0, penaltyDueKsh: 0, earlierDueKsh: 0, receivedKsh: 0, billedHouses: 0 };
+    (Array.isArray(rows) ? rows : []).forEach((item) => {
+        const month = item?.rentMonth;
+        if (!month)
+            return;
+        total.rentKsh += Number(month.rentKsh) || 0;
+        total.paidKsh += Number(month.paidKsh) || 0;
+        total.dueKsh += Number(month.dueKsh) || 0;
+        total.penaltyDueKsh += Number(month.penaltyDueKsh) || 0;
+        total.earlierDueKsh += Number(month.earlierDueKsh) || 0;
+        total.receivedKsh += Number(month.receivedKsh) || 0;
+        if (Number(month.rentKsh) > 0)
+            total.billedHouses += 1;
+    });
+    return total;
+}
 function renderRentStatus(rows) {
     rentStatusBodyEl.replaceChildren();
     const visibleRows = [...getRowsForFocusedBuilding(rows)].sort(compareStableRoomOrder);
-    const scheduledKsh = visibleRows.reduce((sum, item) => sum + Math.max(0, Number(item.currentMonthPaidKsh ?? item.paidAmountKsh ?? 0) +
-        Number(item.currentMonthOutstandingKsh ?? 0)), 0);
-    const collectedKsh = visibleRows.reduce((sum, item) => sum + Math.max(0, Number(item.currentMonthPaidKsh ?? item.paidAmountKsh ?? 0)), 0);
-    const unpaidKsh = visibleRows.reduce((sum, item) => sum + Math.max(0, Number(item.currentMonthOutstandingKsh ?? 0)), 0);
+    const month = sumRentMonth(visibleRows);
     if (rentMonthExpectedEl instanceof HTMLElement)
-        rentMonthExpectedEl.textContent = formatCurrency(scheduledKsh);
+        rentMonthExpectedEl.textContent = formatCurrency(month.rentKsh);
     if (rentMonthCollectedEl instanceof HTMLElement)
-        rentMonthCollectedEl.textContent = formatCurrency(collectedKsh);
+        rentMonthCollectedEl.textContent = formatCurrency(month.paidKsh);
+    if (rentMonthReceivedEl instanceof HTMLElement)
+        rentMonthReceivedEl.textContent = month.receivedKsh !== month.paidKsh ? `${formatCurrency(month.receivedKsh)} received this month` : "";
     if (rentMonthUnpaidEl instanceof HTMLElement)
-        rentMonthUnpaidEl.textContent = formatCurrency(unpaidKsh);
+        rentMonthUnpaidEl.textContent = formatCurrency(month.dueKsh);
+    if (rentMonthEarlierEl instanceof HTMLElement)
+        rentMonthEarlierEl.textContent = month.earlierDueKsh + month.penaltyDueKsh > 0 ? `+ ${formatCurrency(month.earlierDueKsh + month.penaltyDueKsh)} from earlier months and late fees` : "";
     if (rentMonthRateEl instanceof HTMLElement)
-        rentMonthRateEl.textContent = scheduledKsh > 0 ? `${Math.round(collectedKsh / scheduledKsh * 100)}%` : "No rent scheduled";
+        rentMonthRateEl.textContent = month.rentKsh > 0 ? `${Math.floor(month.paidKsh / month.rentKsh * 100)}%` : "No rent scheduled";
     if (rentMonthHouseCountEl instanceof HTMLElement)
-        rentMonthHouseCountEl.textContent = `${visibleRows.filter((item) => Number(item.currentMonthPaidKsh ?? item.paidAmountKsh ?? 0) + Number(item.currentMonthOutstandingKsh ?? 0) > 0).length} houses billed`;
+        rentMonthHouseCountEl.textContent = `${month.billedHouses} houses billed`;
     if (visibleRows.length === 0) {
         const row = document.createElement("tr");
         row.innerHTML = '<td colspan="14">No rent status data for the current building.</td>';
@@ -6408,7 +6501,7 @@ function renderRentStatus(rows) {
     visibleRows.forEach((item) => {
         const row = document.createElement("tr");
         const buildingLabel = getBuildingDisplayNameById(item.buildingId, "-");
-        const currentDueKsh = Number(item.currentMonthOutstandingKsh ?? item.balanceKsh ?? 0);
+        const currentDueKsh = Number(item.rentMonth?.dueKsh ?? item.currentMonthOutstandingKsh ?? item.balanceKsh ?? 0);
         const latePenaltyKsh = Math.max(0, Number(item.currentMonthLatePenaltyKsh ?? 0));
         const totalOutstandingKsh = Number(item.balanceKsh ?? currentDueKsh ?? 0);
         const quickPaymentAmountKsh = Math.max(0, totalOutstandingKsh || currentDueKsh);
@@ -6423,10 +6516,10 @@ function renderRentStatus(rows) {
       <td>${item.houseNumber}</td>
       <td>${renderTableStatusPill(rentVisualState.label, rentVisualState.toneClass)}</td>
       <td>${formatCurrency(item.monthlyRentKsh)}</td>
-      <td>${formatCurrency(item.currentMonthPaidKsh ?? item.paidAmountKsh ?? 0)}</td>
+      <td>${formatCurrency(item.rentMonth?.paidKsh ?? item.currentMonthPaidKsh ?? item.paidAmountKsh ?? 0)}</td>
       <td>${formatCurrency(latePenaltyKsh)}</td>
       <td>${formatCurrency(currentDueKsh)}</td>
-      <td>${formatCurrency(item.arrearsKsh ?? 0)}</td>
+      <td>${formatCurrency(item.rentMonth?.earlierDueKsh ?? item.arrearsKsh ?? 0)}</td>
       <td>${escapeHtml(formatBillingMonth(billingMonth))}</td>
       <td>${formatDateTime(item.dueDate)}</td>
       <td>${escapeHtml(latestPaymentBillingMonth ? formatBillingMonth(latestPaymentBillingMonth) : "-")}</td>
@@ -9052,7 +9145,7 @@ function renderMetrics() {
             overdue += 1;
         }
     });
-    const rentCollectedThisMonth = residentRows.reduce((sum, item) => sum + getResidentCurrentMonthRentPaidKsh(item), 0);
+    const rentCollectedThisMonth = sumRentMonth(state.rentStatus.filter((item) => !metricBuildingId || normalizeLookupBuildingId(item.buildingId) === metricBuildingId)).receivedKsh;
     const utilityCollectedThisMonth = (Array.isArray(state.payments) ? state.payments : [])
         .filter((item) => (!metricBuildingId || normalizeLookupBuildingId(item.buildingId) === metricBuildingId) &&
         monthKeyFromValue(item.paidAt || item.billingMonth) === currentMonthKey)
@@ -9063,11 +9156,11 @@ function renderMetrics() {
         : actionableBills.reduce((sum, item) => sum + utilityAmount(item.balanceKsh), 0);
     metricMetersEl.textContent = String(meters);
     metricUsersEl.textContent = String(residentUsers);
-    metricBillsEl.textContent = String(bills);
-    metricUnpaidEl.textContent = String(unpaid);
-    metricOverdueEl.textContent = String(overdue);
-    metricPaymentsEl.textContent = formatCurrency(paidTotal);
-    metricBalanceEl.textContent = formatCurrency(outstanding);
+    metricBillsEl.textContent = state.billsLoaded ? String(bills) : "-";
+    metricUnpaidEl.textContent = state.billsLoaded ? String(unpaid) : "-";
+    metricOverdueEl.textContent = state.billsLoaded ? String(overdue) : "-";
+    metricPaymentsEl.textContent = state.paymentsLoaded ? formatCurrency(paidTotal) : "-";
+    metricBalanceEl.textContent = state.billsLoaded ? formatCurrency(outstanding) : "-";
     renderLandlordFocusPanel();
     renderDailyDashboard();
 }
@@ -9436,6 +9529,7 @@ async function loadBills() {
     const buildingId = getUtilityLedgerBuildingId();
     const payload = await requestJson(withBuildingQuery("/api/landlord/utilities/bills", buildingId, "limit=600"));
     setBills(payload.data ?? []);
+    state.billsLoaded = true;
     renderUtilityRoomSummary(state.bills);
     renderRoomLedger(state.residentDirectory);
     renderUtilityBills(state.bills);
@@ -9445,6 +9539,7 @@ async function loadPayments() {
     const buildingId = getSelectedUtilityBuildingId();
     const payload = await requestJson(withBuildingQuery("/api/landlord/utilities/payments", buildingId, "limit=600"));
     state.payments = payload.data ?? [];
+    state.paymentsLoaded = true;
     renderUtilityPayments(state.payments);
     renderPaymentCorrections();
     renderMetrics();
@@ -9508,7 +9603,7 @@ async function activateBuilding(buildingId, options = {}) {
         state.activeLandlordView === "balances" ? balancesView.load() : Promise.resolve()
     ]);
 }
-function applyLandlordStartupData(startup) {
+function applyLandlordStartupData(startup, options = {}) {
     const selection = startup?.selection ?? {};
     setBuildings(startup?.buildings ?? []);
     setPaymentAccess(startup?.paymentAccess ?? []);
@@ -9567,6 +9662,10 @@ function applyLandlordStartupData(startup) {
     setMeters(Array.isArray(startup?.meters) ? startup.meters : []);
     setBills(Array.isArray(startup?.bills) ? startup.bills : []);
     state.payments = Array.isArray(startup?.payments) ? startup.payments : [];
+    if (!options.quick) {
+        state.billsLoaded = true;
+        state.paymentsLoaded = true;
+    }
     state.expenditures = Array.isArray(startup?.expenditures) ? startup.expenditures : [];
     state.moveOutSettlements = Array.isArray(startup?.moveOutSettlements)
         ? startup.moveOutSettlements
@@ -9678,7 +9777,7 @@ async function loadData(options = {}) {
     try {
         const payload = await requestJson(`/api/landlord/startup${quick ? "?mode=quick" : ""}`);
         const role = applyLandlordRole(payload.role ?? payload.data?.role ?? state.role);
-        applyLandlordStartupData(payload.data ?? {});
+        applyLandlordStartupData(payload.data ?? {}, { quick: payload.mode === "quick" });
         setStatus(`Signed in as ${formatRoleLabel(role)}. Data refreshed.`);
         if (payload.mode === "quick") {
             void hydrateDeferredLandlordData();

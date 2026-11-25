@@ -3139,11 +3139,12 @@ function getResidentBillingToneClass(resident, utilitySummary = null) {
     utilityAmount(resolvedUtilitySummary?.overdueBalanceKsh)
   ) > 0;
 
+  // Count what is due or late now; next month's rent, added a week early,
+  // doesn't make a house red.
   return debtToneClass({
-    owedKsh: getResidentOperationalOutstandingKsh(resident, resolvedUtilitySummary),
+    owedKsh: arrearsKsh + currentDueKsh,
     monthlyRentKsh: getResidentMonthlyRentKsh(resident),
-    late: rentLate || utilityLate || getResidentExpenseBalanceKsh(resident) > 0,
-    dueKsh: arrearsKsh + currentDueKsh
+    late: rentLate || utilityLate || getResidentExpenseBalanceKsh(resident) > 0
   });
 }
 
@@ -3176,8 +3177,8 @@ function getRentStageLabel(stage, dueDate, partPaid) {
 const DEBT_RED_SHARE_OF_RENT = 0.5;
 const DEBT_RED_WITHOUT_RENT_KSH = 1000;
 
-function debtToneClass({ owedKsh, monthlyRentKsh, late, dueKsh = owedKsh }) {
-  const owed = Math.max(0, Number(owedKsh) || 0, Number(dueKsh) || 0);
+function debtToneClass({ owedKsh, monthlyRentKsh, late }) {
+  const owed = Math.max(0, Number(owedKsh) || 0);
   if (owed <= 0) {
     return "is-success";
   }

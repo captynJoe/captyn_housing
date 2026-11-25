@@ -10218,6 +10218,62 @@ function renderPerformanceBarList(element, rows, labelFor, amountFor, colorClass
   });
 }
 
+// Costs grouped by category: one pill per category with its total; the
+// open pill lists who was paid. The choice survives a reload of the month.
+let performanceOpenCostCategory = "";
+
+function renderPerformanceCostGroups(rows) {
+  if (!(performanceBreakdownEl instanceof HTMLElement)) return;
+  performanceBreakdownEl.replaceChildren();
+  if (!rows.length) {
+    performanceBreakdownEl.innerHTML = '<p class="status-text">No costs recorded in this month.</p>';
+    return;
+  }
+  const groups = new Map();
+  rows.forEach((item) => {
+    const key = String(item.category || "other");
+    const group = groups.get(key) ?? { key, label: formatExpenditureCategory(key), amountKsh: 0, count: 0, items: [] };
+    group.amountKsh += Number(item.amountKsh ?? 0);
+    group.count += Math.max(1, Number(item.count ?? 1));
+    group.items.push(item);
+    groups.set(key, group);
+  });
+  const ordered = [...groups.values()].sort((a, b) => b.amountKsh - a.amountKsh);
+  if (!groups.has(performanceOpenCostCategory)) performanceOpenCostCategory = "";
+
+  const pills = document.createElement("div");
+  pills.className = "performance-cost-pills";
+  ordered.forEach((group) => {
+    const open = group.key === performanceOpenCostCategory;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `performance-cost-pill${open ? " is-open" : ""}`;
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+    button.innerHTML = `<span>${escapeHtml(group.label)}</span><strong>${escapeHtml(formatCurrency(group.amountKsh))}</strong><small>${group.count}</small>`;
+    button.addEventListener("click", () => {
+      performanceOpenCostCategory = open ? "" : group.key;
+      renderPerformanceCostGroups(rows);
+    });
+    pills.append(button);
+  });
+  performanceBreakdownEl.append(pills);
+
+  const openGroup = groups.get(performanceOpenCostCategory);
+  if (!openGroup) return;
+  const list = document.createElement("div");
+  list.className = "performance-cost-list";
+  [...openGroup.items]
+    .sort((a, b) => Number(b.amountKsh ?? 0) - Number(a.amountKsh ?? 0))
+    .forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "performance-row";
+      const count = Number(item.count ?? 1);
+      row.innerHTML = `<span><strong>${escapeHtml(item.payeeName || "Unknown")}</strong>${count > 1 ? `<small>${count} payments</small>` : ""}</span><strong>${escapeHtml(formatCurrency(item.amountKsh))}</strong>`;
+      list.append(row);
+    });
+  performanceBreakdownEl.append(list);
+}
+
 function renderBuildingPerformance(data, previousData) {
   if (!data) return;
   const setText = (element, value) => { if (element instanceof HTMLElement) element.textContent = value; };
@@ -10301,15 +10357,7 @@ function renderBuildingPerformance(data, previousData) {
     "is-cost-bar"
   );
   if (performanceBreakdownEl instanceof HTMLElement) {
-    performanceBreakdownEl.replaceChildren();
-    const rows = Array.isArray(data.expenses) ? data.expenses : [];
-    if (!rows.length) performanceBreakdownEl.innerHTML = '<p class="status-text">No costs recorded in this month.</p>';
-    rows.forEach((item) => {
-      const row = document.createElement("div"); row.className = "performance-row";
-      const category = String(item.category || "other").replaceAll("_", " ");
-      row.innerHTML = `<span><strong>${escapeHtml(category)}</strong><small>Paid to ${escapeHtml(item.payeeName)}</small></span><strong>${escapeHtml(formatCurrency(item.amountKsh))}</strong>`;
-      performanceBreakdownEl.append(row);
-    });
+    renderPerformanceCostGroups(Array.isArray(data.expenses) ? data.expenses : []);
   }
   if (performanceRemittancesEl instanceof HTMLElement) {
     performanceRemittancesEl.replaceChildren();

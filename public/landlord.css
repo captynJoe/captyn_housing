@@ -4984,3 +4984,51 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
     width: 100%;
   }
 }
+
+/* Performance cost details: a pill per category, tap to see who was paid. */
+.performance-cost-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.performance-cost-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--captyn-line);
+  border-radius: 999px;
+  background: var(--captyn-panel-soft);
+  color: inherit;
+  cursor: pointer;
+}
+
+.performance-cost-pill strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.performance-cost-pill small {
+  min-width: 1.6em;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--captyn-line);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.performance-cost-pill.is-open {
+  border-color: var(--captyn-blue, #0b5d43);
+  background: var(--captyn-panel-strong);
+  box-shadow: 0 0 0 1px var(--captyn-blue, #0b5d43);
+}
+
+.performance-cost-list {
+  margin-top: 10px;
+}
+
+@media print {
+  .performance-cost-pill {
+    border-color: #000;
+  }
+}

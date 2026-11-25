@@ -678,6 +678,7 @@ interface LandlordUtilityRegistryRow {
   rentArrearsKsh: number;
   rentDueDate?: string;
   rentStage?: RentMonthFigures["stage"];
+  rentNotYetDueKsh?: number;
   rentMonthDueDate?: string;
   currentMonthRentPaidKsh: number;
   currentMonthRentOutstandingKsh: number;
@@ -5526,6 +5527,12 @@ async function bootstrap() {
       const visibleRentBalanceKsh = billingVisible ? rentBalanceKsh : 0;
       const visibleCurrentRentDueKsh = billingVisible ? currentRentDueKsh : 0;
       const visibleRentArrearsKsh = billingVisible ? rentArrearsKsh : 0;
+      // Next month's rent, which the ledger adds a week before it is due:
+      // part of the balance, but not owed yet.
+      const rentNotYetDueKsh =
+        billingVisible && rent?.rentMonth
+          ? Math.max(0, rentBalanceKsh - currentRentDueKsh - rentArrearsKsh)
+          : 0;
       const visibleCurrentMonthLatePenaltyKsh = billingVisible ? currentMonthLatePenaltyKsh : 0;
       const visibleTotalLatePenaltyKsh = billingVisible ? totalLatePenaltyKsh : 0;
       const visibleRentGraceDays = billingVisible ? configuredRentGraceDays : 0;
@@ -5605,6 +5612,7 @@ async function bootstrap() {
         rentArrearsKsh: visibleRentArrearsKsh,
         rentDueDate: visibleRentDueDate,
         rentStage: billingVisible && paymentAccess.rentEnabled ? rent?.rentMonth?.stage : undefined,
+        rentNotYetDueKsh,
         rentMonthDueDate: billingVisible && paymentAccess.rentEnabled ? rent?.rentMonth?.dueDate : undefined,
         currentMonthRentPaidKsh: visibleCurrentMonthRentPaidKsh,
         currentMonthRentOutstandingKsh: visibleCurrentRentDueKsh,

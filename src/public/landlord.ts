@@ -2783,6 +2783,24 @@ function getUtilityLedgerBuildingId() {
   return "";
 }
 
+// This month's charges still owed: this month's rent, plus utility bills for
+// this month even once they are past their due date. Older months are not
+// included (they show in the total).
+function getResidentDueThisMonthKsh(resident, utilitySummary = null) {
+  const monthKey = currentBillingMonth();
+  const houseBills = (Array.isArray(state.bills) ? state.bills : []).filter(
+    (bill) =>
+      normalizeLookupBuildingId(bill?.buildingId) === normalizeLookupBuildingId(resident?.buildingId) &&
+      normalizeHouse(bill?.houseNumber) === normalizeHouse(resident?.houseNumber)
+  );
+  const utilityThisMonthKsh = state.billsLoaded
+    ? houseBills
+        .filter((bill) => String(bill?.billingMonth ?? "") === monthKey)
+        .reduce((sum, bill) => sum + utilityAmount(bill?.balanceKsh), 0)
+    : getResidentOperationalCurrentDueKsh(resident, utilitySummary) - getResidentCurrentRentDueKsh(resident);
+  return getResidentCurrentRentDueKsh(resident) + Math.max(0, utilityThisMonthKsh);
+}
+
 function getResidentOperationalCurrentDueKsh(resident, utilitySummary = null) {
   const utilityCurrentDueKsh = Math.max(
     getResidentCurrentUtilityDueKsh(resident),
@@ -3863,7 +3881,18 @@ function formatExpenditureCategory(value) {
   return labels[String(value ?? "")] || "Other";
 }
 
+// Next month's rent the ledger added a week early (see rentMonth.ts): part
+// of the balance, but not owed until its due day.
+function getResidentRentNotYetDueKsh(resident) {
+  return Math.max(0, Number(resident?.rentNotYetDueKsh) || 0);
+}
+
+// What the house owes today: the balance less rent that isn't due yet.
 function getResidentOutstandingBalanceKsh(resident) {
+  return Math.max(0, getResidentBalanceWithUpcomingKsh(resident) - getResidentRentNotYetDueKsh(resident));
+}
+
+function getResidentBalanceWithUpcomingKsh(resident) {
   if (!canDisplayResidentBilling(resident)) {
     return 0;
   }
@@ -3909,7 +3938,7 @@ function getResidentUtilityBalanceKsh(resident) {
     return Math.max(0, explicitBalance);
   }
 
-  const outstandingBalanceKsh = getResidentOutstandingBalanceKsh(resident);
+  const outstandingBalanceKsh = getResidentBalanceWithUpcomingKsh(resident);
   const rentBalanceKsh = Math.max(0, Number(resident?.rentBalanceKsh ?? 0));
   const expenseBalanceKsh = getResidentExpenseBalanceKsh(resident);
   return Math.max(0, outstandingBalanceKsh - rentBalanceKsh - expenseBalanceKsh);
@@ -8054,7 +8083,7 @@ function renderOverviewCollections(rows) {
       ? getResidentCurrentLatePenaltyKsh(resident)
       : Math.max(0, Number(item.currentMonthLatePenaltyKsh ?? 0));
     const dueThisMonthKsh = resident
-      ? getResidentOperationalCurrentDueKsh(resident, utilitySummary)
+      ? getResidentDueThisMonthKsh(resident, utilitySummary)
       : Number(item.currentMonthOutstandingKsh ?? item.balanceKsh ?? 0);
     const totalOutstandingKsh = resident
       ? getResidentOperationalOutstandingKsh(resident, utilitySummary)
@@ -8303,7 +8332,7 @@ function renderRoomLedger(rows) {
     const rentArrearsKsh = getResidentRentArrearsKsh(resident);
     const rentBalanceKsh = Math.max(
       rentCurrentDueKsh + rentArrearsKsh,
-      Math.max(0, utilityAmount(resident.rentBalanceKsh))
+      Math.max(0, utilityAmount(resident.rentBalanceKsh) - getResidentRentNotYetDueKsh(resident))
     );
     const monthlyRentKsh = getResidentMonthlyRentKsh(resident);
     const utilityOpenKsh = Math.max(

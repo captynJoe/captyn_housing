@@ -3336,10 +3336,19 @@ export class UserAccountService {
       }
     }
 
+    // Every request checks a session; clearing old ones from the database
+    // once a minute is enough (expired and revoked sessions are refused
+    // regardless).
+    if (nowMs() - this.lastSessionPurgeAt < 60_000) {
+      return;
+    }
+    this.lastSessionPurgeAt = nowMs();
     await this.prisma.userSession.deleteMany({
       where: {
         OR: [{ expiresAt: { lte: new Date() } }, { revokedAt: { not: null } }]
       }
     });
   }
+
+  private lastSessionPurgeAt = 0;
 }

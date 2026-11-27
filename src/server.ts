@@ -8973,7 +8973,22 @@ async function bootstrap() {
   app.get("/admin.html", (_req, res) => {
     return res.redirect("/landlord");
   });
-  app.use(express.static(publicDir, { index: false }));
+  app.use(
+    express.static(publicDir, {
+      index: false,
+      // Files requested with ?v=<content hash> (see scripts/stamp-public-assets.mjs)
+      // never change under that URL, so phones keep them until the next deploy
+      // instead of asking again on every page open. Login pages and the
+      // service worker keep their no-store rule above.
+      setHeaders: (res, filePath) => {
+        const versioned = typeof (res as unknown as { req?: express.Request }).req?.query?.v === "string";
+        const noStore = String(res.getHeader("Cache-Control") ?? "").includes("no-store");
+        if (versioned && !noStore && /\.(?:js|css|png|jpe?g|webp|svg|woff2?)$/i.test(filePath)) {
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        }
+      }
+    })
+  );
   app.use((req, res, next) => {
     const pathValue = req.path ?? "";
     const shouldLog =
@@ -8987,6 +9002,21 @@ async function bootstrap() {
       );
 
     if (!shouldLog) {
+      // Every other API call: logged only when slow, to find what makes pages wait.
+      if (pathValue.startsWith("/api/")) {
+        const slowStartedAt = Date.now();
+        res.on("finish", () => {
+          const durationMs = Date.now() - slowStartedAt;
+          if (durationMs >= 300) {
+            logHousingEvent("request.slow", {
+              method: req.method,
+              path: pathValue,
+              statusCode: res.statusCode,
+              durationMs
+            });
+          }
+        });
+      }
       next();
       return;
     }

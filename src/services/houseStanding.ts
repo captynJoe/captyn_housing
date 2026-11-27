@@ -2,9 +2,13 @@
 // tenants-only promo. Housing owns the rule; WiFi only gets yes/no, the house
 // number and a reason, never amounts.
 //
-// Good standing = rent not overdue and no utility bill overdue. A house set to
-// "not billed" has no new charges, so it qualifies unless it still owes from
-// before.
+// Good standing = nothing overdue: no rent arrears from an earlier month, the
+// current month's rent not past its due date, and no utility bill overdue.
+// This month's dues that aren't late yet are fine. Rent rolls over 7 days
+// before the next due date, so last month's unpaid rent shows as arrears
+// while the status already says "due soon" -- arrears alone must block.
+// A house set to "not billed" has no new charges, so it qualifies unless it
+// still owes from before.
 
 export type HouseStandingReason = "good_standing" | "rent_overdue" | "utilities_overdue" | "not_a_tenant";
 
@@ -31,11 +35,13 @@ export function phoneVariants(phone: string): string[] {
 
 export function houseStanding(input: {
   houseNumber: string;
-  rent: { status: string; balanceKsh: number } | null;
+  rent: { status: string; balanceKsh: number; arrearsKsh?: number } | null;
   utilityBills: Array<{ status: string; balanceKsh: number }>;
 }): HouseStanding {
   const { houseNumber } = input;
-  if (input.rent && input.rent.status === "overdue" && Number(input.rent.balanceKsh) > 0) {
+  const rentArrears = Number(input.rent?.arrearsKsh ?? 0) > 0;
+  const rentLate = input.rent?.status === "overdue" && Number(input.rent.balanceKsh) > 0;
+  if (rentArrears || rentLate) {
     return { eligible: false, reason: "rent_overdue", houseNumber };
   }
   if (input.utilityBills.some((bill) => bill.status === "overdue" && Number(bill.balanceKsh) > 0)) {

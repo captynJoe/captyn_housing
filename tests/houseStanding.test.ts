@@ -21,3 +21,16 @@ test("overdue rent or an overdue utility bill blocks the promo", () => {
   assert.equal(houseStanding({ houseNumber: "3", rent: null, utilityBills: [{ status: "overdue", balanceKsh: 500 }] }).reason, "utilities_overdue");
   assert.equal(houseStanding({ houseNumber: "3", rent: null, utilityBills: [{ status: "overdue", balanceKsh: 0 }] }).eligible, true);
 });
+
+test("last month's unpaid rent blocks, even when this month's rent isn't due yet", () => {
+  // After the 7-day rollover: due date is next month, so status says due_soon,
+  // but November's rent is still owed as arrears.
+  const result = houseStanding({ houseNumber: "9", rent: { status: "due_soon", balanceKsh: 16000, arrearsKsh: 8000 }, utilityBills: [] });
+  assert.equal(result.eligible, false);
+  assert.equal(result.reason, "rent_overdue");
+});
+
+test("only this month's rent, not yet due, is fine", () => {
+  const result = houseStanding({ houseNumber: "9", rent: { status: "due_soon", balanceKsh: 8000, arrearsKsh: 0 }, utilityBills: [] });
+  assert.equal(result.eligible, true);
+});

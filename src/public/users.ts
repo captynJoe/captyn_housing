@@ -6418,3 +6418,45 @@ if (hasRequiredDomBindings()) {
   initPasswordVisibilityToggles();
   startResidentPortal();
 }
+
+
+// ---------- CAPTYN WiFi: "Get free WiFi" ----------
+// Housing vouches for the logged-in tenant and gets a one-time code; the
+// tenant types it on the WiFi portal (Enter a code) on the device they want.
+const residentWifiLinkEl = document.getElementById("resident-wifi-link");
+const residentWifiLinkTitleEl = document.getElementById("resident-wifi-link-title");
+const residentWifiLinkDetailEl = document.getElementById("resident-wifi-link-detail");
+const residentWifiLinkBtn = document.getElementById("resident-wifi-link-btn");
+let residentWifiCodeTimer = 0;
+
+residentWifiLinkEl?.classList.remove("hidden");
+residentWifiLinkBtn?.addEventListener("click", async () => {
+  if (!(residentWifiLinkBtn instanceof HTMLButtonElement)) return;
+  residentWifiLinkBtn.disabled = true;
+  if (residentWifiLinkDetailEl) residentWifiLinkDetailEl.textContent = "Getting your code...";
+  try {
+    const payload = await requestJson("/api/resident/wifi/link-code", { method: "POST" }, { auth: true });
+    const code = String(payload?.data?.code || "");
+    const expiresAt = new Date(payload?.data?.expiresAt || Date.now() + 10 * 60 * 1000).getTime();
+    if (residentWifiLinkTitleEl) residentWifiLinkTitleEl.textContent = code;
+    const render = () => {
+      const minutes = Math.max(0, Math.ceil((expiresAt - Date.now()) / 60000));
+      if (minutes <= 0) {
+        clearInterval(residentWifiCodeTimer);
+        if (residentWifiLinkTitleEl) residentWifiLinkTitleEl.textContent = "Get free WiFi";
+        if (residentWifiLinkDetailEl) residentWifiLinkDetailEl.textContent = "That code expired. Get a new one.";
+        residentWifiLinkBtn.textContent = "Get code";
+        return;
+      }
+      if (residentWifiLinkDetailEl) residentWifiLinkDetailEl.textContent = `On CAPTYN WiFi, open the WiFi page, tap Enter a code and type it. Works for ${minutes} min.`;
+    };
+    clearInterval(residentWifiCodeTimer);
+    render();
+    residentWifiCodeTimer = window.setInterval(render, 15000);
+    residentWifiLinkBtn.textContent = "New code";
+  } catch (error) {
+    if (residentWifiLinkDetailEl) residentWifiLinkDetailEl.textContent = error instanceof Error ? error.message : "Couldn't get a WiFi code. Try again.";
+  } finally {
+    residentWifiLinkBtn.disabled = false;
+  }
+});

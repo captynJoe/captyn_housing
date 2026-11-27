@@ -130,6 +130,17 @@ export class CaptynWifiIntegrationService {
     });
   }
 
+  // "Get free WiFi": Housing vouches for a logged-in tenant's phone and house
+  // and gets a one-time code to type on the WiFi portal.
+  async createLinkCode(input: {
+    phone: string;
+    buildingId: string;
+    houseNumber: string;
+    tenancyId: string;
+  }): Promise<CaptynWifiProxyResult<{ code: string; expiresAt: string }>> {
+    return this.proxyRequest("/api/integrations/housing/link-codes", { method: "POST", body: input });
+  }
+
   async getEntitlementUsage(
     buildingId: string,
     entitlementId: string

@@ -13619,6 +13619,32 @@ async function bootstrap() {
     }
   });
 
+  // "Get free WiFi": the tenant is logged in here, so Housing vouches for their
+  // phone and house and passes back a one-time code for the WiFi portal.
+  app.post("/api/resident/wifi/link-code", async (req, res, next) => {
+    try {
+      const session = await getResidentSession(req, res);
+      if (!session) {
+        return;
+      }
+      if (!captynWifiIntegrationService.enabled) {
+        return res.status(503).json({ error: "CAPTYN WiFi isn't connected right now. Try again later." });
+      }
+      const result = await captynWifiIntegrationService.createLinkCode({
+        phone: session.phoneNumber,
+        buildingId: session.buildingId,
+        houseNumber: session.houseNumber,
+        tenancyId: session.tenancyId
+      });
+      if (result.status !== "ok" || !result.data?.code) {
+        return res.status(502).json({ error: "Couldn't get a WiFi code right now. Try again in a minute." });
+      }
+      return res.json({ data: { code: result.data.code, expiresAt: result.data.expiresAt } });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   app.get("/api/resident/wifi/status", async (req, res, next) => {
     try {
       const session = await getResidentSession(req, res);

@@ -145,3 +145,40 @@ export function buildReportHouses(input: {
     })
     .sort((a, b) => a.houseNumber.localeCompare(b.houseNumber, undefined, { numeric: true }));
 }
+
+// Agent check for a month: what tenants paid the agent, house by house, and
+// what the agent's own report shows for each. Paid but not (fully) reported
+// is money the agent collected and left out.
+export interface AgentCheckHouse {
+  paidToAgentKsh: number;
+  reportedByAgentKsh: number;
+}
+
+export interface AgentMonthCheck {
+  buildingId: string;
+  month: string;
+  agentName: string;
+  houses: Record<string, AgentCheckHouse>;
+  updatedAt?: string;
+  updatedByName?: string;
+}
+
+export function agentCheckShortfalls(check: AgentMonthCheck | null | undefined) {
+  const houses = Object.entries(check?.houses ?? {})
+    .map(([houseNumber, item]) => ({
+      houseNumber,
+      paidToAgentKsh: money(item.paidToAgentKsh),
+      reportedByAgentKsh: money(item.reportedByAgentKsh),
+      notReportedKsh: Math.max(0, money(item.paidToAgentKsh) - money(item.reportedByAgentKsh))
+    }))
+    .sort((a, b) => a.houseNumber.localeCompare(b.houseNumber, undefined, { numeric: true }));
+  const sum = (key: "paidToAgentKsh" | "reportedByAgentKsh" | "notReportedKsh") =>
+    houses.reduce((total, item) => total + item[key], 0);
+  return {
+    houses,
+    notReported: houses.filter((item) => item.notReportedKsh > 0),
+    paidToAgentKsh: sum("paidToAgentKsh"),
+    reportedByAgentKsh: sum("reportedByAgentKsh"),
+    notReportedKsh: sum("notReportedKsh")
+  };
+}

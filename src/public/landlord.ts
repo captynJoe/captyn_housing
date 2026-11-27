@@ -10645,7 +10645,11 @@ const RENT_RECORD_COLUMNS = [
 
 function buildRentRecordRows(data) {
   const houses = Array.isArray(data?.houses) ? data.houses : [];
+  const agentHouses = data?.agentCheck?.houses ?? {};
   return houses.map((house) => {
+    const agent = agentHouses[house.houseNumber];
+    const paidToAgentKsh = Number(agent?.paidToAgentKsh) || 0;
+    const reportedByAgentKsh = Number(agent?.reportedByAgentKsh) || 0;
     const occupied = house.status !== "empty";
     const note = !occupied
       ? "VACANT"
@@ -10666,9 +10670,24 @@ function buildRentRecordRows(data) {
       depositPaidKsh: occupied && !depositToCheck ? house.depositPaidKsh : null,
       depositBalanceKsh: occupied && !depositToCheck ? Math.max(0, house.depositNeededKsh - house.depositPaidKsh) : null,
       utilitiesPaidKsh: house.utilitiesReceivedKsh || null,
-      amountPaidKsh: house.totalReceivedKsh || null
+      amountPaidKsh: house.totalReceivedKsh || null,
+      paidToAgentKsh: paidToAgentKsh || null,
+      reportedByAgentKsh: agent ? reportedByAgentKsh : null,
+      // Paid to the agent but missing (or short) in the agent's own report.
+      notReportedKsh: Math.max(0, paidToAgentKsh - reportedByAgentKsh)
     };
   });
+}
+
+function rentRecordColumns(data) {
+  const agentName = String(data?.agentCheck?.agentName || "").trim().toUpperCase();
+  return agentName
+    ? [
+        ...RENT_RECORD_COLUMNS,
+        { key: "paidToAgentKsh", label: `Paid to ${agentName}` },
+        { key: "reportedByAgentKsh", label: `${agentName} reported` }
+      ]
+    : RENT_RECORD_COLUMNS;
 }
 
 function sumRentRecordColumn(rows, key) {
@@ -10679,6 +10698,10 @@ function buildPerformanceReportHtml(data) {
   const buildingName = data.buildingName || getBuildingDisplayNameById(data.buildingId, data.buildingId);
   const monthLabel = formatReportMonth(data.month).toUpperCase();
   const rows = buildRentRecordRows(data);
+  const columns = rentRecordColumns(data);
+  const agentName = String(data?.agentCheck?.agentName || "").trim().toUpperCase();
+  const notReported = rows.filter((row) => row.notReportedKsh > 0);
+  const notReportedKsh = sumRentRecordColumn(notReported, "notReportedKsh");
   const amount = (value) => value == null || value === "" ? "—" : escapeHtml(Number(value).toLocaleString("en-US"));
   const expenses = Array.isArray(data.expenseItems) ? data.expenseItems : [];
   const rentArrearsTotal = sumRentRecordColumn(rows, "rentBalanceKsh") + sumRentRecordColumn(rows, "arrearsKsh");
@@ -10696,12 +10719,12 @@ function buildPerformanceReportHtml(data) {
       ${head}
       <h1 class="rr-title">${escapeHtml(buildingName.toUpperCase())} RENT RECORD — ${escapeHtml(monthLabel)}</h1>
       <table class="rr-table">
-        <thead><tr><th>House no.</th><th>Tenant</th>${RENT_RECORD_COLUMNS.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr></thead>
+        <thead><tr><th>House no.</th><th>Tenant</th>${columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr></thead>
         <tbody>${rows.map((row) => `
-          <tr>
+          <tr${row.notReportedKsh > 0 ? ' class="rr-unreported"' : ""}>
             <td>${escapeHtml(row.houseNumber)}</td>
             <td class="rr-text">${escapeHtml(row.tenantName)}</td>
-            ${RENT_RECORD_COLUMNS.map((column) => {
+            ${columns.map((column) => {
               if (row.note && ["rentKsh", "rentPaidKsh", "rentBalanceKsh"].includes(column.key)) {
                 return column.key === "rentKsh" ? `<td class="rr-note">${escapeHtml(row.note)}</td>` : "<td>—</td>";
               }
@@ -10710,8 +10733,9 @@ function buildPerformanceReportHtml(data) {
             }).join("")}
           </tr>`).join("")}
         </tbody>
-        <tfoot><tr><td>TOTAL</td><td></td>${RENT_RECORD_COLUMNS.map((column) => `<td>${amount(sumRentRecordColumn(rows, column.key))}</td>`).join("")}</tr></tfoot>
+        <tfoot><tr><td>TOTAL</td><td></td>${columns.map((column) => `<td>${amount(sumRentRecordColumn(rows, column.key))}</td>`).join("")}</tr></tfoot>
       </table>
+      ${notReported.length ? `<p class="rr-legend"><span class="rr-swatch"></span>Paid to ${escapeHtml(agentName)} but not in ${escapeHtml(agentName)}'s report: houses ${notReported.map((row) => escapeHtml(row.houseNumber)).join(", ")} — KSh ${amount(notReportedKsh)}.</p>` : ""}
       <p class="rr-source">Rent paid = this month's rent covered. Arrears = rent owed from earlier months${data.isCurrentMonth ? "" : " (shown for the current month only)"}. Amount paid = all money received from the house this month (rent, deposit, utilities).${toCheck ? ` Deposit TO CHECK = no deposit recorded yet (${toCheck} houses).` : ""} Prepared ${escapeHtml(formatReportDate())}.</p>
       ${footer(1)}
     </section>
@@ -10730,6 +10754,10 @@ function buildPerformanceReportHtml(data) {
           <tr class="rr-strong"><td>Amount after expenditure</td><td>${Number(data.netAfterCostsKsh) < 0 ? `(${amount(Math.abs(data.netAfterCostsKsh))})` : amount(data.netAfterCostsKsh)}</td></tr>
           <tr><td>Rent still owed (this month and arrears)</td><td>${amount(rentArrearsTotal)}</td></tr>
           <tr><td>Deposit balances owed</td><td>${amount(depositArrearsTotal)}</td></tr>
+          ${agentName ? `
+          <tr><td>Paid by tenants to ${escapeHtml(agentName)}</td><td>${amount(sumRentRecordColumn(rows, "paidToAgentKsh"))}</td></tr>
+          <tr><td>Shown in ${escapeHtml(agentName)}'s report</td><td>${amount(sumRentRecordColumn(rows, "reportedByAgentKsh"))}</td></tr>
+          <tr class="rr-strong rr-unreported"><td>Paid to ${escapeHtml(agentName)}, not in their report (${notReported.length} houses)</td><td>${amount(notReportedKsh)}</td></tr>` : ""}
         </tbody>
       </table>
 
@@ -10766,7 +10794,60 @@ function renderRentRecordPreview(data) {
   const container = document.getElementById("performance-rent-record");
   if (!(container instanceof HTMLElement)) return;
   container.innerHTML = data ? `<div class="rent-record">${buildPerformanceReportHtml(data)}</div>` : "";
+  renderAgentCheckEditor(data);
 }
+
+// Agent check: per house, what tenants paid the agent and what the agent's
+// report shows. Houses paid but not reported are highlighted in the record.
+function renderAgentCheckEditor(data) {
+  const body = document.getElementById("performance-agent-check-body");
+  const nameInput = document.getElementById("performance-agent-name");
+  if (!(body instanceof HTMLElement)) return;
+  const check = data?.agentCheck ?? null;
+  if (nameInput instanceof HTMLInputElement) nameInput.value = check?.agentName ?? "";
+  const houses = Array.isArray(data?.houses) ? data.houses : [];
+  const value = (amount) => (Number(amount) > 0 ? String(Math.round(Number(amount))) : "");
+  body.innerHTML = houses.map((house) => {
+    const saved = check?.houses?.[house.houseNumber];
+    return `<tr data-house-number="${escapeHtml(house.houseNumber)}">
+      <td>${escapeHtml(house.houseNumber)}</td>
+      <td>${escapeHtml(house.tenantName || (house.status === "empty" ? "Vacant" : "-"))}</td>
+      <td><input class="rent-sheet-input" data-field="paid" type="number" inputmode="numeric" min="0" step="1" value="${value(saved?.paidToAgentKsh)}" aria-label="Paid to agent, house ${escapeHtml(house.houseNumber)}" /></td>
+      <td><input class="rent-sheet-input" data-field="reported" type="number" inputmode="numeric" min="0" step="1" value="${value(saved?.reportedByAgentKsh)}" aria-label="Agent reported, house ${escapeHtml(house.houseNumber)}" /></td>
+    </tr>`;
+  }).join("");
+}
+
+document.getElementById("performance-agent-check-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!lastBuildingPerformance) return;
+  const nameInput = document.getElementById("performance-agent-name");
+  const houses = [...document.querySelectorAll("#performance-agent-check-body tr[data-house-number]")].map((row) => ({
+    houseNumber: row.dataset.houseNumber,
+    paidToAgentKsh: Number(row.querySelector('input[data-field="paid"]')?.value) || 0,
+    reportedByAgentKsh: Number(row.querySelector('input[data-field="reported"]')?.value) || 0
+  }));
+  const button = event.target.querySelector("button[type=submit]");
+  if (button instanceof HTMLButtonElement) button.disabled = true;
+  try {
+    await requestJson("/api/landlord/agent-checks", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        buildingId: lastBuildingPerformance.buildingId,
+        month: lastBuildingPerformance.month,
+        agentName: nameInput instanceof HTMLInputElement ? nameInput.value.trim() : "",
+        houses
+      })
+    });
+    setStatus("Agent check saved.");
+    ensureBuildingPerformanceLoaded(true);
+  } catch (error) {
+    handleLandlordError(error, "Could not save the agent check.");
+  } finally {
+    if (button instanceof HTMLButtonElement) button.disabled = false;
+  }
+});
 
 function printBuildingPerformanceReport() {
   if (!lastBuildingPerformance) {
@@ -10950,15 +11031,18 @@ function exportBuildingPerformanceCsv(data) {
   // the summary and every expenditure line; payment detail follows.
   const recordRows = buildRentRecordRows(data);
   const cell = (value) => value == null ? "" : value;
-  appendSection(`${buildingName} rent record — ${formatReportMonth(data.month)}`, ["House no.", "Tenant", ...RENT_RECORD_COLUMNS.map((column) => `${column.label} (KSh)`)], [
+  const recordColumns = rentRecordColumns(data);
+  const agentLabel = String(data?.agentCheck?.agentName || "").trim().toUpperCase();
+  appendSection(`${buildingName} rent record — ${formatReportMonth(data.month)}`, ["House no.", "Tenant", ...recordColumns.map((column) => `${column.label} (KSh)`), ...(agentLabel ? [`Not in ${agentLabel} report (KSh)`] : [])], [
     ...recordRows.map((row) => [
       row.houseNumber,
       row.tenantName,
-      ...RENT_RECORD_COLUMNS.map((column) =>
+      ...recordColumns.map((column) =>
         row.note && column.key === "rentKsh" ? row.note : row.depositNote && column.key === "depositKsh" ? row.depositNote : cell(row[column.key])
-      )
+      ),
+      ...(agentLabel ? [row.notReportedKsh || ""] : [])
     ]),
-    ["TOTAL", "", ...RENT_RECORD_COLUMNS.map((column) => sumRentRecordColumn(recordRows, column.key))]
+    ["TOTAL", "", ...recordColumns.map((column) => sumRentRecordColumn(recordRows, column.key)), ...(agentLabel ? [sumRentRecordColumn(recordRows, "notReportedKsh")] : [])]
   ]);
   appendSection("Summary", ["Item", "Amount (KSh)"], [
     ["Rent collected", data.rentReceivedKsh],

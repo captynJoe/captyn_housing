@@ -1065,6 +1065,19 @@
               <button id="print-building-performance" type="button">Print / Save PDF</button>
               <button id="export-building-performance" type="button">Download Excel (CSV)</button>
             </div>
+            <details id="performance-agent-check" class="package-card performance-agent-check">
+              <summary>Agent check</summary>
+              <form id="performance-agent-check-form">
+                <label>Agent<input id="performance-agent-name" type="text" maxlength="80" placeholder="JUKIWA" required /></label>
+                <div class="table-wrap performance-agent-check-wrap">
+                  <table>
+                    <thead><tr><th>House</th><th>Tenant</th><th>Paid to agent (KSh)</th><th>Agent reported (KSh)</th></tr></thead>
+                    <tbody id="performance-agent-check-body"></tbody>
+                  </table>
+                </div>
+                <button type="submit">Save agent check</button>
+              </form>
+            </details>
             <div id="performance-rent-record" class="rent-record-preview" aria-label="Rent record"></div>
           </div>
         </section>

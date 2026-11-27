@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { houseStanding, phoneVariants, type HouseStanding } from "./services/houseStanding.js";
 import { balanceForRentMonth, rentMonthFigures, type RentMonthFigures } from "./services/rentMonth.js";
-import { buildReportHouses } from "./services/performanceReport.js";
+import { agentCheckShortfalls, buildReportHouses, type AgentMonthCheck } from "./services/performanceReport.js";
 import { withDueDay } from "./services/rentSchedule.js";
 import {
   awayUsage,
@@ -337,6 +337,7 @@ const ADMIN_AUTH_STATE_KEY = "admin_auth_v1";
 const RENT_LEDGER_STATE_KEY = "rent_ledger_v1";
 const RENT_PAYMENT_ARRANGEMENTS_STATE_KEY = "rent_payment_arrangements_v1";
 const HOUSE_ABSENCE_NOTICES_STATE_KEY = "house_absence_notices_v1";
+const AGENT_MONTH_CHECKS_STATE_KEY = "agent_month_checks_v1";
 const UTILITY_BILLING_STATE_KEY = "utility_billing_v1";
 const UTILITY_BULK_SUBMISSION_AUDIT_STATE_KEY = "utility_bulk_submission_audit_v1";
 const USER_SUPPORT_STATE_KEY = "user_support_v1";
@@ -17916,6 +17917,73 @@ async function bootstrap() {
     }
   });
 
+  // Agent checks: per month, what tenants paid the agent and what the agent's
+  // report shows (see services/performanceReport.ts). Read from the database
+  // each time; it is small and changes rarely.
+  const readAgentMonthChecks = async (): Promise<AgentMonthCheck[]> => {
+    if (!repositoryContext.prisma) return [];
+    const row = await repositoryContext.prisma.appState.findUnique({ where: { key: AGENT_MONTH_CHECKS_STATE_KEY } });
+    const value = row?.value as { checks?: AgentMonthCheck[] } | null;
+    return Array.isArray(value?.checks) ? value.checks : [];
+  };
+
+  app.put("/api/landlord/agent-checks", async (req, res, next) => {
+    try {
+      const context = await resolveLandlordAccessContext(req, res);
+      if (!context) return;
+      if (context.role === "caretaker") {
+        return res.status(403).json({ error: "Only the owner can record an agent check." });
+      }
+      if (!repositoryContext.prisma) {
+        return res.status(503).json({ error: "Agent checks need the database." });
+      }
+      const buildingId = normalizeBuildingId(String(req.body?.buildingId ?? ""));
+      const month = String(req.body?.month ?? "").trim();
+      const agentName = String(req.body?.agentName ?? "").trim().slice(0, 80);
+      if (!buildingId || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !agentName) {
+        return res.status(400).json({ error: "Choose the building, the month and the agent's name." });
+      }
+      const building = await store.getBuilding(buildingId);
+      if (!building) return res.status(404).json({ error: "Building not found." });
+      if (!(await canManageBuildingFromLandlordContext(context, building.id))) {
+        return res.status(403).json({ error: "Building access denied" });
+      }
+      const allowedHouses = new Set((building.houseNumbers ?? []).map((item) => normalizeHouseNumber(item)));
+      const houses: AgentMonthCheck["houses"] = {};
+      for (const item of Array.isArray(req.body?.houses) ? req.body.houses : []) {
+        const houseNumber = normalizeHouseNumber(String(item?.houseNumber ?? ""));
+        const paid = Math.round(Number(item?.paidToAgentKsh) || 0);
+        const reported = Math.round(Number(item?.reportedByAgentKsh) || 0);
+        if (!houseNumber || !allowedHouses.has(houseNumber)) continue;
+        if (paid < 0 || reported < 0 || paid > 1_000_000 || reported > 1_000_000) {
+          return res.status(400).json({ error: `House ${houseNumber}: amounts must be between 0 and 1,000,000.` });
+        }
+        if (paid > 0 || reported > 0) houses[houseNumber] = { paidToAgentKsh: paid, reportedByAgentKsh: reported };
+      }
+      const actor = actorFromLandlordContext(context);
+      const check: AgentMonthCheck = {
+        buildingId: building.id,
+        month,
+        agentName,
+        houses,
+        updatedAt: new Date().toISOString(),
+        updatedByName: actor.name
+      };
+      const checks = (await readAgentMonthChecks()).filter(
+        (item) => !(item.buildingId === building.id && item.month === month)
+      );
+      checks.push(check);
+      await repositoryContext.prisma.appState.upsert({
+        where: { key: AGENT_MONTH_CHECKS_STATE_KEY },
+        update: { value: { checks } as object },
+        create: { key: AGENT_MONTH_CHECKS_STATE_KEY, value: { checks } as object }
+      });
+      return res.json({ data: { ...check, ...agentCheckShortfalls(check) } });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   app.get("/api/landlord/building-performance", async (req, res, next) => {
     try {
       const context = await resolveLandlordAccessContext(req, res);
@@ -18068,6 +18136,12 @@ async function bootstrap() {
         collectors: [...collectors.values()].sort((a, b) => b.amountKsh - a.amountKsh),
         expenses: [...expenseBreakdown.values()].sort((a, b) => b.amountKsh - a.amountKsh),
         payments,
+        agentCheck: await (async () => {
+          const check = (await readAgentMonthChecks()).find(
+            (item) => item.buildingId === buildingId && item.month === month
+          );
+          return check ? { ...check, ...agentCheckShortfalls(check) } : null;
+        })(),
         // Every cost line for the month, for the printed record.
         expenseItems: expenses
           .map((item) => ({

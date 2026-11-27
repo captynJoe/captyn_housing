@@ -80,3 +80,19 @@ test("rent record rows carry arrears, deposit, not-billed reason and total recei
   assert.equal(tenant.depositPaidKsh, 2_500);
   assert.equal(tenant.totalReceivedKsh, 4_000);
 });
+
+test("agent check: houses paid to the agent but missing from its report", async () => {
+  const { agentCheckShortfalls } = await import("../src/services/performanceReport.js");
+  const result = agentCheckShortfalls({
+    buildingId: "B", month: "2026-11", agentName: "JUKIWA",
+    houses: {
+      "3": { paidToAgentKsh: 4_100, reportedByAgentKsh: 0 },
+      "4": { paidToAgentKsh: 5_000, reportedByAgentKsh: 5_000 },
+      "48": { paidToAgentKsh: 3_985, reportedByAgentKsh: 2_250 }
+    }
+  });
+  assert.deepEqual(result.notReported.map((item) => [item.houseNumber, item.notReportedKsh]), [["3", 4_100], ["48", 1_735]]);
+  assert.equal(result.paidToAgentKsh, 13_085);
+  assert.equal(result.notReportedKsh, 5_835);
+  assert.equal(agentCheckShortfalls(null).houses.length, 0);
+});

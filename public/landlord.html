@@ -953,7 +953,7 @@
               <p id="building-performance-summary" class="status-text">Monthly collections, operating costs, and collection attribution.</p>
             </div>
             <div class="action-row">
-              <button id="export-building-performance" type="button">Export CSV</button>
+              <button id="export-building-performance" type="button">Download Excel (CSV)</button>
               <button id="print-building-performance" type="button">Print / Save PDF</button>
               <button id="refresh-building-performance" type="button">Refresh</button>
             </div>
@@ -966,6 +966,7 @@
             </div>
             <details class="performance-explainer"><summary>How to read these figures</summary><p class="status-text">Collections include rent, utilities, and deposits. Deposits are shown separately from rent income. Agent salaries and commissions belong in Costs with the agent's name as the payee. A transfer of collected funds from an agent to the owner is not new income or an expense. Older records without collection or payee details appear as Unknown.</p></details>
           </div>
+          <div id="performance-rent-record" class="rent-record-preview" aria-label="Rent record"></div>
           <div class="resident-overview-cards performance-cards">
             <article class="resident-overview-card performance-primary-card"><span>Total received</span><strong id="performance-total-received">-</strong><small id="performance-payment-count">-</small><small id="performance-total-change" class="performance-change"></small></article>
             <article class="resident-overview-card"><span>Operating costs</span><strong id="performance-expenses">-</strong><small id="performance-expense-count">-</small></article>

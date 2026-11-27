@@ -57,3 +57,26 @@ test("past month: rent received that month decides who paid", () => {
   assert.equal(five.utilitiesReceivedKsh, 300);
   assert.equal(six.status, "not_paid");
 });
+
+test("rent record rows carry arrears, deposit, not-billed reason and total received", () => {
+  const [tenant, ownerHouse] = buildReportHouses({
+    month: "2026-11",
+    isCurrentMonth: true,
+    payments: [
+      { houseNumber: "12", type: "Rent", amountKsh: 2_500 },
+      { houseNumber: "12", type: "Rent deposit", amountKsh: 1_000 },
+      { houseNumber: "12", type: "Water", amountKsh: 500 }
+    ],
+    houses: [
+      { ...base, houseNumber: "14", rentBilled: false, notBilledReason: "Owner's house" },
+      { ...base, houseNumber: "12", monthlyRentKsh: 5_500, currentRentDueKsh: 3_000, rentEarlierDueKsh: 1_000, depositRequiredKsh: 5_500, depositPaidKsh: 2_500 }
+    ]
+  });
+  assert.equal(ownerHouse.notBilledReason, "Owner's house");
+  assert.equal(tenant.rentPaidKsh, 2_500);
+  assert.equal(tenant.rentShortKsh, 3_000);
+  assert.equal(tenant.earlierDueKsh, 1_000);
+  assert.equal(tenant.depositNeededKsh, 5_500);
+  assert.equal(tenant.depositPaidKsh, 2_500);
+  assert.equal(tenant.totalReceivedKsh, 4_000);
+});

@@ -18,6 +18,8 @@ export interface ReportHouseSource {
   hasActiveResident?: boolean;
   rentEnabled?: boolean;
   rentBilled?: boolean;
+  // Why rent isn't billed (e.g. "Owner's house"), shown in the Rent column.
+  notBilledReason?: string;
   monthlyRentKsh?: number;
   // This month's due date and stage, current month only.
   rentDueDate?: string;
@@ -25,6 +27,8 @@ export interface ReportHouseSource {
   // Live ledger figures for the current month.
   currentMonthRentPaidKsh?: number;
   currentRentDueKsh?: number;
+  // Rent owed from months before this one (current month only).
+  rentEarlierDueKsh?: number;
   rentBalanceKsh?: number;
   depositRequiredKsh?: number;
   depositPaidKsh?: number;
@@ -43,6 +47,13 @@ export interface ReportHouse {
   depositReceivedKsh: number;
   dueDate?: string;
   stage?: ReportRentStage;
+  notBilledReason?: string;
+  // Rent owed from earlier months (current month only; 0 otherwise).
+  earlierDueKsh: number;
+  depositNeededKsh: number;
+  depositPaidKsh: number;
+  // Everything received from the house during the month.
+  totalReceivedKsh: number;
   // What the house owes as of today, whatever month the report is for.
   owesRentTodayKsh: number;
   owesDepositTodayKsh: number;
@@ -119,6 +130,11 @@ export function buildReportHouses(input: {
         depositReceivedKsh: got.deposit,
         dueDate,
         stage: rentShortKsh > 0 ? (input.isCurrentMonth ? stage : "late") : undefined,
+        notBilledReason: occupied && rentKsh <= 0 ? house.notBilledReason || undefined : undefined,
+        earlierDueKsh: occupied && input.isCurrentMonth ? money(house.rentEarlierDueKsh) : 0,
+        depositNeededKsh: occupied && Number.isFinite(depositRequired) ? money(depositRequired) : 0,
+        depositPaidKsh: occupied ? money(house.depositPaidKsh) : 0,
+        totalReceivedKsh: got.rent + got.utilities + got.deposit,
         owesRentTodayKsh: money(house.rentBalanceKsh),
         owesDepositTodayKsh:
           occupied && Number.isFinite(depositRequired)

@@ -4719,14 +4719,14 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
   }
 }
 
-/* Printed monthly owner report (Performance > Print / Save PDF). */
+/* Rent record (Performance): the same sheet on screen, in print and in CSV. */
 #performance-print-report {
   display: none;
 }
 
 @page owner-report {
-  size: A4 portrait;
-  margin: 16mm 14mm;
+  size: A4 landscape;
+  margin: 10mm 10mm 12mm;
 }
 
 @media print {
@@ -4737,116 +4737,166 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
   body.printing-performance-report #performance-print-report {
     page: owner-report;
     display: block !important;
-    color: #000;
-    background: #fff;
-    font-family: Georgia, "Times New Roman", serif;
-    font-size: 15pt;
-    line-height: 1.45;
   }
 
-  #performance-print-report .r-head {
-    border-bottom: 3px solid #000;
-    padding-bottom: 8pt;
-    margin-bottom: 14pt;
+  .rent-record .rr-page {
+    box-shadow: none !important;
+    border: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    break-after: page;
   }
 
-  #performance-print-report h1 {
-    font-size: 26pt;
-    margin: 0;
+  .rent-record .rr-page:last-child {
+    break-after: auto;
   }
+}
 
-  #performance-print-report .r-title {
-    font-size: 19pt;
-    margin: 4pt 0 0;
-  }
+.rent-record-preview {
+  margin: 12px 0 18px;
+  overflow-x: auto;
+}
 
-  #performance-print-report .r-printed {
-    font-size: 12pt;
-    margin: 4pt 0 0;
-  }
+.rent-record-preview:empty {
+  display: none;
+}
 
-  #performance-print-report section {
-    margin-top: 18pt;
-  }
+.rent-record {
+  color: #111;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 11px;
+  line-height: 1.35;
+}
 
-  #performance-print-report h2 {
-    font-size: 19pt;
-    margin: 0 0 8pt;
-    break-after: avoid;
-  }
+.rent-record .rr-page {
+  min-width: 900px;
+  margin: 0 0 16px;
+  padding: 22px 26px;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
 
-  #performance-print-report h3 {
-    font-size: 16pt;
-    margin: 12pt 0 6pt;
-    break-after: avoid;
-  }
+.rent-record .rr-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #111;
+}
 
-  #performance-print-report p {
-    margin: 6pt 0;
-  }
+.rent-record .rr-head div {
+  display: grid;
+}
 
-  #performance-print-report table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 0 0 6pt;
-  }
+.rent-record .rr-brand {
+  font-size: 20px;
+  letter-spacing: 0.02em;
+}
 
-  #performance-print-report th,
-  #performance-print-report td {
-    border: 1px solid #000;
-    padding: 5pt 7pt;
-    text-align: left;
-    vertical-align: top;
-  }
+.rent-record .rr-head span {
+  font-size: 9px;
+}
 
-  #performance-print-report th {
-    background: #e6e6e6;
-    font-size: 13pt;
-  }
+.rent-record .rr-head-right {
+  text-align: left;
+  font-size: 9px;
+}
 
-  #performance-print-report tr {
-    break-inside: avoid;
-  }
+.rent-record .rr-title {
+  margin: 14px 0 8px;
+  text-align: center;
+  font-size: 16px;
+}
 
-  #performance-print-report thead {
-    display: table-header-group;
-  }
+.rent-record .rr-subtitle {
+  margin: 16px 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+}
 
-  #performance-print-report tfoot td {
-    font-weight: 700;
-    border-top: 2px solid #000;
-  }
+.rent-record table {
+  width: 100%;
+  border-collapse: collapse;
+}
 
-  #performance-print-report .r-num {
-    text-align: right;
-    white-space: nowrap;
-  }
+.rent-record th,
+.rent-record td {
+  border: 1px solid #9a9a9a;
+  padding: 2px 6px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 
-  #performance-print-report .r-house {
-    font-weight: 700;
-    white-space: nowrap;
-  }
+.rent-record th {
+  background: #e6e6e6;
+  font-size: 9px;
+  text-transform: uppercase;
+  text-align: center;
+}
 
-  #performance-print-report .r-summary {
-    border: 2px solid #000;
-    padding: 10pt 12pt;
-    break-inside: avoid;
-  }
+.rent-record td:first-child,
+.rent-record .rr-text {
+  text-align: left;
+}
 
-  #performance-print-report .r-key td {
-    font-size: 16pt;
-    border: 0;
-    border-bottom: 1px solid #999;
-  }
+.rent-record .rr-text {
+  white-space: normal;
+}
 
-  #performance-print-report .r-key .r-strong td {
-    font-weight: 700;
-  }
+.rent-record .rr-note {
+  text-align: center;
+  font-size: 9px;
+}
 
-  #performance-print-report .r-sentence {
-    font-size: 16pt;
-    margin-top: 10pt;
-  }
+.rent-record .rr-warn {
+  color: #8a4b00;
+  font-weight: 700;
+}
+
+.rent-record tfoot td,
+.rent-record .rr-strong td {
+  font-weight: 700;
+  background: #f0f0f0;
+}
+
+.rent-record .rr-summary {
+  width: 70%;
+  margin: 10px auto;
+}
+
+.rent-record .rr-summary td:first-child {
+  width: 75%;
+}
+
+.rent-record .rr-sign {
+  margin-top: 22px;
+}
+
+.rent-record .rr-sign th {
+  text-align: left;
+}
+
+.rent-record .rr-sign td {
+  text-align: left;
+  height: 22px;
+}
+
+.rent-record .rr-sign .rr-sign-row td {
+  height: 44px;
+}
+
+.rent-record .rr-source {
+  margin: 6px 0 0;
+  font-size: 9px;
+}
+
+.rent-record .rr-footer {
+  margin: 14px 0 0;
+  text-align: center;
+  font-size: 8px;
+  color: #555;
 }
 
 /* Houses To Watch: the list scrolls in its own box so the column names stay

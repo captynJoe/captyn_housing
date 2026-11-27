@@ -10652,15 +10652,6 @@ document.getElementById("absence-notices-list")?.addEventListener("click", async
 
 let lastBuildingPerformance = null;
 
-const REPORT_STATUS_LABELS = {
-  paid: "Paid",
-  part_paid: "Part paid",
-  not_paid: "Not paid",
-  not_yet_due: "Not due yet",
-  not_charged: "No rent charged",
-  empty: "Empty house"
-};
-
 function formatReportMonth(month) {
   const date = new Date(`${month}-01T00:00:00`);
   return Number.isNaN(date.getTime())
@@ -10675,138 +10666,144 @@ function formatReportDate(value) {
     : new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric" }).format(date);
 }
 
-// A plain printed statement for the owner: big type, short sentences, one
-// question per section. Uses the same figures as the Performance page.
+// Monthly rent record: one row per house and a totals row (page 1), then the
+// collection summary, expenditure and sign-off (page 2). The same rows feed
+// the screen preview, the printed PDF and the Excel (CSV) export.
+const RENT_RECORD_COLUMNS = [
+  { key: "rentKsh", label: "Rent" },
+  { key: "rentPaidKsh", label: "Rent paid" },
+  { key: "rentBalanceKsh", label: "Rent balance" },
+  { key: "arrearsKsh", label: "Arrears" },
+  { key: "depositKsh", label: "Deposit" },
+  { key: "depositPaidKsh", label: "Deposit paid" },
+  { key: "depositBalanceKsh", label: "Deposit balance" },
+  { key: "utilitiesPaidKsh", label: "Utilities paid" },
+  { key: "amountPaidKsh", label: "Amount paid" }
+];
+
+function buildRentRecordRows(data) {
+  const houses = Array.isArray(data?.houses) ? data.houses : [];
+  return houses.map((house) => {
+    const occupied = house.status !== "empty";
+    const note = !occupied
+      ? "VACANT"
+      : house.status === "not_charged"
+        ? String(house.notBilledReason || "NOT BILLED").toUpperCase()
+        : "";
+    const depositToCheck = occupied && Number(house.depositNeededKsh) <= 0;
+    return {
+      houseNumber: house.houseNumber,
+      tenantName: occupied ? house.tenantName || "-" : "",
+      note,
+      depositNote: depositToCheck ? "TO CHECK" : "",
+      rentKsh: note ? null : house.rentKsh,
+      rentPaidKsh: note ? null : house.rentPaidKsh,
+      rentBalanceKsh: note ? null : house.rentShortKsh,
+      arrearsKsh: occupied ? house.earlierDueKsh : null,
+      depositKsh: occupied && !depositToCheck ? house.depositNeededKsh : null,
+      depositPaidKsh: occupied && !depositToCheck ? house.depositPaidKsh : null,
+      depositBalanceKsh: occupied && !depositToCheck ? Math.max(0, house.depositNeededKsh - house.depositPaidKsh) : null,
+      utilitiesPaidKsh: house.utilitiesReceivedKsh || null,
+      amountPaidKsh: house.totalReceivedKsh || null
+    };
+  });
+}
+
+function sumRentRecordColumn(rows, key) {
+  return rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
+}
+
 function buildPerformanceReportHtml(data) {
-  const month = formatReportMonth(data.month);
-  const houses = Array.isArray(data.houses) ? data.houses : [];
-  const money = (value) => escapeHtml(formatCurrency(Math.round(Number(value) || 0)));
-  const sum = (rows, key) => rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
-  const tenant = (house) => escapeHtml(house.tenantName || "-");
-
-  const charged = houses.filter((house) => Number(house.rentKsh) > 0);
-  const paid = charged.filter((house) => house.status === "paid");
-  const notYetDue = charged.filter((house) => house.status === "not_yet_due");
-  const owing = charged.filter((house) => house.status === "part_paid" || house.status === "not_paid");
-  const notCharged = houses.filter((house) => Number(house.rentKsh) <= 0);
-  const rentShortKsh = sum(charged, "rentShortKsh");
-
-  const rentRows = (rows, withStatus) => rows.map((house) => `
-    <tr>
-      <td class="r-house">${escapeHtml(house.houseNumber)}</td>
-      <td>${tenant(house)}</td>
-      <td class="r-num">${money(house.rentKsh)}</td>
-      <td class="r-num">${money(house.rentPaidKsh)}</td>
-      <td class="r-num">${money(house.rentShortKsh)}</td>
-      ${withStatus ? `<td>${escapeHtml(house.stage ? getRentStageLabel(house.stage, house.dueDate, false) : REPORT_STATUS_LABELS[house.status] || "")}</td>` : ""}
-    </tr>`).join("");
-  const rentTable = (title, rows, withStatus) => rows.length === 0 ? "" : `
-    <h3>${escapeHtml(title)} (${rows.length})</h3>
-    <table>
-      <thead><tr><th>House</th><th>Tenant</th><th class="r-num">Rent</th><th class="r-num">Paid</th><th class="r-num">Still owed</th>${withStatus ? "<th>Note</th>" : ""}</tr></thead>
-      <tbody>${rentRows(rows, withStatus)}</tbody>
-      <tfoot><tr><td colspan="2">Total</td><td class="r-num">${money(sum(rows, "rentKsh"))}</td><td class="r-num">${money(sum(rows, "rentPaidKsh"))}</td><td class="r-num">${money(sum(rows, "rentShortKsh"))}</td>${withStatus ? "<td></td>" : ""}</tr></tfoot>
-    </table>`;
-
-  const owesToday = houses
-    .map((house) => ({
-      ...house,
-      owesTotalKsh: (Number(house.owesRentTodayKsh) || 0) + (Number(house.owesDepositTodayKsh) || 0) + (Number(house.owesUtilitiesTodayKsh) || 0)
-    }))
-    .filter((house) => house.owesTotalKsh > 0);
-
-  const expenses = Array.isArray(data.expenses) ? data.expenses : [];
-  const agents = (Array.isArray(data.agentReconciliation) ? data.agentReconciliation : [])
-    .filter((item) => Number(item.collectedKsh) || Number(item.commissionKsh) || Number(item.remittedKsh));
-
-  const rentSentence = charged.length === 0
-    ? "No rent was charged this month."
-    : `${paid.length} of ${charged.length} houses have paid their rent in full.` +
-      (notYetDue.length > 0 ? ` ${notYetDue.length} ${notYetDue.length === 1 ? "is" : "are"} not due yet.` : "") +
-      (owing.length > 0 ? ` ${owing.length} still ${owing.length === 1 ? "owes" : "owe"}.` : "");
+  const buildingName = data.buildingName || getBuildingDisplayNameById(data.buildingId, data.buildingId);
+  const monthLabel = formatReportMonth(data.month).toUpperCase();
+  const rows = buildRentRecordRows(data);
+  const amount = (value) => value == null || value === "" ? "—" : escapeHtml(Number(value).toLocaleString("en-US"));
+  const expenses = Array.isArray(data.expenseItems) ? data.expenseItems : [];
+  const rentArrearsTotal = sumRentRecordColumn(rows, "rentBalanceKsh") + sumRentRecordColumn(rows, "arrearsKsh");
+  const depositArrearsTotal = sumRentRecordColumn(rows, "depositBalanceKsh");
+  const toCheck = rows.filter((row) => row.depositNote).length;
+  const footer = (page) => `<p class="rr-footer">${escapeHtml(buildingName.toUpperCase())} | ${escapeHtml(monthLabel)} | PAGE ${page}</p>`;
+  const head = `
+    <header class="rr-head">
+      <div><strong class="rr-brand">CAPTYN GLOBAL</strong><span>PROPERTY MANAGEMENT</span></div>
+      <div class="rr-head-right"><strong>${escapeHtml(buildingName.toUpperCase())}</strong><span>RENT RECORD — ${escapeHtml(monthLabel)}</span></div>
+    </header>`;
 
   return `
-    <header class="r-head">
-      <h1>${escapeHtml(data.buildingName || getBuildingDisplayNameById(data.buildingId, data.buildingId))}</h1>
-      <p class="r-title">Monthly report for ${escapeHtml(month)}</p>
-      <p class="r-printed">Printed on ${escapeHtml(formatReportDate())}</p>
-    </header>
-
-    <section class="r-summary">
-      <h2>In short</h2>
-      <table class="r-key">
-        <tr><td>Money received in ${escapeHtml(month)}</td><td class="r-num">${money(data.totalReceivedKsh)}</td></tr>
-        <tr><td>Costs paid in ${escapeHtml(month)}</td><td class="r-num">${money(data.expenseTotalKsh)}</td></tr>
-        <tr class="r-strong"><td>Left after costs</td><td class="r-num">${money(data.netAfterCostsKsh)}</td></tr>
-        <tr><td>Rent for ${escapeHtml(month)} still owed</td><td class="r-num">${money(rentShortKsh)}</td></tr>
+    <section class="rr-page">
+      ${head}
+      <h1 class="rr-title">${escapeHtml(buildingName.toUpperCase())} RENT RECORD — ${escapeHtml(monthLabel)}</h1>
+      <table class="rr-table">
+        <thead><tr><th>House no.</th><th>Tenant</th>${RENT_RECORD_COLUMNS.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr></thead>
+        <tbody>${rows.map((row) => `
+          <tr>
+            <td>${escapeHtml(row.houseNumber)}</td>
+            <td class="rr-text">${escapeHtml(row.tenantName)}</td>
+            ${RENT_RECORD_COLUMNS.map((column) => {
+              if (row.note && ["rentKsh", "rentPaidKsh", "rentBalanceKsh"].includes(column.key)) {
+                return column.key === "rentKsh" ? `<td class="rr-note">${escapeHtml(row.note)}</td>` : "<td>—</td>";
+              }
+              if (row.depositNote && column.key === "depositKsh") return `<td class="rr-note rr-warn">${row.depositNote}</td>`;
+              return `<td>${amount(row[column.key])}</td>`;
+            }).join("")}
+          </tr>`).join("")}
+        </tbody>
+        <tfoot><tr><td>TOTAL</td><td></td>${RENT_RECORD_COLUMNS.map((column) => `<td>${amount(sumRentRecordColumn(rows, column.key))}</td>`).join("")}</tr></tfoot>
       </table>
-      <p class="r-sentence">${escapeHtml(rentSentence)}</p>
+      <p class="rr-source">Rent paid = this month's rent covered. Arrears = rent owed from earlier months${data.isCurrentMonth ? "" : " (shown for the current month only)"}. Amount paid = all money received from the house this month (rent, deposit, utilities).${toCheck ? ` Deposit TO CHECK = no deposit recorded yet (${toCheck} houses).` : ""} Prepared ${escapeHtml(formatReportDate())}.</p>
+      ${footer(1)}
     </section>
 
-    <section>
-      <h2>1. Money received</h2>
-      <table>
+    <section class="rr-page">
+      ${head}
+      <h1 class="rr-title">${escapeHtml(buildingName.toUpperCase())}<br />${escapeHtml(monthLabel)} RENT SUMMARY</h1>
+      <table class="rr-summary">
+        <thead><tr><th>Collection / expenditure summary</th><th>Amount (KSh)</th></tr></thead>
         <tbody>
-          <tr><td>Rent</td><td class="r-num">${money(data.rentReceivedKsh)}</td></tr>
-          <tr><td>Water and electricity</td><td class="r-num">${money(data.utilitiesReceivedKsh)}</td></tr>
-          <tr><td>Deposits</td><td class="r-num">${money(data.depositsReceivedKsh)}</td></tr>
-        </tbody>
-        <tfoot><tr><td>Total received</td><td class="r-num">${money(data.totalReceivedKsh)}</td></tr></tfoot>
-      </table>
-    </section>
-
-    <section>
-      <h2>2. Rent for ${escapeHtml(month)}: who has paid</h2>
-      ${charged.length === 0 ? "<p>No rent was charged this month.</p>" : ""}
-      ${rentTable("Not fully paid", [...owing, ...notYetDue], true)}
-      ${rentTable("Paid in full", paid, false)}
-      ${notCharged.length === 0 ? "" : `
-        <h3>No rent charged (${notCharged.length})</h3>
-        <p>${notCharged.map((house) => `${escapeHtml(house.houseNumber)}${house.status === "empty" ? " (empty)" : ""}`).join(", ")}</p>`}
-    </section>
-
-    <section>
-      <h2>3. Money owed today</h2>
-      ${owesToday.length === 0 ? "<p>Nobody owes anything today.</p>" : `
-        <table>
-          <thead><tr><th>House</th><th>Tenant</th><th class="r-num">Rent</th><th class="r-num">Deposit</th><th class="r-num">Water and electricity</th><th class="r-num">Total</th></tr></thead>
-          <tbody>${owesToday.map((house) => `
-            <tr>
-              <td class="r-house">${escapeHtml(house.houseNumber)}</td>
-              <td>${tenant(house)}</td>
-              <td class="r-num">${money(house.owesRentTodayKsh)}</td>
-              <td class="r-num">${money(house.owesDepositTodayKsh)}</td>
-              <td class="r-num">${money(house.owesUtilitiesTodayKsh)}</td>
-              <td class="r-num"><strong>${money(house.owesTotalKsh)}</strong></td>
-            </tr>`).join("")}
-          </tbody>
-          <tfoot><tr><td colspan="2">Total</td><td class="r-num">${money(sum(owesToday, "owesRentTodayKsh"))}</td><td class="r-num">${money(sum(owesToday, "owesDepositTodayKsh"))}</td><td class="r-num">${money(sum(owesToday, "owesUtilitiesTodayKsh"))}</td><td class="r-num">${money(sum(owesToday, "owesTotalKsh"))}</td></tr></tfoot>
-        </table>`}
-    </section>
-
-    <section>
-      <h2>4. Costs paid in ${escapeHtml(month)}</h2>
-      ${expenses.length === 0 ? "<p>No costs were recorded this month.</p>" : `
-        <table>
-          <thead><tr><th>What for</th><th>Paid to</th><th class="r-num">Amount</th></tr></thead>
-          <tbody>${expenses.map((item) => `
-            <tr><td>${escapeHtml(formatExpenditureCategory(item.category))}</td><td>${escapeHtml(item.payeeName || "-")}</td><td class="r-num">${money(item.amountKsh)}</td></tr>`).join("")}
-          </tbody>
-          <tfoot><tr><td colspan="2">Total costs</td><td class="r-num">${money(data.expenseTotalKsh)}</td></tr></tfoot>
-        </table>`}
-    </section>
-
-    ${agents.length === 0 ? "" : `
-    <section>
-      <h2>5. Money collected by agents</h2>
-      <table>
-        <thead><tr><th>Agent</th><th class="r-num">Collected</th><th class="r-num">Commission</th><th class="r-num">Given to owner</th><th class="r-num">Still with agent</th></tr></thead>
-        <tbody>${agents.map((item) => `
-          <tr><td>${escapeHtml(item.agentName)}</td><td class="r-num">${money(item.collectedKsh)}</td><td class="r-num">${money(item.commissionKsh)}</td><td class="r-num">${money(item.remittedKsh)}</td><td class="r-num">${money(Math.max(0, Number(item.unreconciledKsh) || 0))}</td></tr>`).join("")}
+          <tr><td>Rent collected</td><td>${amount(data.rentReceivedKsh)}</td></tr>
+          <tr><td>Deposits collected</td><td>${amount(data.depositsReceivedKsh)}</td></tr>
+          <tr><td>Utilities collected</td><td>${amount(data.utilitiesReceivedKsh)}</td></tr>
+          <tr class="rr-strong"><td>Total collected</td><td>${amount(data.totalReceivedKsh)}</td></tr>
+          <tr><td>Less: expenditure (below)</td><td>(${amount(data.expenseTotalKsh)})</td></tr>
+          <tr class="rr-strong"><td>Amount after expenditure</td><td>${Number(data.netAfterCostsKsh) < 0 ? `(${amount(Math.abs(data.netAfterCostsKsh))})` : amount(data.netAfterCostsKsh)}</td></tr>
+          <tr><td>Rent still owed (this month and arrears)</td><td>${amount(rentArrearsTotal)}</td></tr>
+          <tr><td>Deposit balances owed</td><td>${amount(depositArrearsTotal)}</td></tr>
         </tbody>
       </table>
-    </section>`}
+
+      <h2 class="rr-subtitle">Expenditure</h2>
+      <table class="rr-expenses">
+        <thead><tr><th>Date</th><th>Category</th><th>What for</th><th>Paid to</th><th>House</th><th>Amount (KSh)</th></tr></thead>
+        <tbody>${expenses.length === 0 ? '<tr><td colspan="6">No expenditure recorded this month.</td></tr>' : expenses.map((item) => `
+          <tr>
+            <td>${escapeHtml(formatReportDate(item.paidAt))}</td>
+            <td>${escapeHtml(formatExpenditureCategory(item.category))}</td>
+            <td class="rr-text">${escapeHtml(item.title || "-")}</td>
+            <td class="rr-text">${escapeHtml(item.payeeName || "-")}</td>
+            <td>${escapeHtml(item.houseNumber || "-")}</td>
+            <td>${amount(item.amountKsh)}</td>
+          </tr>`).join("")}
+        </tbody>
+        <tfoot><tr><td colspan="5">TOTAL EXPENDITURE</td><td>${amount(data.expenseTotalKsh)}</td></tr></tfoot>
+      </table>
+
+      <table class="rr-sign">
+        <tr><th colspan="2">Prepared by — Captyn Global</th><th colspan="2">Checked by — Finance manager</th></tr>
+        <tr><td>Name:</td><td></td><td>Name:</td><td></td></tr>
+        <tr class="rr-sign-row"><td>Sign:</td><td></td><td>Sign:</td><td></td></tr>
+        <tr><th colspan="4">Checked by — Property owner</th></tr>
+        <tr><td>Name:</td><td colspan="3"></td></tr>
+        <tr class="rr-sign-row"><td>Sign:</td><td colspan="3"></td></tr>
+      </table>
+      ${footer(2)}
+    </section>
   `;
+}
+
+function renderRentRecordPreview(data) {
+  const container = document.getElementById("performance-rent-record");
+  if (!(container instanceof HTMLElement)) return;
+  container.innerHTML = data ? `<div class="rent-record">${buildPerformanceReportHtml(data)}</div>` : "";
 }
 
 function printBuildingPerformanceReport() {
@@ -10820,7 +10817,7 @@ function printBuildingPerformanceReport() {
     container.id = "performance-print-report";
     document.body.append(container);
   }
-  container.innerHTML = buildPerformanceReportHtml(lastBuildingPerformance);
+  container.innerHTML = `<div class="rent-record">${buildPerformanceReportHtml(lastBuildingPerformance)}</div>`;
   document.body.classList.add("printing-performance-report");
   const done = () => {
     document.body.classList.remove("printing-performance-report");
@@ -10849,6 +10846,7 @@ async function loadBuildingPerformance() {
   ]);
   if (responseResult.status === "rejected") throw responseResult.reason;
   lastBuildingPerformance = responseResult.value.data ?? null;
+  renderRentRecordPreview(lastBuildingPerformance);
   renderBuildingPerformance(
     responseResult.value.data,
     previousResult.status === "fulfilled" ? previousResult.value.data : null
@@ -10986,21 +10984,36 @@ function exportBuildingPerformanceCsv(data) {
   const settlements = Array.isArray(data.agentAdvanceSettlements) ? data.agentAdvanceSettlements : [];
   const reconciliation = Array.isArray(data.agentReconciliation) ? data.agentReconciliation : [];
 
-  appendSection("Report", ["Building", "Month"], [[buildingName, data.month]]);
-  appendSection("Summary", ["Metric", "Value"], [
-    ["Total received (KSh)", data.totalReceivedKsh],
-    ["Rent received (KSh)", data.rentReceivedKsh],
-    ["Utilities received (KSh)", data.utilitiesReceivedKsh],
-    ["Deposits received (KSh)", data.depositsReceivedKsh],
-    ["Operating costs (KSh)", data.expenseTotalKsh],
-    ["Cash after costs (KSh)", data.netAfterCostsKsh],
-    ["Agent remittances to owner (KSh)", data.remittedToOwnerKsh],
-    ["Money sent to agents (KSh)", data.agentDisbursementTotalKsh],
-    ["Outstanding agent advances (KSh)", data.agentAdvanceOutstandingKsh],
-    ["Payment entries", data.paymentCount],
-    ["Cost entries", data.expenseCount],
-    ["Remittance transfers", remittances.length],
-    ["Agent payments", data.agentDisbursementCount]
+  // Same house-by-house sheet as the printed rent record, then its totals,
+  // the summary and every expenditure line; payment detail follows.
+  const recordRows = buildRentRecordRows(data);
+  const cell = (value) => value == null ? "" : value;
+  appendSection(`${buildingName} rent record — ${formatReportMonth(data.month)}`, ["House no.", "Tenant", ...RENT_RECORD_COLUMNS.map((column) => `${column.label} (KSh)`)], [
+    ...recordRows.map((row) => [
+      row.houseNumber,
+      row.tenantName,
+      ...RENT_RECORD_COLUMNS.map((column) =>
+        row.note && column.key === "rentKsh" ? row.note : row.depositNote && column.key === "depositKsh" ? row.depositNote : cell(row[column.key])
+      )
+    ]),
+    ["TOTAL", "", ...RENT_RECORD_COLUMNS.map((column) => sumRentRecordColumn(recordRows, column.key))]
+  ]);
+  appendSection("Summary", ["Item", "Amount (KSh)"], [
+    ["Rent collected", data.rentReceivedKsh],
+    ["Deposits collected", data.depositsReceivedKsh],
+    ["Utilities collected", data.utilitiesReceivedKsh],
+    ["Total collected", data.totalReceivedKsh],
+    ["Expenditure", data.expenseTotalKsh],
+    ["Amount after expenditure", data.netAfterCostsKsh],
+    ["Rent still owed (this month and arrears)", sumRentRecordColumn(recordRows, "rentBalanceKsh") + sumRentRecordColumn(recordRows, "arrearsKsh")],
+    ["Deposit balances owed", sumRentRecordColumn(recordRows, "depositBalanceKsh")]
+  ]);
+  const expenseItems = Array.isArray(data.expenseItems) ? data.expenseItems : [];
+  appendSection("Expenditure", ["Date", "Category", "What for", "Paid to", "House", "Amount (KSh)"], [
+    ...expenseItems.map((item) => [
+      String(item.paidAt || "").slice(0, 10), formatExpenditureCategory(item.category), item.title, item.payeeName, item.houseNumber, item.amountKsh
+    ]),
+    ["TOTAL", "", "", "", "", data.expenseTotalKsh]
   ]);
   appendSection("Payments", ["Paid at", "House", "Type", "Amount KSh", "Method", "Paid to", "Collected by"], payments.map((item) => [
     item.paidAt, item.houseNumber, item.type, item.amountKsh, item.provider,
@@ -11030,7 +11043,7 @@ function exportBuildingPerformanceCsv(data) {
   const link = document.createElement("a");
   const safeBuildingName = buildingName.replace(/[^\w -]+/g, "").trim().replace(/\s+/g, "-") || "building";
   link.href = url;
-  link.download = `performance-${safeBuildingName}-${data.month || "report"}.csv`;
+  link.download = `rent-record-${safeBuildingName}-${data.month || "report"}.csv`;
   link.click();
   URL.revokeObjectURL(url);
 }

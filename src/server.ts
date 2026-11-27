@@ -18038,6 +18038,17 @@ async function bootstrap() {
         collectors: [...collectors.values()].sort((a, b) => b.amountKsh - a.amountKsh),
         expenses: [...expenseBreakdown.values()].sort((a, b) => b.amountKsh - a.amountKsh),
         payments,
+        // Every cost line for the month, for the printed record.
+        expenseItems: expenses
+          .map((item) => ({
+            paidAt: item.paidAt || item.createdAt,
+            category: item.category,
+            title: item.title,
+            payeeName: item.payeeName,
+            houseNumber: item.houseNumber,
+            amountKsh: Number(item.amountKsh ?? 0)
+          }))
+          .sort((a, b) => String(a.paidAt).localeCompare(String(b.paidAt))),
         buildingName: building.name,
         isCurrentMonth,
         houses: buildReportHouses({
@@ -18050,6 +18061,8 @@ async function bootstrap() {
             hasActiveResident: row.hasActiveResident,
             rentEnabled: row.rentEnabled,
             rentBilled: row.billing?.rent.billed,
+            notBilledReason: row.billing?.rent.billed === false ? row.billing.rent.reason : undefined,
+            rentEarlierDueKsh: row.rentArrearsKsh,
             monthlyRentKsh: row.monthlyRentKsh,
             rentDueDate: row.rentMonthDueDate,
             rentStage: row.rentStage,

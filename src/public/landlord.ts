@@ -2809,6 +2809,28 @@ function getResidentOperationalArrearsKsh(resident, utilitySummary = null) {
   );
 }
 
+// Outstanding across houses: this month's rent still owed, older rent, unpaid
+// utility bills and house charges. Next month's rent, added a week early,
+// isn't counted until its due day. Uses the same rent figures as the Rent page.
+function getOwedNowTotalKsh(buildingId = "") {
+  const inScope = (item) => !buildingId || normalizeLookupBuildingId(item?.buildingId) === buildingId;
+  const rentKsh = (Array.isArray(state.rentStatus) ? state.rentStatus : [])
+    .filter(inScope)
+    .reduce((sum, item) => {
+      const month = item?.rentMonth;
+      return sum + (month
+        ? (Number(month.dueKsh) || 0) + (Number(month.penaltyDueKsh) || 0) + (Number(month.earlierDueKsh) || 0)
+        : Math.max(0, Number(item?.balanceKsh) || 0));
+    }, 0);
+  const utilitiesKsh = getActionableUtilityBills(state.bills)
+    .filter(inScope)
+    .reduce((sum, item) => sum + utilityAmount(item.balanceKsh), 0);
+  const chargesKsh = dedupeResidentDirectoryRows(state.residentDirectory)
+    .filter(inScope)
+    .reduce((sum, item) => sum + getResidentExpenseBalanceKsh(item), 0);
+  return rentKsh + utilitiesKsh + chargesKsh;
+}
+
 // What a house owes that is due or late now. Leaves out next month's rent,
 // which the ledger adds a week before it is due.
 function getResidentOwedNowKsh(resident, utilitySummary = null) {
@@ -5282,14 +5304,7 @@ function renderDailyDashboard() {
   const utilityCollectedThisMonth = getRowsForFocusedBuilding(state.payments)
     .filter((item) => monthKeyFromValue(item.paidAt || item.billingMonth) === currentMonthKey)
     .reduce((sum, item) => sum + Math.max(0, Number(item.amountKsh ?? 0)), 0);
-  const outstanding = residentRows.length > 0
-    ? residentRows.reduce(
-        (sum, item) =>
-          sum + getResidentOwedNowKsh(item, getResidentUtilityRoomSummary(item)),
-        0
-      )
-    : rentRows.reduce((sum, item) => sum + Math.max(0, Number(item.balanceKsh ?? 0)), 0) +
-      utilityBills.reduce((sum, item) => sum + utilityAmount(item.balanceKsh), 0);
+  const outstanding = getOwedNowTotalKsh(focusedBuildingId);
   const unpaidRoomKeys = new Set();
 
   rentRows.forEach((item) => {
@@ -5353,17 +5368,7 @@ function getFocusedBuildingSummary(buildingId) {
     (item) => normalizeLookupBuildingId(item.buildingId) === buildingId
   );
   let openBills = 0;
-  const outstanding =
-    residentRows.length > 0
-      ? residentRows.reduce(
-          (sum, item) =>
-            sum + getResidentOwedNowKsh(item, getResidentUtilityRoomSummary(item)),
-          0
-        )
-      : utilityBills.reduce(
-          (sum, item) => sum + utilityAmount(item.balanceKsh),
-          0
-        );
+  const outstanding = getOwedNowTotalKsh(buildingId);
 
   utilityBills.forEach((item) => {
     const balanceKsh = utilityAmount(item.balanceKsh);
@@ -11512,13 +11517,7 @@ function renderMetrics() {
     )
     .reduce((sum, item) => sum + Math.max(0, Number(item.amountKsh ?? 0)), 0);
   const paidTotal = rentCollectedThisMonth + utilityCollectedThisMonth;
-  const outstanding =
-    residentRows.length > 0
-      ? residentRows.reduce(
-          (sum, item) => sum + getResidentOwedNowKsh(item, getResidentUtilityRoomSummary(item)),
-          0
-        )
-      : actionableBills.reduce((sum, item) => sum + utilityAmount(item.balanceKsh), 0);
+  const outstanding = getOwedNowTotalKsh(metricBuildingId);
 
   metricMetersEl.textContent = String(meters);
   metricUsersEl.textContent = String(residentUsers);

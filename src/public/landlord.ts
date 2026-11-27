@@ -1740,9 +1740,8 @@ function setActiveLandlordView(nextView, options = {}) {
     void loadExpenditures().catch((error) => handleLandlordError(error, "Unable to load expenditure."));
   }
 
-  if (targetView === "performance" && (previousView !== "performance" || options.forceLoad) && !options.skipLoad) {
-    syncPerformanceBuildingOptions();
-    void loadBuildingPerformance().catch((error) => handleLandlordError(error, "Unable to load building performance."));
+  if (targetView === "performance" && !options.skipLoad) {
+    ensureBuildingPerformanceLoaded(options.forceLoad || previousView !== "performance");
   }
 
   if (targetView === "reports" && (previousView !== "reports" || options.forceLoad) && !options.skipLoad) {
@@ -10584,8 +10583,21 @@ function setPerformanceTab(tab) {
 }
 
 document.querySelectorAll<HTMLButtonElement>("[data-performance-tab]").forEach((button) => {
-  button.addEventListener("click", () => setPerformanceTab(button.dataset.performanceTab));
+  button.addEventListener("click", () => {
+    setPerformanceTab(button.dataset.performanceTab);
+    ensureBuildingPerformanceLoaded();
+  });
 });
+
+// Loads the chosen building and month unless that is what's already shown.
+function ensureBuildingPerformanceLoaded(force = false) {
+  syncPerformanceBuildingOptions();
+  const buildingId = performanceBuildingEl instanceof HTMLSelectElement ? performanceBuildingEl.value : "";
+  const month = performanceMonthEl instanceof HTMLInputElement ? performanceMonthEl.value : "";
+  const shown = lastBuildingPerformance;
+  if (!force && shown && shown.buildingId === buildingId && shown.month === month) return;
+  void loadBuildingPerformance().catch((error) => handleLandlordError(error, "Unable to load building performance."));
+}
 setPerformanceTab((() => {
   try {
     return localStorage.getItem("landlord.performanceTab");
@@ -10594,7 +10606,8 @@ setPerformanceTab((() => {
   }
 })());
 
-let lastBuildingPerformance = null;
+// var, not let: the view switch can ask for it before this line has run.
+var lastBuildingPerformance = null;
 
 function formatReportMonth(month) {
   const date = new Date(`${month}-01T00:00:00`);
@@ -12175,6 +12188,8 @@ function applyLandlordStartupData(startup, options = {}) {
   renderMetrics();
   renderDailyDashboard();
   updateLandlordBranding();
+  // A reload can land straight on Performance; it still needs its month.
+  if (state.activeLandlordView === "performance") ensureBuildingPerformanceLoaded();
 }
 
 async function loadDataLegacy() {

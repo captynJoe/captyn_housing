@@ -5186,18 +5186,18 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
   overflow: hidden;
 }
 
-.performance-tabs button {
+#building-performance-section .performance-tabs button {
   border: 0;
   border-radius: 0;
   padding: 8px 14px;
-  background: transparent;
-  color: inherit;
-  box-shadow: none;
+  background: transparent !important;
+  color: var(--captyn-muted) !important;
+  box-shadow: none !important;
 }
 
-.performance-tabs button[aria-selected="true"] {
-  background: var(--captyn-blue);
-  color: #fff;
+#building-performance-section .performance-tabs button[aria-selected="true"] {
+  background: var(--captyn-blue) !important;
+  color: #fff !important;
 }
 
 #building-performance-section .performance-cards {

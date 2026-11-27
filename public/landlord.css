@@ -5162,3 +5162,123 @@ body.landlord-caretaker-role [data-dashboard-action="add-tenant"] {
 .rent-sheet-table.hide-utility .rent-sheet-utility-col {
   display: none;
 }
+
+/* Performance: Analysis / Rent record views, compact figures. */
+.performance-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.performance-head .performance-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.performance-tabs {
+  display: inline-flex;
+  border: 1px solid var(--captyn-line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.performance-tabs button {
+  border: 0;
+  border-radius: 0;
+  padding: 8px 14px;
+  background: transparent;
+  color: inherit;
+  box-shadow: none;
+}
+
+.performance-tabs button[aria-selected="true"] {
+  background: var(--captyn-blue);
+  color: #fff;
+}
+
+#building-performance-section .performance-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.performance-card {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--captyn-line);
+  border-radius: 12px;
+  background: var(--captyn-panel-strong);
+}
+
+.performance-card span {
+  font-size: 0.78rem;
+  color: var(--captyn-muted);
+}
+
+.performance-card strong {
+  font-size: 1.35rem;
+  overflow-wrap: anywhere;
+}
+
+.performance-card small {
+  font-size: 0.75rem;
+  color: var(--captyn-muted);
+}
+
+.performance-card.is-primary {
+  border-color: var(--captyn-blue);
+}
+
+#building-performance-section .performance-charts-grid {
+  margin: 0 0 12px;
+  gap: 12px;
+}
+
+#building-performance-section .performance-chart-card {
+  padding: 12px 14px;
+}
+
+#building-performance-section .performance-chart-card header {
+  margin-bottom: 8px;
+}
+
+#building-performance-section .performance-daily-card {
+  grid-column: 1 / -1;
+}
+
+.performance-agent-money,
+#building-performance-section .performance-records {
+  margin-top: 10px;
+}
+
+.performance-agent-money summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--accent, #00a77b);
+}
+
+.performance-agent-money[open] > * + * {
+  margin-top: 12px;
+}
+
+.performance-record-actions {
+  justify-content: flex-end;
+  margin: 10px 0;
+}
+
+@media (max-width: 760px) {
+  #building-performance-section .performance-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #building-performance-section .performance-charts-grid {
+    grid-template-columns: 1fr;
+  }
+}

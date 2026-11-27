@@ -397,22 +397,12 @@ const refreshCollectionsReportBtnEl = document.getElementById("refresh-collectio
 const exportCollectionsReportBtnEl = document.getElementById("export-collections-report");
 const performanceBuildingEl = document.getElementById("building-performance-building");
 const performanceMonthEl = document.getElementById("building-performance-month");
-const performanceSummaryEl = document.getElementById("building-performance-summary");
-const performanceMonthComparisonEl = document.getElementById("performance-month-comparison");
 const exportBuildingPerformanceBtnEl = document.getElementById("export-building-performance");
 const printBuildingPerformanceBtnEl = document.getElementById("print-building-performance");
 const performanceDailyChartEl = document.getElementById("performance-daily-chart");
-const performanceHourlyChartEl = document.getElementById("performance-hourly-chart");
 const performanceTypeChartEl = document.getElementById("performance-type-chart");
-const performanceCostChartEl = document.getElementById("performance-cost-chart");
-const performanceBusiestHourEl = document.getElementById("performance-busiest-hour");
-const performanceBusiestHourCountEl = document.getElementById("performance-busiest-hour-count");
-const performanceAveragePaymentEl = document.getElementById("performance-average-payment");
 const performanceTotalChangeEl = document.getElementById("performance-total-change");
 const performanceTotalEl = document.getElementById("performance-total-received");
-const performanceRentEl = document.getElementById("performance-rent-received");
-const performanceUtilitiesEl = document.getElementById("performance-utilities-received");
-const performanceDepositsEl = document.getElementById("performance-deposits-received");
 const performanceExpensesEl = document.getElementById("performance-expenses");
 const performanceExpenseCountEl = document.getElementById("performance-expense-count");
 const performanceNetEl = document.getElementById("performance-net");
@@ -463,7 +453,6 @@ const performancePaymentCountEl = document.getElementById("performance-payment-c
 const performanceCollectorsEl = document.getElementById("performance-collectors");
 const performanceBreakdownEl = document.getElementById("performance-expense-breakdown");
 const performancePaymentsBodyEl = document.getElementById("performance-payments-body");
-const refreshPerformanceBtnEl = document.getElementById("refresh-building-performance");
 const paymentCorrectionBuildingSelectEl = document.getElementById(
   "payment-correction-building-select"
 );
@@ -10234,56 +10223,6 @@ function renderPerformanceDailyChart(payments, month) {
   performanceDailyChartEl.append(svg);
 }
 
-function renderPerformanceHourlyChart(payments) {
-  if (!(performanceHourlyChartEl instanceof HTMLElement)) return;
-  performanceHourlyChartEl.replaceChildren();
-  if (performanceBusiestHourEl instanceof HTMLElement) performanceBusiestHourEl.textContent = "—";
-  if (performanceBusiestHourCountEl instanceof HTMLElement) performanceBusiestHourCountEl.textContent = "";
-  const counts = Array.from({ length: 24 }, () => 0);
-  let timedPayments = 0;
-  payments.forEach((payment) => {
-    const date = new Date(payment.paidAt);
-    if (Number.isNaN(date.getTime())) return;
-    counts[date.getHours()] += 1;
-    timedPayments += 1;
-  });
-  if (!timedPayments) {
-    performanceHourlyChartEl.textContent = "Payment times are not available for this month.";
-    return;
-  }
-  const busiest = Math.max(...counts);
-  const winner = counts.indexOf(busiest);
-  if (performanceBusiestHourEl instanceof HTMLElement) {
-    performanceBusiestHourEl.textContent = String(winner).padStart(2, "0") + ":00";
-  }
-  if (performanceBusiestHourCountEl instanceof HTMLElement) {
-    performanceBusiestHourCountEl.textContent = busiest + " payment" + (busiest === 1 ? "" : "s");
-  }
-  const width = 760, height = 220, left = 34, right = 14, top = 16, bottom = 32;
-  const plotWidth = width - left - right, plotHeight = height - top - bottom;
-  const step = plotWidth / 24, barWidth = step * 0.64;
-  const svg = performanceSvgElement("svg", { viewBox: "0 0 " + width + " " + height, role: "presentation", "aria-hidden": "true" });
-  for (let tick = 0; tick <= 3; tick += 1) {
-    const y = top + plotHeight - plotHeight * tick / 3;
-    svg.append(performanceSvgElement("line", { x1: left, y1: y, x2: width - right, y2: y, class: "performance-grid-line" }));
-  }
-  counts.forEach((count, hour) => {
-    const barHeight = busiest ? plotHeight * count / busiest : 0;
-    const x = left + step * hour + (step - barWidth) / 2;
-    const rect = performanceSvgElement("rect", { x, y: top + plotHeight - barHeight, width: barWidth, height: Math.max(count ? 1 : 0, barHeight), rx: 3, class: hour === winner ? "performance-hour-bar is-busiest" : "performance-hour-bar" });
-    const title = performanceSvgElement("title");
-    title.textContent = String(hour).padStart(2, "0") + ":00 · " + count + " payment" + (count === 1 ? "" : "s");
-    rect.append(title);
-    svg.append(rect);
-    if (hour % 3 === 0) {
-      const label = performanceSvgElement("text", { x: left + step * hour + step / 2, y: height - 10, "text-anchor": "middle", class: "performance-axis-label" });
-      label.textContent = String(hour).padStart(2, "0");
-      svg.append(label);
-    }
-  });
-  performanceHourlyChartEl.append(svg);
-}
-
 function renderPerformanceBarList(element, rows, labelFor, amountFor, colorClass = "") {
   if (!(element instanceof HTMLElement)) return;
   element.replaceChildren();
@@ -10384,20 +10323,6 @@ function renderPerformanceCostGroups(rows) {
 function renderBuildingPerformance(data, previousData) {
   if (!data) return;
   const setText = (element, value) => { if (element instanceof HTMLElement) element.textContent = value; };
-  setText(performanceSummaryEl, `${getBuildingDisplayNameById(data.buildingId, data.buildingId)} · ${data.month}`);
-  if (performanceMonthComparisonEl instanceof HTMLElement) {
-    const current = Number(data.totalReceivedKsh ?? 0);
-    const previous = Number(previousData?.totalReceivedKsh ?? 0);
-    const delta = current - previous;
-    const percentage = previous > 0 ? Math.round((delta / previous) * 100) : null;
-    const direction = delta > 0 ? "up" : delta < 0 ? "down" : "unchanged";
-    const priorLabel = previousData?.month ?? "previous month";
-    performanceMonthComparisonEl.textContent = previous > 0
-      ? `${formatCurrency(current)} received vs ${formatCurrency(previous)} in ${priorLabel} · ${formatCurrency(Math.abs(delta))} ${direction}${percentage == null ? "" : ` (${Math.abs(percentage)}%)`}`
-      : current > 0
-        ? `${formatCurrency(current)} received this month · no collections recorded in ${priorLabel}`
-        : `No collections this month or in ${priorLabel}.`;
-  }
   const payments = Array.isArray(data.payments) ? data.payments : [];
   const expenses = Array.isArray(data.expenses) ? data.expenses : [];
   const collectors = Array.isArray(data.collectors) ? data.collectors : [];
@@ -10405,29 +10330,32 @@ function renderBuildingPerformance(data, previousData) {
   const previous = Number(previousData?.totalReceivedKsh ?? 0);
   const delta = total - previous;
   const percentage = previous > 0 ? Math.round(delta / previous * 100) : null;
+  const recordRows = buildRentRecordRows(data);
+  const rentOwedKsh = sumRentRecordColumn(recordRows, "rentBalanceKsh") + sumRentRecordColumn(recordRows, "arrearsKsh");
+  const depositOwedKsh = sumRentRecordColumn(recordRows, "depositBalanceKsh");
   setText(performanceTotalEl, formatCurrency(total));
-  setText(performanceRentEl, formatCurrency(data.rentReceivedKsh));
-  setText(performanceUtilitiesEl, formatCurrency(data.utilitiesReceivedKsh));
-  setText(performanceDepositsEl, formatCurrency(data.depositsReceivedKsh));
+  setText(performancePaymentCountEl, `${data.paymentCount} payments`);
   setText(performanceExpensesEl, formatCurrency(data.expenseTotalKsh));
-  setText(performanceExpenseCountEl, String(data.expenseCount) + " cost entries");
+  setText(performanceExpenseCountEl, `${data.expenseCount} entries`);
   setText(performanceNetEl, formatCurrency(data.netAfterCostsKsh));
+  setText(document.getElementById("performance-still-owed"), formatCurrency(rentOwedKsh + depositOwedKsh));
+  setText(document.getElementById("performance-still-owed-split"), `Rent ${formatCurrency(rentOwedKsh)} · Deposits ${formatCurrency(depositOwedKsh)}`);
   setText(performanceRemittedEl, formatCurrency(data.remittedToOwnerKsh));
   setText(performanceRemittanceCountEl, String(Array.isArray(data.remittances) ? data.remittances.length : 0) + " transfers");
   setText(performanceAgentDisbursementTotalEl, formatCurrency(data.agentDisbursementTotalKsh));
   setText(performanceAgentDisbursementCountEl, String(data.agentDisbursementCount ?? 0) + " payments");
   setText(performanceAgentAdvanceOutstandingEl, formatCurrency(data.agentAdvanceOutstandingKsh));
-  setText(performancePaymentCountEl, String(data.paymentCount) + " payment entries");
-  setText(performanceAveragePaymentEl, formatCurrency(payments.length ? total / payments.length : 0));
   if (performanceTotalChangeEl instanceof HTMLElement) {
-    performanceTotalChangeEl.textContent = previousData
-      ? (delta >= 0 ? "+" : "−") + formatCurrency(Math.abs(delta)) + " vs previous month" + (percentage == null ? "" : " (" + (delta >= 0 ? "+" : "−") + Math.abs(percentage) + "%)")
-      : "No previous month available";
+    performanceTotalChangeEl.textContent = previous > 0
+      ? (delta >= 0 ? "+" : "−") + formatCurrency(Math.abs(delta)) + " vs last month" + (percentage == null ? "" : " (" + (delta >= 0 ? "+" : "−") + Math.abs(percentage) + "%)")
+      : "";
     performanceTotalChangeEl.classList.toggle("is-positive", delta > 0);
     performanceTotalChangeEl.classList.toggle("is-negative", delta < 0);
   }
+  // Only worth a card when money came in through more than one route.
+  const collectorsCard = document.getElementById("performance-collectors-card");
+  if (collectorsCard) collectorsCard.hidden = collectors.filter((item) => Number(item.amountKsh) > 0).length < 2;
   renderPerformanceDailyChart(payments, data.month);
-  renderPerformanceHourlyChart(payments);
 
   const typeTotals = new Map();
   payments.forEach((item) => {
@@ -10450,18 +10378,6 @@ function renderBuildingPerformance(data, previousData) {
     (item) => String(item.name || "Not recorded") === "Unknown" ? "Not recorded" : String(item.name || "Not recorded"),
     (item) => item.amountKsh,
     "is-collector-bar"
-  );
-  const costTotals = new Map();
-  expenses.forEach((item) => {
-    const category = String(item.category || "other").replaceAll("_", " ");
-    costTotals.set(category, (costTotals.get(category) || 0) + (Number(item.amountKsh) || 0));
-  });
-  renderPerformanceBarList(
-    performanceCostChartEl,
-    [...costTotals.entries()].map(([name, amountKsh]) => ({ name, amountKsh })),
-    (item) => item.name,
-    (item) => item.amountKsh,
-    "is-cost-bar"
   );
   if (performanceBreakdownEl instanceof HTMLElement) {
     renderPerformanceCostGroups(Array.isArray(data.expenses) ? data.expenses : []);
@@ -10649,6 +10565,34 @@ document.getElementById("absence-notices-list")?.addEventListener("click", async
     button.disabled = false;
   }
 });
+
+// Performance has two views: Analysis (figures and charts) and Rent record
+// (the sheet that is printed and exported). The last one used is remembered.
+function setPerformanceTab(tab) {
+  const active = tab === "record" ? "record" : "analysis";
+  document.querySelectorAll<HTMLElement>("[data-performance-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.performancePanel !== active;
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-performance-tab]").forEach((button) => {
+    button.setAttribute("aria-selected", button.dataset.performanceTab === active ? "true" : "false");
+  });
+  try {
+    localStorage.setItem("landlord.performanceTab", active);
+  } catch {
+    // Remembering the tab is only a convenience.
+  }
+}
+
+document.querySelectorAll<HTMLButtonElement>("[data-performance-tab]").forEach((button) => {
+  button.addEventListener("click", () => setPerformanceTab(button.dataset.performanceTab));
+});
+setPerformanceTab((() => {
+  try {
+    return localStorage.getItem("landlord.performanceTab");
+  } catch {
+    return null;
+  }
+})());
 
 let lastBuildingPerformance = null;
 
@@ -15383,7 +15327,6 @@ agentRemittanceFormEl?.addEventListener("submit", (event) => {
 });
 performanceBuildingEl?.addEventListener("change", () => { void loadBuildingPerformance().catch((error) => handleLandlordError(error, "Unable to load building performance.")); });
 performanceMonthEl?.addEventListener("change", () => { void loadBuildingPerformance().catch((error) => handleLandlordError(error, "Unable to load building performance.")); });
-refreshPerformanceBtnEl?.addEventListener("click", () => { void loadBuildingPerformance().catch((error) => handleLandlordError(error, "Unable to refresh building performance.")); });
 exportBuildingPerformanceBtnEl?.addEventListener("click", () => {
   if (!(exportBuildingPerformanceBtnEl instanceof HTMLButtonElement)) return;
   exportBuildingPerformanceBtnEl.disabled = true;

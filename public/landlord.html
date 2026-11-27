@@ -947,50 +947,40 @@
         </section>
 
         <section class="panel wide-panel landlord-view hidden" data-landlord-view-panel="performance" id="building-performance-section">
-          <div class="panel-head">
-            <div>
-              <h2>Building Performance</h2>
-              <p id="building-performance-summary" class="status-text">Monthly collections, operating costs, and collection attribution.</p>
-            </div>
-            <div class="action-row">
-              <button id="export-building-performance" type="button">Download Excel (CSV)</button>
-              <button id="print-building-performance" type="button">Print / Save PDF</button>
-              <button id="refresh-building-performance" type="button">Refresh</button>
-            </div>
-          </div>
-          <div class="package-card performance-controls">
-            <div class="inline-fields compact-fields">
+          <div class="panel-head performance-head">
+            <h2>Performance</h2>
+            <div class="action-row performance-controls">
               <label>Building<select id="building-performance-building"></select></label>
               <label>Month<input id="building-performance-month" type="month" /></label>
-              <div class="performance-comparison-card"><strong>Compared with last month</strong><span id="performance-month-comparison">Select a month to compare collections.</span></div>
+              <div class="performance-tabs" role="tablist" aria-label="Performance view">
+                <button type="button" role="tab" data-performance-tab="analysis" aria-selected="true">Analysis</button>
+                <button type="button" role="tab" data-performance-tab="record" aria-selected="false">Rent record</button>
+              </div>
             </div>
-            <details class="performance-explainer"><summary>How to read these figures</summary><p class="status-text">Collections include rent, utilities, and deposits. Deposits are shown separately from rent income. Agent salaries and commissions belong in Costs with the agent's name as the payee. A transfer of collected funds from an agent to the owner is not new income or an expense. Older records without collection or payee details appear as Unknown.</p></details>
           </div>
-          <div id="performance-rent-record" class="rent-record-preview" aria-label="Rent record"></div>
-          <div class="resident-overview-cards performance-cards">
-            <article class="resident-overview-card performance-primary-card"><span>Total received</span><strong id="performance-total-received">-</strong><small id="performance-payment-count">-</small><small id="performance-total-change" class="performance-change"></small></article>
-            <article class="resident-overview-card"><span>Operating costs</span><strong id="performance-expenses">-</strong><small id="performance-expense-count">-</small></article>
-            <article class="resident-overview-card"><span>Cash after costs</span><strong id="performance-net">-</strong></article>
-            <article class="resident-overview-card"><span>Rent received</span><strong id="performance-rent-received">-</strong></article>
-            <article class="resident-overview-card"><span>Utilities received</span><strong id="performance-utilities-received">-</strong></article>
-            <article class="resident-overview-card"><span>Deposits received</span><strong id="performance-deposits-received">-</strong></article>
-            <article class="resident-overview-card"><span>Average payment</span><strong id="performance-average-payment">-</strong></article>
-            <article class="resident-overview-card"><span>Agent remittances to owner</span><strong id="performance-remitted">-</strong><small id="performance-remittance-count">-</small></article>
-            <article class="resident-overview-card"><span>Money sent to agents this month</span><strong id="performance-agent-disbursement-total">-</strong><small id="performance-agent-disbursement-count">-</small></article>
-            <article class="resident-overview-card"><span>Outstanding agent advances</span><strong id="performance-agent-advance-outstanding">-</strong><small>All months</small></article>
-            <article class="resident-overview-card"><span>Busiest collection hour</span><strong id="performance-busiest-hour">-</strong><small id="performance-busiest-hour-count"></small></article>
-          </div>
-          <div class="performance-charts-grid">
-            <article class="package-card performance-chart-card performance-daily-card"><header><div><h3>Daily collections</h3><p class="status-text">Amount received each day, with a 7-day average.</p></div><span class="performance-chart-legend"><i class="legend-bar"></i> Daily <i class="legend-line"></i> 7-day average</span></header><div id="performance-daily-chart" class="performance-chart" role="img" aria-label="Daily collections chart"></div></article>
-            <article class="package-card performance-chart-card"><header><div><h3>When payments arrive</h3><p class="status-text">Payment count by hour of day.</p></div></header><div id="performance-hourly-chart" class="performance-chart performance-hourly-chart" role="img" aria-label="Payments by hour chart"></div></article>
-            <article class="package-card performance-chart-card"><header><div><h3>Collections by type</h3><p class="status-text">See how much came from rent, utilities, and deposits.</p></div></header><div id="performance-type-chart" class="performance-bar-list"></div></article>
-            <article class="package-card performance-chart-card"><header><div><h3>Collections by recipient</h3><p class="status-text">Shows funds paid to the building billing account or collected by each named agent.</p></div></header><div id="performance-collectors" class="performance-bar-list"></div></article>
-            <article class="package-card performance-chart-card"><header><div><h3>Costs by category</h3><p class="status-text">Operating costs recorded during this month.</p></div></header><div id="performance-cost-chart" class="performance-bar-list"></div></article>
-            <article class="package-card performance-chart-card"><header><div><h3>Cost details</h3></div></header><div id="performance-expense-breakdown" class="stack-list"></div></article>
-          </div>
-          <div class="package-card performance-agent-reconciliation">
+
+          <div data-performance-panel="analysis">
+            <div class="performance-cards">
+              <article class="performance-card is-primary"><span>Total received</span><strong id="performance-total-received">-</strong><small id="performance-payment-count"></small><small id="performance-total-change" class="performance-change"></small></article>
+              <article class="performance-card"><span>Costs</span><strong id="performance-expenses">-</strong><small id="performance-expense-count"></small></article>
+              <article class="performance-card"><span>Cash after costs</span><strong id="performance-net">-</strong></article>
+              <article class="performance-card"><span>Still owed</span><strong id="performance-still-owed">-</strong><small id="performance-still-owed-split"></small></article>
+            </div>
+            <div class="performance-charts-grid">
+              <article class="package-card performance-chart-card performance-daily-card"><header><h3>Daily collections</h3><span class="performance-chart-legend"><i class="legend-bar"></i> Daily <i class="legend-line"></i> 7-day average</span></header><div id="performance-daily-chart" class="performance-chart" role="img" aria-label="Daily collections chart"></div></article>
+              <article class="package-card performance-chart-card"><header><h3>Collections by type</h3></header><div id="performance-type-chart" class="performance-bar-list"></div></article>
+              <article class="package-card performance-chart-card"><header><h3>Costs</h3></header><div id="performance-expense-breakdown" class="stack-list"></div></article>
+              <article class="package-card performance-chart-card" id="performance-collectors-card" hidden><header><h3>Collected by</h3></header><div id="performance-collectors" class="performance-bar-list"></div></article>
+            </div>
+            <details class="package-card performance-agent-money">
+              <summary>Agent money</summary>
+              <div class="performance-cards">
+                <article class="performance-card"><span>Handed to owner</span><strong id="performance-remitted">-</strong><small id="performance-remittance-count"></small></article>
+                <article class="performance-card"><span>Sent to agents</span><strong id="performance-agent-disbursement-total">-</strong><small id="performance-agent-disbursement-count"></small></article>
+                <article class="performance-card"><span>Advances outstanding</span><strong id="performance-agent-advance-outstanding">-</strong><small>All months</small></article>
+              </div>
+              <div class="package-card performance-agent-reconciliation">
             <h3>Agent collection reconciliation</h3>
-            <p class="status-text">Unreconciled = collected - commission - remitted. Record commissions in Expenditure with category Agent commission and the agent's name as the payee. A negative amount means the recorded commission and remittance exceed recorded collections.</p>
             <div class="table-wrap">
               <table><thead><tr><th>Agent</th><th>Collected</th><th>Commission</th><th>Remitted</th><th>Unreconciled</th></tr></thead><tbody id="performance-agent-reconciliation-body"></tbody></table>
             </div>
@@ -1061,12 +1051,22 @@
             </form>
             <div class="package-card"><h3>Agent remittance history</h3><div id="performance-remittances" class="stack-list"></div></div>
           </div>
-          <details class="package-card performance-records">
+            </details>
+            <details class="package-card performance-records">
             <summary>Payment records for this month</summary>
             <div class="table-wrap">
               <table><thead><tr><th>Date</th><th>House</th><th>Type</th><th>Amount</th><th>Method</th><th>Paid to</th><th>Collected by</th></tr></thead><tbody id="performance-payments-body"></tbody></table>
             </div>
           </details>
+          </div>
+
+          <div data-performance-panel="record" hidden>
+            <div class="action-row performance-record-actions">
+              <button id="print-building-performance" type="button">Print / Save PDF</button>
+              <button id="export-building-performance" type="button">Download Excel (CSV)</button>
+            </div>
+            <div id="performance-rent-record" class="rent-record-preview" aria-label="Rent record"></div>
+          </div>
         </section>
 
         <section
